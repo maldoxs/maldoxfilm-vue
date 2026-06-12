@@ -114,3 +114,44 @@ a {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   TV mode — pantallas grandes (ver desde el sofá). PRESERVADO del index
+   original (~2108-2200). Se portan SOLO tamaños de texto y foco D-pad.
+   Se OMITEN a propósito (romperían el layout Vue): el tamaño fijo de `.card`
+   (en Vue lo dimensiona el grid/aspect-ratio) y el `display:none` de `.tabs-bar`
+   (en Vue es la navegación Películas/Series/Populares). La clase `html.tv-mode`
+   la aplica `stores/device.ts` al detectar TV (ancho≥1280, 16:9, sin touch).
+   ════════════════════════════════════════════════════════════════════ */
+html.tv-mode body {
+  font-size: 18px;
+}
+html.tv-mode .section-title {
+  font-size: 1.3rem !important;
+}
+html.tv-mode .player-title {
+  font-size: 1rem !important;
+}
+html.tv-mode .genre-pill {
+  font-size: 1rem !important;
+  padding: 10px 22px !important;
+}
+
+/* Foco con control remoto (D-pad) — solo visible al navegar con el control. */
+html.tv-mode .card:focus,
+html.tv-mode .card:focus-visible {
+  outline: 4px solid var(--accent);
+  outline-offset: 3px;
+  z-index: 20;
+}
+html.tv-mode .genre-pill:focus-visible,
+html.tv-mode button:focus-visible,
+html.tv-mode a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Dentro del player, foco propio sutil (no el outline genérico) — original ~2147. */
+html.tv-mode .player-page button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(61, 90, 254, 0.7);
+}
