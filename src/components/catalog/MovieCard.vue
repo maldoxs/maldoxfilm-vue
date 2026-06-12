@@ -63,7 +63,7 @@ function onClick() {
 
 <template>
   <div class="card" role="button" tabindex="0" @click="onClick" @keydown.enter="onClick">
-    <img v-if="poster" class="card-poster" :src="poster" :alt="title" loading="lazy" decoding="async" />
+    <img v-if="poster" class="card-poster" :src="poster" :alt="title" loading="eager" decoding="async" />
     <div v-else class="card-poster card-poster-fallback">{{ title }}</div>
 
     <svg class="card-score" viewBox="0 0 36 36" aria-hidden="true">

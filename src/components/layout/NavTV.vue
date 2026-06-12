@@ -159,7 +159,9 @@ function onFullscreenClick() {
   left: 0;
   right: 0;
   z-index: 300;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.97) 0%, rgba(0, 0, 0, 0.8) 60%, transparent 100%);
+  /* Fondo negro sólido — el degradado a transparente dejaba ver las carátulas/letras
+     de atrás. Sólido para que la barra fija no muestre el contenido por debajo. */
+  background: #0e0e0e;
   height: 76px;
   box-sizing: border-box;
 }
