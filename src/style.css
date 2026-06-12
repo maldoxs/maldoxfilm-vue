@@ -137,8 +137,10 @@ html.tv-mode .genre-pill {
   padding: 10px 22px !important;
 }
 
-/* Foco con control remoto (D-pad) — solo visible al navegar con el control. */
-html.tv-mode .card:focus,
+/* Foco con control remoto (D-pad) — SOLO `:focus-visible` (no `:focus`): así el
+   contorno azul aparece únicamente al navegar con el control/teclado, NO con foco
+   restaurado (al volver del reproductor) ni con el puntero por encima. Eso causaba
+   la "línea azul" en el borde de la primera card al volver al Inicio. */
 html.tv-mode .card:focus-visible {
   outline: 4px solid var(--accent);
   outline-offset: 3px;
