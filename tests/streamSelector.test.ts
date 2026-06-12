@@ -12,6 +12,7 @@ import {
   pickFallbackUrl,
   matchInDownloads,
   resolveActiveStream,
+  buildSelectedStream,
   isJunkStream,
   isJunkMatch,
   MIN_VALID_FILE_BYTES,
@@ -247,5 +248,29 @@ describe('Archivo basura — caso "Scary Movie" (no reproducir samples/test)', (
     ];
     const r = resolveActiveStream(best, best.url!, '6 - Pec Minor Length Test.mp4', [{ s: best, pts: 50 }], [{ s: best, pts: 50 }], downloads);
     expect(r.rdId).toBeNull(); // el match basura fue descartado
+  });
+
+  test('buildSelectedStream ANULA la URL si el stream final es basura (no se reproduce directo)', () => {
+    const junk = stream({ url: 'https://x/sample.mp4', behaviorHints: { filename: 'movie.sample.mp4' } });
+    const active = {
+      match: undefined,
+      activeBest: junk,
+      activeUrl: junk.url!,
+      activeFilename: 'movie.sample.mp4',
+      rdId: null,
+      rdDownloadUrl: null,
+      rdFilesize: 0,
+      unavailableInRd: false,
+    };
+    const sel = buildSelectedStream({
+      best: junk,
+      withUrl: [junk],
+      resolvedUrl: junk.url!,
+      streamFilename: 'movie.sample.mp4',
+      infoHash: '',
+      imdbId: null,
+      active,
+    });
+    expect(sel.url).toBeNull(); // basura → sin URL → cae a server-side/iframe, nunca reproduce basura
   });
 });

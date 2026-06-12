@@ -355,9 +355,19 @@ export function buildSelectedStream(params: {
   const streamFilenameFinal = active.activeFilename;
 
   const streamHasAAC = hasAAC(bestFinal);
-  const finalUrl = resolvedUrlFinal !== bestFinal.url ? resolvedUrlFinal : (bestFinal.url || resolvedUrl);
+  let finalUrl: string | null = resolvedUrlFinal !== bestFinal.url ? resolvedUrlFinal : (bestFinal.url || resolvedUrl);
   const finalHash = extractInfoHash(bestFinal) || infoHash || '';
   const fallbackUrl = pickFallbackUrl(best, withUrl);
+
+  // GUARD anti-basura final: si el stream que quedó elegido es un sample/test
+  // (no se encontró alternativa real), NO entregar su URL → evita que se
+  // reproduzca directo (caso "Scary Movie"). El camino server-side (rd-stream,
+  // que elige el archivo MÁS GRANDE del torrent) o el iframe toman el control.
+  const finalIsJunk = isJunkStream(bestFinal);
+  if (finalIsJunk) {
+    console.warn('[RD] Stream final es basura/sample — URL anulada para no reproducir basura:', streamFilenameFinal);
+    finalUrl = null;
+  }
 
   // Líneas ~4915-4916 — logs de diagnóstico finales (preservados 1:1)
   console.warn('[RD] Resultado final → url:', finalUrl, '| rdId:', active.rdId, '| isX265:', isX265(bestFinal), '| hasAAC:', streamHasAAC);
