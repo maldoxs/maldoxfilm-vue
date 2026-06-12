@@ -16,6 +16,8 @@
  * los carruseles (`loadCarouselInfinite(...&with_genres={id}...)`).
  */
 import type { GenreOption } from '../../services/catalog';
+import { useDeviceStore } from '../../stores/device';
+import TvGenreBar from './TvGenreBar.vue';
 
 const props = defineProps<{
   options: GenreOption[];
@@ -25,10 +27,20 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'select', id: number): void;
 }>();
+
+const deviceStore = useDeviceStore();
 </script>
 
 <template>
-  <div class="genre-bar" role="tablist">
+  <!-- TV: menú deslizante estilo Netflix (activo anclado a la izquierda). En
+       escritorio/móvil se mantiene la barra de pills de siempre (sin cambios). -->
+  <TvGenreBar
+    v-if="deviceStore.isTV"
+    :options="props.options"
+    :active-id="props.activeId"
+    @select="emit('select', $event)"
+  />
+  <div v-else class="genre-bar" role="tablist">
     <button
       v-for="opt in options"
       :key="opt.id"
