@@ -117,7 +117,6 @@ onBeforeUnmount(clearSettle);
         :tabindex="i === focusedIndex ? 0 : -1"
         @click="goTo(i, true)"
         @keydown="onKeydown($event, i)"
-        @mouseenter="goTo(i)"
       >
         {{ opt.label }}
       </button>
