@@ -1187,7 +1187,9 @@ html.tv-mode .source-btn:focus {
   flex: 1;
   position: relative;
   isolation: isolate;
-  will-change: transform;
+  /* NO usar `will-change: transform` aquí: en pantallas grandes/TV promueve una
+     capa GPU intermedia que choca con el plano de video por hardware y produce
+     una "pantalla azul" (chroma-key del overlay). El video se compone solo. */
 }
 .rd-wrap,
 .player-frame {
