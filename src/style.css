@@ -155,3 +155,26 @@ html.tv-mode .player-page button:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px rgba(61, 90, 254, 0.7);
 }
+
+/* ── TV / Magic remote: controles que en escritorio se revelan al HOVER deben
+   estar SIEMPRE VISIBLES (con el puntero/control no hay hover fiable). PRESERVADO
+   del original (~líneas 528-535). Sin esto, las flechas de carrusel y el ✕ de
+   "Continuar viendo" eran casi invisibles y difíciles de accionar con el Magic. */
+html.tv-mode .carousel-arrow {
+  opacity: 1 !important;
+}
+html.tv-mode .continue-card-remove {
+  opacity: 1 !important;
+}
+/* TV: la card no hace el "salto" de escala en hover (se movía bajo el puntero);
+   solo un borde de acento — preservado del original (~líneas 516-519). */
+html.tv-mode .card:hover,
+html.tv-mode .continue-card:hover,
+html.tv-mode .top-card:hover {
+  transform: none !important;
+  box-shadow: 0 0 0 2px var(--accent) !important;
+}
+/* TV: sin shimmer del skeleton (perf) — original ~líneas 522-525. */
+html.tv-mode .card-skeleton {
+  animation: none !important;
+}
