@@ -97,9 +97,9 @@ describe('withoutProgress (preservado de removeProgress, línea ~7471-7476)', ()
 });
 
 describe('playButtonLabel (preservado EXACTO de `progLabel`+template del botón, líneas ~8917/8930)', () => {
-  test('sin progreso: "▶ ▶ Reproducir" — preserva el doble ▶ del original (curiosidad visual, no se "corrige")', () => {
-    expect(playButtonLabel(null, false)).toBe('▶ ▶ Reproducir');
-    expect(playButtonLabel(null, true)).toBe('▶ ▶ Reproducir');
+  test('sin progreso: "▶ Reproducir" (un solo ícono — se corrigió el doble ▶ del original)', () => {
+    expect(playButtonLabel(null, false)).toBe('▶ Reproducir');
+    expect(playButtonLabel(null, true)).toBe('▶ Reproducir');
   });
 
   test('película con progreso: "▶ Continuar {pct}%"', () => {

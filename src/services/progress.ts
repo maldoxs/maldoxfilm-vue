@@ -105,6 +105,6 @@ export function playButtonLabel(prog: ProgressEntry | null, isTV: boolean): stri
     ? isTV && prog.season
       ? `Continuar T${prog.season}·E${prog.episode}`
       : `Continuar ${Math.round(prog.pct)}%`
-    : '▶ Reproducir';
+    : 'Reproducir';
   return `▶ ${progLabel}`;
 }

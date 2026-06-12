@@ -807,8 +807,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       }
       // HEVC directo falló → si no hay rdId, contenido bloqueado/no disponible (líneas ~7905-7911)
       if (!rdId) {
-        loadingMessage.value =
-          '🚫 Película bloqueada o no disponible en RD — cambiando al reproductor alternativo en 4 segundos...';
+        loadingMessage.value = '🚫 Película no disponible — cambiando de reproductor...';
         await new Promise((r) => setTimeout(r, BLOCKED_MESSAGE_WAIT_MS));
         if (playerStore.isStale(myGen)) return;
       }
