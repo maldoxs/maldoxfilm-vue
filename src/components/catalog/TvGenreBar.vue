@@ -1,22 +1,22 @@
 <script setup lang="ts">
 /**
- * TvGenreBar — selector de géneros estilo Netflix para TV (Magic remote / D-pad).
+ * TvGenreBar — selector de géneros estilo Netflix para TV, con SCROLL INFINITO real.
  *
  * Comportamiento (confirmado con el usuario):
- *  - El género activo queda anclado a la IZQUIERDA, con borde blanco; al moverse
- *    la barra se DESLIZA (transform) para anclar el nuevo y esconder los anteriores.
- *  - **Wrap infinito**: después del último vuelve al primero (Todos) y viceversa.
- *    En el salto del wrap NO rebobina (transición instantánea) para que no se vea
- *    "pasando todas las opciones de vuelta".
+ *  - El género activo queda anclado a la IZQUIERDA, con borde blanco; al moverse la
+ *    barra se DESLIZA para anclar el nuevo.
+ *  - **Infinito sin gap**: la lista se renderiza TRIPLICADA, así SIEMPRE hay géneros
+ *    a la derecha (y a la izquierda). Después del último viene el primero (Todos)
+ *    de inmediato, sin espacio negro — "un scroll que nunca termina". Cuando el
+ *    índice se acerca a un borde, se "reasienta" al bloque del medio sin animación
+ *    (invisible, porque el contenido es idéntico cada N chips).
  *  - El FILTRO real (emit 'select') se aplica al ASENTARSE (~350ms); Enter/clic al toque.
- *  - **Integrado al flujo del control:** ←/→ cambia de género; ↓ baja al contenido;
- *    ↑ vuelve al nav. (NavTV baja a esta barra, y el contenido sube a ella — el
- *    chip activo lleva la clase `.tv-genre-chip.active` para que lo enfoquen desde afuera.)
- *  - Con el puntero: clic selecciona. El hover NO desliza (eso causaba un bucle).
+ *  - Integrado al control: ←/→ género; ↓ contenido; ↑ nav. (El chip activo lleva la
+ *    clase `.tv-genre-chip.active` para que lo enfoquen NavTV/useTvSpatialNav.)
  *
- * Drop-in del `GenreFilter` (misma firma); se usa SOLO en TV. Botones grandes.
+ * Drop-in del `GenreFilter` (misma firma); SOLO TV.
  */
-import { ref, watch, nextTick, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
 import type { GenreOption } from '../../services/catalog';
 
 const props = defineProps<{ options: GenreOption[]; activeId: number }>();
@@ -24,77 +24,105 @@ const emit = defineEmits<{ (e: 'select', id: number): void }>();
 
 const chipRefs = ref<(HTMLElement | null)[]>([]);
 const offsetX = ref(0);
-const instantJump = ref(false); // true durante el salto del wrap (sin animación)
+const instantJump = ref(false);
 
 function setChipRef(el: Element | { $el?: Element } | null, i: number) {
   chipRefs.value[i] = (el as HTMLElement) ?? null;
 }
 
-const indexOfId = (id: number) => props.options.findIndex((o) => o.id === id);
+const n = computed(() => props.options.length);
+const indexOfId = (id: number) => Math.max(0, props.options.findIndex((o) => o.id === id));
 
-// Índice ENFOCADO (visual, inmediato). El filtro real (activeId) lo maneja el padre.
-const focusedIndex = ref(Math.max(0, indexOfId(props.activeId)));
+/** Lista TRIPLICADA — `_real` es el índice real (0..n-1); el `key` del v-for es la pos. */
+const displayList = computed(() =>
+  [...props.options, ...props.options, ...props.options].map((opt, i) => ({
+    id: opt.id,
+    label: opt.label,
+    real: i % (n.value || 1),
+    pos: i,
+  }))
+);
 
+// Índice VIRTUAL (posición en la lista triplicada). Se mantiene en el bloque del medio.
+const vIndex = ref(0);
+const realIndex = computed(() => (n.value ? ((vIndex.value % n.value) + n.value) % n.value : 0));
+
+let initialized = false;
+function initVIndex() {
+  if (!n.value) return;
+  vIndex.value = n.value + indexOfId(props.activeId);
+  initialized = true;
+  updateOffset();
+}
+// Inicializa cuando hay opciones, y re-inicializa si cambian (otra vista).
+watch(
+  () => props.options,
+  () => {
+    initialized = false;
+    initVIndex();
+  },
+  { immediate: true }
+);
+
+// Si el padre cambia activeId desde afuera y NO coincide con el actual, re-anclar.
 watch(
   () => props.activeId,
   (id) => {
-    const i = indexOfId(id);
-    if (i >= 0 && i !== focusedIndex.value) focusedIndex.value = i;
+    if (!initialized || !n.value) return;
+    if (indexOfId(id) !== realIndex.value) vIndex.value = n.value + indexOfId(id);
   }
 );
 
-/** Ancla el chip enfocado a la izquierda (recalcula el desplazamiento). */
 async function updateOffset() {
   await nextTick();
-  const el = chipRefs.value[focusedIndex.value];
+  const el = chipRefs.value[vIndex.value];
   offsetX.value = el ? el.offsetLeft : 0;
 }
-watch([focusedIndex, () => props.options.length], updateOffset, { immediate: true });
+watch(vIndex, updateOffset);
 
 let settleTimer: ReturnType<typeof setTimeout> | null = null;
-function clearSettle() {
-  if (settleTimer) {
-    clearTimeout(settleTimer);
-    settleTimer = null;
-  }
-}
-function applyFilter(i: number, immediate: boolean) {
-  clearSettle();
-  const id = props.options[i]?.id;
+function applyFilter(immediate: boolean) {
+  if (settleTimer) clearTimeout(settleTimer);
+  const id = props.options[realIndex.value]?.id;
   if (id === undefined) return;
   if (immediate) emit('select', id);
   else settleTimer = setTimeout(() => emit('select', id), 350);
 }
 
-function goTo(i: number, opts: { immediate?: boolean; wrapped?: boolean } = {}) {
-  if (i < 0 || i >= props.options.length) return;
-  if (i === focusedIndex.value) {
-    if (opts.immediate) applyFilter(i, true);
-    return;
+// Reasienta vIndex al bloque del medio [n, 2n) cuando está idle (invisible: misma
+// posición visual cada N chips). Mantiene el infinito sin que se agoten las copias.
+let reseatTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleReseat() {
+  if (reseatTimer) clearTimeout(reseatTimer);
+  reseatTimer = setTimeout(reseat, 320);
+}
+function reseat() {
+  if (!n.value) return;
+  let v = vIndex.value;
+  while (v < n.value) v += n.value;
+  while (v >= 2 * n.value) v -= n.value;
+  if (v !== vIndex.value) {
+    instantJump.value = true;
+    vIndex.value = v;
+    nextTick(() => {
+      chipRefs.value[v]?.focus();
+      requestAnimationFrame(() => (instantJump.value = false));
+    });
   }
-  instantJump.value = !!opts.wrapped; // en el wrap, saltar instantáneo (no rebobinar)
-  focusedIndex.value = i;
-  nextTick(() => {
-    chipRefs.value[i]?.focus();
-    if (opts.wrapped) requestAnimationFrame(() => (instantJump.value = false));
-  });
-  applyFilter(i, !!opts.immediate);
 }
 
-/** Mueve un género con WRAP infinito (último → primero y viceversa). */
+function goToDisplay(di: number, immediate = false) {
+  if (di < 0 || di >= displayList.value.length) return;
+  instantJump.value = false;
+  vIndex.value = di;
+  nextTick(() => chipRefs.value[di]?.focus());
+  applyFilter(immediate);
+  scheduleReseat();
+}
+
 function move(dir: 1 | -1) {
-  const n = props.options.length;
-  if (!n) return;
-  let next = focusedIndex.value + dir;
-  let wrapped = false;
-  if (next < 0) {
-    next = n - 1;
-    wrapped = true;
-  } else if (next >= n) {
-    next = 0;
-    wrapped = true;
-  }
-  goTo(next, { wrapped });
+  if (!n.value) return;
+  goToDisplay(vIndex.value + dir);
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -109,7 +137,7 @@ function onKeydown(e: KeyboardEvent) {
       break;
     case 'Enter':
       e.preventDefault();
-      applyFilter(focusedIndex.value, true);
+      applyFilter(true);
       break;
     case 'ArrowDown':
       e.preventDefault();
@@ -125,7 +153,10 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-onBeforeUnmount(clearSettle);
+onBeforeUnmount(() => {
+  if (settleTimer) clearTimeout(settleTimer);
+  if (reseatTimer) clearTimeout(reseatTimer);
+});
 </script>
 
 <template>
@@ -136,18 +167,18 @@ onBeforeUnmount(clearSettle);
       :style="{ transform: `translateX(${-offsetX}px)` }"
     >
       <button
-        v-for="(opt, i) in options"
-        :key="opt.id"
-        :ref="(el) => setChipRef(el, i)"
+        v-for="item in displayList"
+        :key="item.pos"
+        :ref="(el) => setChipRef(el, item.pos)"
         class="tv-genre-chip"
-        :class="{ active: i === focusedIndex }"
+        :class="{ active: item.pos === vIndex }"
         role="tab"
-        :aria-selected="i === focusedIndex"
-        :tabindex="i === focusedIndex ? 0 : -1"
-        @click="goTo(i, { immediate: true })"
+        :aria-selected="item.pos === vIndex"
+        :tabindex="item.pos === vIndex ? 0 : -1"
+        @click="goToDisplay(item.pos, true)"
         @keydown="onKeydown($event)"
       >
-        {{ opt.label }}
+        {{ item.label }}
       </button>
     </div>
   </div>
@@ -157,7 +188,6 @@ onBeforeUnmount(clearSettle);
 .tv-genre-bar {
   overflow: hidden;
   padding: 16px 52px;
-  /* Fade en los bordes para indicar "hay más" géneros. */
   -webkit-mask-image: linear-gradient(to right, transparent 0, #000 36px, #000 calc(100% - 90px), transparent 100%);
   mask-image: linear-gradient(to right, transparent 0, #000 36px, #000 calc(100% - 90px), transparent 100%);
 }
@@ -165,11 +195,11 @@ onBeforeUnmount(clearSettle);
   display: flex;
   gap: 16px;
   width: max-content;
-  transition: transform 0.25s ease-out; /* deslizamiento suave */
+  transition: transform 0.25s ease-out;
   will-change: transform;
 }
 .tv-genre-track.no-anim {
-  transition: none; /* salto instantáneo en el wrap (no rebobina) */
+  transition: none; /* reasiento invisible del scroll infinito */
 }
 .tv-genre-chip {
   flex-shrink: 0;
@@ -178,7 +208,7 @@ onBeforeUnmount(clearSettle);
   border-radius: 14px;
   color: rgba(255, 255, 255, 0.82);
   font-family: 'Roboto', sans-serif;
-  font-size: 1.25rem; /* botones grandes */
+  font-size: 1.25rem;
   font-weight: 600;
   padding: 16px 36px;
   cursor: pointer;
