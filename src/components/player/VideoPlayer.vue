@@ -453,11 +453,6 @@ onBeforeUnmount(() => {
   height: 100%;
   object-fit: contain;
   background: #000;
-  /* Forzar al <video> a su propia capa de composición. En pantallas grandes/TV
-     con aceleración de hardware, sin esto el plano de video puede renderizarse
-     como un overlay con chroma-key → "pantalla azul" donde debería ir la imagen.
-     `translateZ(0)` lo manda al compositor correcto y se ve la imagen real. */
-  transform: translateZ(0);
 }
 .player-loading {
   position: absolute;

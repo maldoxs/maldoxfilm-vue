@@ -1187,9 +1187,7 @@ html.tv-mode .source-btn:focus {
   flex: 1;
   position: relative;
   isolation: isolate;
-  /* NO usar `will-change: transform` aquí: en pantallas grandes/TV promueve una
-     capa GPU intermedia que choca con el plano de video por hardware y produce
-     una "pantalla azul" (chroma-key del overlay). El video se compone solo. */
+  will-change: transform;
 }
 .rd-wrap,
 .player-frame {
@@ -1560,7 +1558,12 @@ html.tv-mode .source-btn:focus {
 }
 
 /* ── TV mode — preserva overrides de líneas ~2270-2400 ── */
-:global(html.tv-mode) .player-page.active {
+/* En el original el player se abría con `.player-page.active`; en la migración
+   `.player-page` es la vista de ruta (siempre "activa") y NUNCA recibe `.active`,
+   por lo que esa regla quedaba muerta y se perdía la promoción de capa GPU de la
+   página → en TV el video caía a un overlay de hardware ("pantalla azul"). Se
+   aplica directo a `.player-page` para restaurar el comportamiento del original. */
+:global(html.tv-mode) .player-page {
   will-change: transform;
   transform: translateZ(0);
 }
