@@ -12,6 +12,9 @@ import {
   pickFallbackUrl,
   matchInDownloads,
   resolveActiveStream,
+  isJunkStream,
+  isJunkMatch,
+  MIN_VALID_FILE_BYTES,
 } from '../src/services/streamSelector';
 import type { TorrentioStream, RDDownload } from '../src/types';
 
@@ -202,5 +205,47 @@ describe('detectores básicos de formato', () => {
     expect(hasSpa(stream({ title: 'Castellano' }))).toBe(true);
     expect(hasSpa(stream({ title: 'Latino' }))).toBe(true);
     expect(hasSpa(stream({ title: 'English' }))).toBe(false);
+  });
+});
+
+describe('Archivo basura — caso "Scary Movie" (no reproducir samples/test)', () => {
+  const download = (over: Partial<RDDownload>): RDDownload =>
+    ({ id: 'X', filename: 'real.mkv', filesize: 2_000_000_000, download: 'https://cdn/d/X/real.mkv', ...over }) as RDDownload;
+
+  test('isJunkStream detecta sample/trailer/"length test"', () => {
+    expect(isJunkStream(stream({ behaviorHints: { filename: '6 - Pec Minor Length Test.mp4' } }))).toBe(true);
+    expect(isJunkStream(stream({ title: 'Movie 1080p SAMPLE' }))).toBe(true);
+    expect(isJunkStream(stream({ behaviorHints: { filename: 'movie-trailer.mp4' } }))).toBe(true);
+    expect(isJunkStream(stream({ behaviorHints: { filename: 'La.Pelicula.1080p.H264.AAC.mkv' } }))).toBe(false);
+  });
+
+  test('scoreStream descarta el stream basura (-1000 → fuera del ranking)', () => {
+    const junk = stream({ title: 'Movie 1080p H264 AAC Spanish 💾 5 GB', behaviorHints: { filename: '6 - Pec Minor Length Test.mp4' } });
+    expect(scoreStream(junk)).toBe(-1000);
+    const { scored } = rankStreams([junk]);
+    expect(scored).toHaveLength(0); // descartado, no entra al ranking
+  });
+
+  test('selectBestStream prefiere la película real sobre el sample', () => {
+    const junk = stream({ title: 'Movie SAMPLE 💾 5 GB', behaviorHints: { filename: 'movie.sample.mp4' } });
+    const real = stream({ title: 'Movie 1080p H264 AAC Spanish 💾 4 GB', behaviorHints: { filename: 'Movie.1080p.H264.AAC.mkv' } });
+    const { best } = selectBestStream([junk, real]);
+    expect(best?.behaviorHints?.filename).toBe('Movie.1080p.H264.AAC.mkv');
+  });
+
+  test('isJunkMatch: rechaza por tamaño ínfimo y por nombre', () => {
+    expect(isJunkMatch(download({ filesize: 7_005_748 }))).toBe(true); // 7 MB
+    expect(isJunkMatch(download({ filename: '6 - Pec Minor Length Test.mp4' }))).toBe(true);
+    expect(isJunkMatch(download({ filesize: MIN_VALID_FILE_BYTES + 1 }))).toBe(false);
+    expect(isJunkMatch(download({}))).toBe(false); // real.mkv 2GB
+  });
+
+  test('resolveActiveStream RECHAZA un match basura → rdId null (no reproduce basura)', () => {
+    const best = stream({ title: 'Movie 1080p H264 AAC 💾 5 GB', url: 'https://x/resolve/realdebrid/t/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/6%20-%20Pec%20Minor%20Length%20Test.mp4', behaviorHints: { filename: '6 - Pec Minor Length Test.mp4' } });
+    const downloads: RDDownload[] = [
+      download({ id: 'JUNK', filename: '6 - Pec Minor Length Test.mp4', filesize: 7_005_748, download: best.url! }),
+    ];
+    const r = resolveActiveStream(best, best.url!, '6 - Pec Minor Length Test.mp4', [{ s: best, pts: 50 }], [{ s: best, pts: 50 }], downloads);
+    expect(r.rdId).toBeNull(); // el match basura fue descartado
   });
 });

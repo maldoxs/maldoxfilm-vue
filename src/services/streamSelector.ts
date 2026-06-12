@@ -65,6 +65,23 @@ export const BAD_AUDIO_RE =
   /\bac3\b|\bac-3\b|\bdts\b|\btruehd\b|\batmos\b|\bdd[\d\+]|\bddp\b|\bflac\b|\bpcm\b/i;
 export const hasBadAudio = (s: TorrentioStream): boolean => BAD_AUDIO_RE.test(streamInfo(s));
 
+// ── Detección de archivos "basura" (NO son la peli/episodio real) ────────────
+// Caso real "Scary Movie": Torrentio devolvió un torrent cuyo archivo elegido era
+// "6 - Pec Minor Length Test.mp4" (7 MB) → se reproducía basura (pantalla azul,
+// sin audio ni subtítulos). Estos guards evitan ELEGIR o ACEPTAR ese tipo de
+// archivo: por nombre (sample/trailer/test) y por tamaño mínimo creíble.
+export const JUNK_FILE_RE =
+  /\bsample\b|\btrailer\b|\bteaser\b|\bfeaturette\b|\bproof\b|\breadme\b|\bminor\s*length\s*test\b|\blength\s*test\b|\btest\s*file\b/i;
+/** Tamaño mínimo creíble para una peli/episodio real (50 MB). Por debajo = basura. */
+export const MIN_VALID_FILE_BYTES = 50 * 1024 * 1024;
+export const isJunkFilename = (name: string | null | undefined): boolean => JUNK_FILE_RE.test(name || '');
+export const isJunkStream = (s: TorrentioStream): boolean => JUNK_FILE_RE.test(streamInfo(s));
+/** ¿El download cacheado en RD es basura? (tamaño ínfimo o nombre de sample/test) */
+export function isJunkMatch(d: RDDownload): boolean {
+  const tooSmall = typeof d.filesize === 'number' && d.filesize > 0 && d.filesize < MIN_VALID_FILE_BYTES;
+  return tooSmall || isJunkFilename(d.filename);
+}
+
 /**
  * scoreStream — sistema de puntaje para elegir el mejor stream disponible.
  * Pesos exactos preservados del original (rdGetStream línea ~4757-4780):
@@ -77,6 +94,9 @@ export const hasBadAudio = (s: TorrentioStream): boolean => BAD_AUDIO_RE.test(st
  */
 export function scoreStream(s: TorrentioStream): number {
   let pts = 0;
+  // Archivo basura (sample/trailer/"length test") → descarte directo. Evita el
+  // caso "Scary Movie" (se elegía un .mp4 de prueba en vez de la película).
+  if (isJunkStream(s)) return -1000;
   // Idioma — español tiene mayor peso para garantizar que gane sobre inglés
   if (hasSpa(s)) pts += 120; // SPA explícito o Dual/Lat
   else if (hasBadLang(s)) return -1000; // ITA/KOR/RUS sin ENG → descarte
@@ -226,6 +246,14 @@ export function resolveActiveStream(
   // Ronda 1 — top stream
   let match = matchInDownloads(resolvedUrl, best.url || '', streamFilename, downloads);
 
+  // GUARD anti-basura: si el archivo cacheado es un sample/test o ínfimo (<50MB),
+  // NO es la película → se descarta el match para que sigan las rondas de rescate
+  // (o quede sin rdId y caiga a iframe) en vez de reproducir basura. Caso "Scary Movie".
+  if (match && isJunkMatch(match)) {
+    console.warn('[RD] Match descartado — archivo basura/sample:', match.filename, '| size:', match.filesize);
+    match = undefined;
+  }
+
   // Ronda 2 — solo si el top stream tiene idioma incompatible (pts <= -500)
   const topHasBadLang = scored.length > 0 && scored[0].pts <= -500;
   if (!match && topHasBadLang && pool.length > 1) {
@@ -238,7 +266,7 @@ export function resolveActiveStream(
       const alt = pool[i].s;
       const altFn = extractFilename(alt);
       const altMatch = matchInDownloads(alt.url || '', alt.url || '', altFn, downloads);
-      if (altMatch) {
+      if (altMatch && !isJunkMatch(altMatch)) {
         match = altMatch;
         activeBest = alt;
         activeUrl = alt.url || '';
@@ -275,7 +303,7 @@ export function resolveActiveStream(
         const alt = scored[i].s;
         const altFn = extractFilename(alt);
         const altMatch = matchInDownloads(alt.url || '', alt.url || '', altFn, downloads);
-        if (altMatch) {
+        if (altMatch && !isJunkMatch(altMatch)) {
           rdId = altMatch.id;
           rdDownloadUrl = altMatch.download || null;
           rdFilesize = altMatch.filesize || 0;
