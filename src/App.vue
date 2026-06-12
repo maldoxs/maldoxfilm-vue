@@ -19,9 +19,14 @@ import NavMobile from './components/layout/NavMobile.vue';
 import NavTV from './components/layout/NavTV.vue';
 import Toast from './components/Toast.vue';
 import { useDeviceStore } from './stores/device';
+import { useTvSpatialNav } from './composables/useTvSpatialNav';
 import type { RouteKey } from './services/navigation';
 
 const deviceStore = useDeviceStore();
+
+// Navegación espacial con flechas/control en TV (recorre cards y categorías).
+// Solo actúa cuando el modo es TV (con puntero/D-pad del Magic remote).
+useTvSpatialNav(() => deviceStore.isTV);
 const router = useRouter();
 const route = useRoute();
 

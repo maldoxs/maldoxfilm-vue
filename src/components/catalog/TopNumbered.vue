@@ -71,7 +71,7 @@ function onSelect(item: MediaItem) {
           </div>
         </template>
         <template v-else>
-          <div v-for="(item, i) in top10" :key="item.id" class="top-card" @click="onSelect(item)">
+          <div v-for="(item, i) in top10" :key="item.id" class="top-card" tabindex="0" @click="onSelect(item)" @keydown.enter="onSelect(item)">
             <div class="top-card-num">{{ i + 1 }}</div>
             <div class="top-card-img">
               <img v-if="poster(item)" :src="poster(item)" :alt="itemTitle(item)" loading="lazy" decoding="async" />

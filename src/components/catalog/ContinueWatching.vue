@@ -128,7 +128,7 @@ function clearHistory() {
     <div class="carousel-wrapper">
       <button class="carousel-arrow prev" aria-label="Anterior" @click="scroll(-1)">‹</button>
       <div ref="railRef" class="continue-carousel">
-        <div v-for="c in cards" :key="c.key" class="continue-card" @click="onSelect(c)">
+        <div v-for="c in cards" :key="c.key" class="continue-card" tabindex="0" @click="onSelect(c)" @keydown.enter="onSelect(c)">
           <img v-if="c.poster" :src="c.poster" :alt="c.title" loading="lazy" decoding="async" />
           <div v-else class="continue-card-fallback">{{ c.title }}</div>
           <button class="continue-card-remove" title="Quitar" @click.stop="removeCard(c)">✕</button>
