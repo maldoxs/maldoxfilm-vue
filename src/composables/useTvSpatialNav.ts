@@ -98,6 +98,23 @@ export function useTvSpatialNav(isEnabled: () => boolean) {
     }
   }
 
+  /**
+   * Foco sigue al puntero (Magic remote): al pasar el puntero por una card, esa
+   * queda enfocada = ancla del desplazamiento. Así "donde te posicionás con el
+   * puntero tiene prioridad" y las flechas recorren DESDE ahí (no desde un foco
+   * viejo del nav). `preventScroll` evita que el hover mueva la página.
+   */
+  function onPointerOver(e: Event) {
+    if (!isEnabled()) return;
+    const active = document.activeElement as HTMLElement | null;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+    const card = (e.target as HTMLElement | null)?.closest<HTMLElement>(CARD_SEL);
+    if (card && card !== active) {
+      card.setAttribute('tabindex', '0');
+      card.focus({ preventScroll: true });
+    }
+  }
+
   function onKeydown(e: KeyboardEvent) {
     if (!isEnabled()) return;
     // NavTV (y otros handlers) ya gestionaron + preventDefault → no pisar.
@@ -137,6 +154,12 @@ export function useTvSpatialNav(isEnabled: () => boolean) {
     }
   }
 
-  onMounted(() => document.addEventListener('keydown', onKeydown));
-  onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown));
+  onMounted(() => {
+    document.addEventListener('keydown', onKeydown);
+    document.addEventListener('mouseover', onPointerOver);
+  });
+  onBeforeUnmount(() => {
+    document.removeEventListener('keydown', onKeydown);
+    document.removeEventListener('mouseover', onPointerOver);
+  });
 }

@@ -18,8 +18,8 @@
  * aplican sobre refs de botones reales — se preserva el mismo algoritmo
  * (`(i + count) % count`) sin reimplementarlo a mano en el componente.
  */
-import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue';
-import { NAV_ITEMS_TV, nextDpadIndex, isReturnToNavKey, type RouteKey } from '../../services/navigation';
+import { ref, computed, nextTick } from 'vue';
+import { NAV_ITEMS_TV, nextDpadIndex, type RouteKey } from '../../services/navigation';
 
 const props = defineProps<{
   active: RouteKey;
@@ -71,20 +71,11 @@ function onTopnavKeydown(e: KeyboardEvent, index: number) {
   }
 }
 
-/** Segundo listener — devuelve el foco al topnav si el usuario presiona ArrowUp cerca del tope (líneas ~8536-8550). */
-function onDocumentKeydown(e: KeyboardEvent) {
-  const el = document.activeElement as HTMLElement | null;
-  if (!el || el === document.body) return;
-  if (buttonRefs.value.includes(el)) return; // ya estamos en el topnav
-  const rect = el.getBoundingClientRect();
-  if (isReturnToNavKey(e.key, rect.top)) {
-    e.preventDefault();
-    focusButton(focusedIndex.value);
-  }
-}
-
-onMounted(() => document.addEventListener('keydown', onDocumentKeydown));
-onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown));
+// NOTA: el "return-to-nav en ArrowUp" del original se removió — ahora lo maneja
+// `useTvSpatialNav` (App.vue): ArrowUp sube de carrusel y, desde el primero, vuelve
+// al nav enfocando la opción ACTIVA (no `focusedIndex`, que podía quedar en otra
+// opción y "robaba" el foco mientras recorrías un carrusel). Da prioridad al
+// desplazamiento donde el usuario está posicionado.
 
 function onItemClick(key: RouteKey, index: number) {
   focusedIndex.value = index;
