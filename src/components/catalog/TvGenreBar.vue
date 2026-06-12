@@ -2,16 +2,19 @@
 /**
  * TvGenreBar — selector de géneros estilo Netflix para TV (Magic remote / D-pad).
  *
- * Comportamiento (confirmado con el usuario, capturas de Netflix):
- *  - El género ACTIVO queda anclado a la IZQUIERDA, con borde blanco.
- *  - Al moverse a otro, la barra se DESLIZA (transform) para anclar el nuevo a la
- *    izquierda; los anteriores se esconden hacia la izquierda y aparecen los
- *    siguientes por la derecha.
- *  - El FILTRO real (emit 'select') se aplica al ASENTARSE (~350ms), NO en cada
- *    paso → no recarga el catálogo en cada tecla (UX fluida). Enter aplica al toque.
+ * Comportamiento (confirmado con el usuario):
+ *  - El género activo queda anclado a la IZQUIERDA, con borde blanco; al moverse
+ *    la barra se DESLIZA (transform) para anclar el nuevo y esconder los anteriores.
+ *  - **Wrap infinito**: después del último vuelve al primero (Todos) y viceversa.
+ *    En el salto del wrap NO rebobina (transición instantánea) para que no se vea
+ *    "pasando todas las opciones de vuelta".
+ *  - El FILTRO real (emit 'select') se aplica al ASENTARSE (~350ms); Enter/clic al toque.
+ *  - **Integrado al flujo del control:** ←/→ cambia de género; ↓ baja al contenido;
+ *    ↑ vuelve al nav. (NavTV baja a esta barra, y el contenido sube a ella — el
+ *    chip activo lleva la clase `.tv-genre-chip.active` para que lo enfoquen desde afuera.)
+ *  - Con el puntero: clic selecciona. El hover NO desliza (eso causaba un bucle).
  *
- * Drop-in del `GenreFilter` (misma firma `options`/`activeId`/`@select`); este se
- * usa SOLO en TV (lo decide `GenreFilter.vue`). Botones grandes para ver de lejos.
+ * Drop-in del `GenreFilter` (misma firma); se usa SOLO en TV. Botones grandes.
  */
 import { ref, watch, nextTick, onBeforeUnmount } from 'vue';
 import type { GenreOption } from '../../services/catalog';
@@ -21,6 +24,7 @@ const emit = defineEmits<{ (e: 'select', id: number): void }>();
 
 const chipRefs = ref<(HTMLElement | null)[]>([]);
 const offsetX = ref(0);
+const instantJump = ref(false); // true durante el salto del wrap (sin animación)
 
 function setChipRef(el: Element | { $el?: Element } | null, i: number) {
   chipRefs.value[i] = (el as HTMLElement) ?? null;
@@ -31,7 +35,6 @@ const indexOfId = (id: number) => props.options.findIndex((o) => o.id === id);
 // Índice ENFOCADO (visual, inmediato). El filtro real (activeId) lo maneja el padre.
 const focusedIndex = ref(Math.max(0, indexOfId(props.activeId)));
 
-// Si el padre cambia activeId desde afuera (reset, etc.), sincronizar el visual.
 watch(
   () => props.activeId,
   (id) => {
@@ -40,7 +43,7 @@ watch(
   }
 );
 
-/** Recalcula el desplazamiento para anclar el chip enfocado a la izquierda. */
+/** Ancla el chip enfocado a la izquierda (recalcula el desplazamiento). */
 async function updateOffset() {
   await nextTick();
   const el = chipRefs.value[focusedIndex.value];
@@ -55,42 +58,64 @@ function clearSettle() {
     settleTimer = null;
   }
 }
-
-/** Mueve el foco visual al género `i`; aplica el filtro al asentarse (o inmediato). */
-function goTo(i: number, immediate = false) {
-  if (i < 0 || i >= props.options.length || i === focusedIndex.value) {
-    if (immediate) emit('select', props.options[i]?.id);
-    return;
-  }
-  focusedIndex.value = i;
-  nextTick(() => chipRefs.value[i]?.focus());
+function applyFilter(i: number, immediate: boolean) {
   clearSettle();
-  if (immediate) emit('select', props.options[i].id);
-  else settleTimer = setTimeout(() => emit('select', props.options[i].id), 350);
+  const id = props.options[i]?.id;
+  if (id === undefined) return;
+  if (immediate) emit('select', id);
+  else settleTimer = setTimeout(() => emit('select', id), 350);
 }
 
-function onKeydown(e: KeyboardEvent, i: number) {
+function goTo(i: number, opts: { immediate?: boolean; wrapped?: boolean } = {}) {
+  if (i < 0 || i >= props.options.length) return;
+  if (i === focusedIndex.value) {
+    if (opts.immediate) applyFilter(i, true);
+    return;
+  }
+  instantJump.value = !!opts.wrapped; // en el wrap, saltar instantáneo (no rebobinar)
+  focusedIndex.value = i;
+  nextTick(() => {
+    chipRefs.value[i]?.focus();
+    if (opts.wrapped) requestAnimationFrame(() => (instantJump.value = false));
+  });
+  applyFilter(i, !!opts.immediate);
+}
+
+/** Mueve un género con WRAP infinito (último → primero y viceversa). */
+function move(dir: 1 | -1) {
+  const n = props.options.length;
+  if (!n) return;
+  let next = focusedIndex.value + dir;
+  let wrapped = false;
+  if (next < 0) {
+    next = n - 1;
+    wrapped = true;
+  } else if (next >= n) {
+    next = 0;
+    wrapped = true;
+  }
+  goTo(next, { wrapped });
+}
+
+function onKeydown(e: KeyboardEvent) {
   switch (e.key) {
     case 'ArrowRight':
       e.preventDefault();
-      goTo(i + 1);
+      move(1);
       break;
     case 'ArrowLeft':
       e.preventDefault();
-      goTo(i - 1);
+      move(-1);
       break;
     case 'Enter':
       e.preventDefault();
-      clearSettle();
-      emit('select', props.options[i].id);
+      applyFilter(focusedIndex.value, true);
       break;
     case 'ArrowDown':
-      // Bajar al contenido (primera card visible).
       e.preventDefault();
       document.querySelector<HTMLElement>('.card, .top-card, .continue-card')?.focus();
       break;
     case 'ArrowUp':
-      // Subir al nav (opción activa).
       e.preventDefault();
       (
         document.querySelector<HTMLElement>('.tv-topnav-item.active') ||
@@ -105,7 +130,11 @@ onBeforeUnmount(clearSettle);
 
 <template>
   <div class="tv-genre-bar" role="tablist">
-    <div class="tv-genre-track" :style="{ transform: `translateX(${-offsetX}px)` }">
+    <div
+      class="tv-genre-track"
+      :class="{ 'no-anim': instantJump }"
+      :style="{ transform: `translateX(${-offsetX}px)` }"
+    >
       <button
         v-for="(opt, i) in options"
         :key="opt.id"
@@ -115,8 +144,8 @@ onBeforeUnmount(clearSettle);
         role="tab"
         :aria-selected="i === focusedIndex"
         :tabindex="i === focusedIndex ? 0 : -1"
-        @click="goTo(i, true)"
-        @keydown="onKeydown($event, i)"
+        @click="goTo(i, { immediate: true })"
+        @keydown="onKeydown($event)"
       >
         {{ opt.label }}
       </button>
@@ -128,7 +157,7 @@ onBeforeUnmount(clearSettle);
 .tv-genre-bar {
   overflow: hidden;
   padding: 16px 52px;
-  /* Fade en los bordes para indicar "hay más" géneros (izq y der). */
+  /* Fade en los bordes para indicar "hay más" géneros. */
   -webkit-mask-image: linear-gradient(to right, transparent 0, #000 36px, #000 calc(100% - 90px), transparent 100%);
   mask-image: linear-gradient(to right, transparent 0, #000 36px, #000 calc(100% - 90px), transparent 100%);
 }
@@ -136,8 +165,11 @@ onBeforeUnmount(clearSettle);
   display: flex;
   gap: 16px;
   width: max-content;
-  transition: transform 0.25s ease-out; /* el deslizamiento suave */
+  transition: transform 0.25s ease-out; /* deslizamiento suave */
   will-change: transform;
+}
+.tv-genre-track.no-anim {
+  transition: none; /* salto instantáneo en el wrap (no rebobina) */
 }
 .tv-genre-chip {
   flex-shrink: 0;
@@ -146,7 +178,7 @@ onBeforeUnmount(clearSettle);
   border-radius: 14px;
   color: rgba(255, 255, 255, 0.82);
   font-family: 'Roboto', sans-serif;
-  font-size: 1.25rem; /* botones grandes (pedido del usuario) */
+  font-size: 1.25rem; /* botones grandes */
   font-weight: 600;
   padding: 16px 36px;
   cursor: pointer;
@@ -158,7 +190,6 @@ onBeforeUnmount(clearSettle);
   color: #fff;
   background: rgba(255, 255, 255, 0.12);
 }
-/* Activo: anclado a la izquierda, con borde blanco (estilo Netflix). */
 .tv-genre-chip.active {
   background: rgba(255, 255, 255, 0.16);
   border-color: #fff;

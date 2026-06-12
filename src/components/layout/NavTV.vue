@@ -62,11 +62,13 @@ function onTopnavKeydown(e: KeyboardEvent, index: number) {
     e.preventDefault();
     focusButton(nextDpadIndex(index, 'left', totalButtons.value));
   } else if (e.key === 'ArrowDown') {
-    // Salta al primer `.card`/`.channel-card-compact` enfocable del contenido
-    // (línea ~8520-8528). En Vue, el contenido vive fuera de este componente,
-    // así que se delega al documento — preservando el mismo selector.
+    // Baja al contenido. Si la vista tiene barra de géneros TV, primero enfoca el
+    // género activo (queda integrada al flujo: nav ↓ géneros ↓ películas); si no,
+    // va directo a la primera card.
     e.preventDefault();
-    const target = document.querySelector<HTMLElement>('.card[tabindex="0"], .channel-card-compact[tabindex="0"]');
+    const target =
+      document.querySelector<HTMLElement>('.tv-genre-chip.active') ||
+      document.querySelector<HTMLElement>('.card[tabindex="0"], .channel-card-compact[tabindex="0"]');
     target?.focus();
   }
 }

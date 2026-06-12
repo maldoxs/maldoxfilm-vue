@@ -77,7 +77,13 @@ export function useTvSpatialNav(isEnabled: () => boolean) {
     const idx = carousels.indexOf(cur);
     let nextIdx = idx + dir;
     if (nextIdx < 0) {
-      // ↑ desde el primer carrusel → volver al nav superior.
+      // ↑ desde el primer carrusel → si hay barra de géneros TV, ir al género activo
+      // (integrada al flujo: películas ↑ géneros ↑ nav); si no, directo al nav.
+      const genre = document.querySelector<HTMLElement>('.tv-genre-chip.active');
+      if (genre) {
+        genre.focus();
+        return;
+      }
       const navItem =
         document.querySelector<HTMLElement>('.tv-topnav-item.active') ||
         document.querySelector<HTMLElement>('.tv-topnav-item');
@@ -124,7 +130,7 @@ export function useTvSpatialNav(isEnabled: () => boolean) {
     if (!active) return;
     // No interferir con nav, géneros, inputs ni el reproductor.
     if (active.closest('.tv-topnav')) return;
-    if (active.classList.contains('genre-pill')) return;
+    if (active.classList.contains('genre-pill') || active.classList.contains('tv-genre-chip')) return;
     if (active.closest('.player-page')) return;
     if (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') return;
 
