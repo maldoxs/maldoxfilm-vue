@@ -118,51 +118,57 @@ function onFullscreenClick() {
       >
         {{ item.label }}
       </button>
-
-      <button
-        :ref="(el) => setButtonRef(el, NAV_ITEMS_TV.length)"
-        class="tv-topnav-item tv-topnav-search"
-        :class="{ active: active === 'search' }"
-        :tabindex="tabIndexFor(NAV_ITEMS_TV.length)"
-        title="Buscar"
-        @click="onSearchClick"
-        @keydown="onTopnavKeydown($event, NAV_ITEMS_TV.length)"
-      >
-        🔍
-      </button>
-
-      <button
-        :ref="(el) => setButtonRef(el, NAV_ITEMS_TV.length + 1)"
-        class="tv-topnav-item tv-topnav-fullscreen"
-        :tabindex="tabIndexFor(NAV_ITEMS_TV.length + 1)"
-        title="Pantalla completa"
-        @click="onFullscreenClick"
-        @keydown="onTopnavKeydown($event, NAV_ITEMS_TV.length + 1)"
-      >
-        <svg v-if="!isFullscreen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
-        </svg>
-        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M9 3v4a1 1 0 0 1-1 1H4M21 9h-4a1 1 0 0 1-1-1V4M3 15h4a1 1 0 0 1 1 1v4M15 21v-4a1 1 0 0 1 1-1h4" />
-        </svg>
-      </button>
     </div>
+
+    <!-- Buscar + Fullscreen FUERA de `.tv-topnav-items` → con `flex:1` en los
+         items, estos quedan empujados a la DERECHA (preserva el original ~2558). -->
+    <button
+      :ref="(el) => setButtonRef(el, NAV_ITEMS_TV.length)"
+      class="tv-topnav-search"
+      :tabindex="tabIndexFor(NAV_ITEMS_TV.length)"
+      title="Buscar"
+      @click="onSearchClick"
+      @keydown="onTopnavKeydown($event, NAV_ITEMS_TV.length)"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" />
+      </svg>
+      Buscar
+    </button>
+
+    <button
+      :ref="(el) => setButtonRef(el, NAV_ITEMS_TV.length + 1)"
+      class="tv-topnav-fullscreen"
+      :tabindex="tabIndexFor(NAV_ITEMS_TV.length + 1)"
+      title="Pantalla completa"
+      @click="onFullscreenClick"
+      @keydown="onTopnavKeydown($event, NAV_ITEMS_TV.length + 1)"
+    >
+      <svg v-if="!isFullscreen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+      </svg>
+      <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 3v4a1 1 0 0 1-1 1H4M21 9h-4a1 1 0 0 1-1-1V4M3 15h4a1 1 0 0 1 1 1v4M15 21v-4a1 1 0 0 1 1-1h4" />
+      </svg>
+    </button>
   </nav>
 </template>
 
 <style scoped>
-/* Preservados de `.tv-topnav`/`.tv-topnav-item`/`.tv-topnav-item:focus`/`.tv-topnav-item.active` (líneas ~1977-2024, ~2072-2172) */
+/* Preservados FIEL del original `.tv-topnav*` (índex.html ~1977-2065). Clave:
+   `.tv-topnav-items { flex:1 }` empuja Buscar/Fullscreen a la derecha; el item
+   activo lleva subrayado (`::after`), no fondo; logo Oswald MALDOX(azul)/FILM(blanco). */
 .tv-topnav {
   display: none;
   align-items: center;
-  gap: 28px;
-  padding: 16px 40px;
+  gap: 0;
+  padding: 0 52px;
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  z-index: 70;
-  background: linear-gradient(to bottom, rgba(14, 14, 14, 0.96), transparent);
+  z-index: 300;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.97) 0%, rgba(0, 0, 0, 0.8) 60%, transparent 100%);
   height: 76px;
   box-sizing: border-box;
 }
@@ -170,52 +176,124 @@ html.tv-mode .tv-topnav {
   display: flex;
 }
 .logo {
+  font-family: 'Oswald', sans-serif;
   font-weight: 800;
-  font-size: 1.3rem;
-  letter-spacing: 0.5px;
-  color: var(--text, #f0f0f0);
+  font-size: 1.75rem;
+  letter-spacing: 3px;
+  color: var(--accent, #3d5afe);
+  margin-right: 36px;
+  flex-shrink: 0;
+  user-select: none;
 }
 .logo span {
-  color: var(--accent, #3d5afe);
+  color: #fff;
 }
 .tv-topnav-items {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 2px;
+  flex: 1; /* ← empuja Buscar/Fullscreen a la derecha */
 }
 .tv-topnav-item {
-  background: rgba(255, 255, 255, 0.05);
-  border: 2px solid transparent;
-  border-radius: var(--radius, 8px);
-  color: var(--text-muted, #c2c2c2);
-  font-size: 1rem;
-  font-weight: 600;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.68);
+  font-family: 'Roboto', sans-serif;
+  font-size: 1.05rem;
+  font-weight: 500;
   padding: 10px 22px;
+  border-radius: var(--radius, 8px);
   cursor: pointer;
-  transition: background var(--trans, 0.25s ease), color var(--trans, 0.25s ease), border-color var(--trans, 0.25s ease), transform var(--trans, 0.25s ease);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+  position: relative;
+  outline: none;
 }
 .tv-topnav-item:hover {
   color: #fff;
-}
-.tv-topnav-item.active {
-  background: rgba(61, 90, 254, 0.18);
-  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
 }
 .tv-topnav-item:focus,
 .tv-topnav-item:focus-visible {
-  outline: none;
-  border-color: var(--accent, #3d5afe);
-  background: var(--accent, #3d5afe);
-  color: #000;
-  transform: scale(1.06);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  outline: 2px solid rgba(61, 90, 254, 0.6);
+  outline-offset: 2px;
 }
-.tv-topnav-search,
+.tv-topnav-item.active {
+  color: #fff;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.14);
+}
+/* Línea bajo el item activo */
+.tv-topnav-item.active::after {
+  content: '';
+  position: absolute;
+  bottom: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 28px;
+  height: 3px;
+  background: var(--accent, #3d5afe);
+  border-radius: 2px;
+}
+/* Buscar — a la derecha (margin-left:auto), icono + texto */
+.tv-topnav-search {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1.5px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.78);
+  padding: 9px 20px;
+  border-radius: var(--radius, 8px);
+  font-family: 'Roboto', sans-serif;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  outline: none;
+}
+.tv-topnav-search:hover,
+.tv-topnav-search:focus,
+.tv-topnav-search:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: var(--accent, #3d5afe);
+  color: #fff;
+  outline: 2px solid rgba(61, 90, 254, 0.5);
+  outline-offset: 2px;
+}
+.tv-topnav-search svg {
+  width: 20px;
+  height: 20px;
+}
+/* Fullscreen — botón cuadrado al lado de Buscar */
 .tv-topnav-fullscreen {
-  font-size: 1.2rem;
-  padding: 10px 16px;
   display: flex;
   align-items: center;
   justify-content: center;
+  margin-left: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1.5px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.78);
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius, 8px);
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  outline: none;
+}
+.tv-topnav-fullscreen:hover,
+.tv-topnav-fullscreen:focus,
+.tv-topnav-fullscreen:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: var(--accent, #3d5afe);
+  color: #fff;
+  outline: 2px solid rgba(61, 90, 254, 0.5);
+  outline-offset: 2px;
 }
 .tv-topnav-fullscreen svg {
   width: 22px;
