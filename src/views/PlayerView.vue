@@ -1564,6 +1564,17 @@ html.tv-mode .source-btn:focus {
    página → en TV el video caía a un overlay de hardware ("pantalla azul"). Se
    aplica directo a `.player-page` para restaurar el comportamiento del original. */
 :global(html.tv-mode) .player-page {
+  /* Forzar el player a pantalla completa en TV — PRESERVADO del original
+     (index.html ~2099): la migración había perdido este `width/height: 100v*`,
+     por eso en TV el player quedaba achicado en una franja y el resto azul. */
+  left: 0 !important;
+  right: 0 !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  padding: 0 !important;
+  margin: 0 !important;
   will-change: transform;
   transform: translateZ(0);
 }
