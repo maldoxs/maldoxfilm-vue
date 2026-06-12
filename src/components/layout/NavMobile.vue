@@ -1,0 +1,190 @@
+<script setup lang="ts">
+/**
+ * NavMobile — la barra inferior de navegación móvil (`#bottomNav`).
+ *
+ * Reemplaza `.bottom-nav`/`.bottom-nav-item`/`#bottomMoreMenu` (líneas
+ * ~2627-2660+) y `setBottomActive`/`toggleBottomMore`/`closeBottomMore`
+ * (líneas ~6286-6318).
+ *
+ * El original alterna `.active`/`.open` recorriendo el DOM a mano y usa
+ * `requestAnimationFrame` + un listener de "click afuera" de un solo uso
+ * para cerrar el submenú; aquí:
+ *   - `.active` es 100% derivado de `active === item.key` (sin recorrido DOM)
+ *   - el submenú es un `v-if`/transición CSS controlada por `moreOpen` (ref)
+ *   - el cierre por click-afuera se implementa con un único listener en
+ *     `document` que se agrega/quita junto con `moreOpen` (mismo efecto que
+ *     el "listener de un solo uso", sin fugas de memoria)
+ */
+import { ref, onBeforeUnmount, watch } from 'vue';
+import { NAV_ITEMS_MOBILE, MORE_MENU_ITEMS, type RouteKey } from '../../services/navigation';
+
+const props = defineProps<{
+  active: RouteKey;
+}>();
+
+const emit = defineEmits<{
+  (e: 'navigate', key: RouteKey): void;
+  /** El botón "Buscar" no navega directo — abre el panel de búsqueda móvil (línea ~6246: `openMobileSearch`). */
+  (e: 'open-search'): void;
+}>();
+
+const moreOpen = ref(false);
+const navRootRef = ref<HTMLElement | null>(null);
+
+/** toggleBottomMore — preservado de la línea ~6290-6318 (toggle + auto-close al hacer click afuera). */
+function toggleMore() {
+  moreOpen.value = !moreOpen.value;
+}
+
+function closeMore() {
+  moreOpen.value = false;
+}
+
+function onOutsideClick(e: MouseEvent) {
+  if (navRootRef.value && !navRootRef.value.contains(e.target as Node)) closeMore();
+}
+
+watch(moreOpen, (open) => {
+  if (open) document.addEventListener('click', onOutsideClick, true);
+  else document.removeEventListener('click', onOutsideClick, true);
+});
+
+onBeforeUnmount(() => document.removeEventListener('click', onOutsideClick, true));
+
+function onItemClick(key: RouteKey) {
+  if (key === 'search') {
+    emit('open-search');
+    return;
+  }
+  emit('navigate', key);
+}
+
+function onMoreItemClick(key: RouteKey) {
+  closeMore();
+  emit('navigate', key);
+}
+
+const isMoreActive = (): boolean => MORE_MENU_ITEMS.some((m) => m.key === props.active);
+</script>
+
+<template>
+  <nav ref="navRootRef" class="bottom-nav">
+    <div class="bottom-nav-inner">
+      <button
+        v-for="item in NAV_ITEMS_MOBILE"
+        :key="item.key"
+        class="bottom-nav-item"
+        :class="{ active: active === item.key }"
+        @click="onItemClick(item.key)"
+      >
+        <span class="bottom-nav-icon">{{ item.icon }}</span>
+        <span>{{ item.label }}</span>
+      </button>
+
+      <button class="bottom-nav-item bottom-nav-more" :class="{ active: isMoreActive(), open: moreOpen }" @click="toggleMore">
+        <span class="bottom-nav-icon">☰</span>
+        <span>Más</span>
+      </button>
+    </div>
+
+    <transition name="bottom-more">
+      <div v-if="moreOpen" class="bottom-more-menu">
+        <button
+          v-for="item in MORE_MENU_ITEMS"
+          :key="item.key"
+          class="bottom-more-item"
+          :class="{ active: active === item.key }"
+          @click="onMoreItemClick(item.key)"
+        >
+          <span class="bottom-nav-icon">{{ item.icon }}</span>
+          <span>{{ item.label }}</span>
+        </button>
+      </div>
+    </transition>
+  </nav>
+</template>
+
+<style scoped>
+/* Preservados de `.bottom-nav/.bottom-nav-inner/.bottom-nav-item/.bottom-nav-item.active/.bottom-more-menu` (líneas ~1807-1837, ~2653+) */
+.bottom-nav {
+  display: none;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  background: rgba(14, 14, 14, 0.96);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+html.mobile-mode .bottom-nav {
+  display: block;
+}
+.bottom-nav-inner {
+  display: flex;
+  justify-content: space-around;
+  padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+}
+.bottom-nav-item {
+  background: none;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-muted, #9a9a9a);
+  font-size: 0.62rem;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: color var(--trans, 0.25s ease);
+}
+.bottom-nav-item.active {
+  color: var(--accent, #3d5afe);
+}
+.bottom-nav-icon {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+.bottom-more-menu {
+  position: absolute;
+  right: 10px;
+  bottom: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(26, 26, 26, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius, 8px);
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.bottom-more-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  color: var(--text, #f0f0f0);
+  font-size: 0.78rem;
+  padding: 8px 14px;
+  border-radius: var(--radius, 6px);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--trans, 0.25s ease);
+}
+.bottom-more-item:hover,
+.bottom-more-item.active {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--accent, #3d5afe);
+}
+
+.bottom-more-enter-active,
+.bottom-more-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.bottom-more-enter-from,
+.bottom-more-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+</style>

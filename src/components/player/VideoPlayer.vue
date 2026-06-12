@@ -1,0 +1,624 @@
+<script setup lang="ts">
+/**
+ * VideoPlayer — el `<video>` + barra de controles custom estilo Netflix +
+ * overlay de carga + overlay de subtítulos, todo orquestado.
+ *
+ * Reemplaza el núcleo del reproductor (líneas ~3732-3826 de assets/index.html):
+ * `#playerFrame`/`#playerVideo`/`#playerLoading`/`#nfControls` + sus paneles.
+ * Combina los composables ya escritos:
+ *   - `usePlayer`      → carga RD (HEVC/transcode/HLS/Shaka/watchdogs)
+ *   - `useSubtitles`   → búsqueda/parseo/overlay de subtítulos
+ *   - `useFullscreen`  → fullscreen custom
+ *   - `useNetflixControls` → barra de controles (`#nfControls`)
+ *
+ * GANANCIA REAL vs el original: el árbol de `getElementById`/`innerHTML`/
+ * `classList` disperso entre 8 funciones (`_nfSetupControls`, `_injectSubtitle`,
+ * `loadPlayerSource`, `enterPlayerFullscreen`, ...) se vuelve un único
+ * componente con `<template>` declarativo — el estado vive en los composables,
+ * el DOM lo gestiona Vue.
+ *
+ * Esta vista NO reimplementa la carga de fuentes-iframe (UnlimPlay/vidlink) —
+ * eso vive en `PlayerView.vue` (Fase 5), que es quien conoce `playerState`/
+ * `SOURCES` y decide cuál `<VideoPlayer>` o `<iframe>` mostrar.
+ */
+import { ref, computed, onBeforeUnmount } from 'vue';
+import SubtitleOverlay from './SubtitleOverlay.vue';
+import PlayerSettingsPanel from './PlayerSettingsPanel.vue';
+import { usePlayer, type UsePlayerReturn } from '../../composables/usePlayer';
+import { useSubtitles } from '../../composables/useSubtitles';
+import { useFullscreen } from '../../composables/useFullscreen';
+import { FULLSCREEN_PATH_D } from '../../services/fullscreen';
+import { useNetflixControls, formatNfTime } from '../../composables/useNetflixControls';
+import { useToast } from '../../composables/useToast';
+import { usePlayerStore } from '../../stores/player';
+import { useDeviceStore } from '../../stores/device';
+import type { RdStreamResolver } from '../../services/rdStream';
+import type { RealDebridClient } from '../../services/realdebrid';
+
+const props = defineProps<{
+  rdStreamResolver: RdStreamResolver;
+  rdClient: RealDebridClient;
+  title: string;
+}>();
+
+const emit = defineEmits<{
+  (e: 'fallback-to-next-source'): void;
+  /**
+   * started — el video RD arrancó de verdad (equiv. `hideLoadingAndStart`,
+   * línea ~7808). `PlayerView` lo escucha para arrancar `startProgressTracking`/
+   * `scheduleAutoNext` — esa orquestación NO vive aquí (ver nota de cabecera:
+   * "Esta vista NO reimplementa la carga de fuentes-iframe... eso vive en
+   * PlayerView.vue"); este componente solo avisa CUÁNDO arrancó.
+   */
+  (e: 'started'): void;
+}>();
+
+const playerStore = usePlayerStore();
+const deviceStore = useDeviceStore();
+const { show: showToast } = useToast();
+
+const videoRef = ref<HTMLVideoElement | null>(null);
+const playerPageRef = ref<HTMLElement | null>(null);
+const seekBarRef = ref<HTMLElement | null>(null);
+const fullscreenIconRef = ref<HTMLElement | null>(null);
+
+// ── Subtítulos ──────────────────────────────────────────────────────────────
+const subtitles = useSubtitles({ videoRef });
+
+// ── Fullscreen custom ────────────────────────────────────────────────────────
+const fullscreen = useFullscreen({
+  playerPageRef,
+  iconRef: fullscreenIconRef,
+  isTvMode: () => deviceStore.isTV,
+});
+
+// ── Panel de Audio/Subtítulos/Velocidad — estado para `_spInit` (líneas ~4213-4277) ──
+// `hasNativeSpanish`/`lastSelectedStream` se capturan en `onStreamReady` (no son
+// reactivos en `usePlayer` — solo viajan una vez por stream vía callback, igual
+// que `_hasNativeSpanish`/`_hasSpaDirect` globales del original).
+const hasNativeSpanish = ref(false);
+const lastSelectedStream = ref<{ imdbId: string | null; streamFilename: string | null; infoHash: string | null } | null>(null);
+// `_spShowForRD(true)` — los botones CC/Velocidad solo aparecen una vez el
+// stream está listo (igual que el original, que los muestra dentro de `_spInit`,
+// llamado tras resolver el stream — líneas ~7901/8012/4270).
+const audioPanelReady = ref(false);
+
+// ── Carga de stream RD ───────────────────────────────────────────────────────
+const player: UsePlayerReturn = usePlayer({
+  videoRef,
+  rdStreamResolver: props.rdStreamResolver,
+  rdClient: props.rdClient,
+  // ADR-006 — borrar en RD el torrent creado por rd-stream al cerrar/cambiar.
+  // sendBeacon sobrevive al cierre/descarga de la página (mejor que fetch aquí).
+  serverCleanup: (torrentId: string) => {
+    try {
+      navigator.sendBeacon(`/.netlify/functions/rd-cleanup?id=${encodeURIComponent(torrentId)}`);
+    } catch {
+      /* best effort — nunca debe romper el cierre */
+    }
+  },
+  onStarted: () => {
+    isLoading.value = false;
+    nfControls.attach();
+    emit('started');
+  },
+  onToast: (msg) => showToast(msg),
+  onNativeSpanishDetected: () => {
+    subtitles.enabled.value = false;
+    subtitles.status.value = '🔊 Audio en Español';
+  },
+  onStreamReady: ({ selected, hasNativeSpanish: nativeEs, spanishTrack: detectedTrack }) => {
+    hasNativeSpanish.value = nativeEs;
+    lastSelectedStream.value = { imdbId: selected.imdbId, streamFilename: selected.streamFilename, infoHash: selected.infoHash ?? null };
+    audioPanelReady.value = true;
+    // `_subsEnabled = !hasSpanish` — preserva el estado inicial de `_spInit` (línea ~4265):
+    // arranca ON salvo que el audio nativo ya sea español.
+    subtitles.enabled.value = !nativeEs;
+    if (nativeEs) return; // _onVideoStarted no busca subs si el audio nativo ya es ES (línea ~7841-7846)
+    if (selected.imdbId) {
+      subtitles.fetchAndInject({
+        imdbId: selected.imdbId,
+        type: playerStore.current.type,
+        season: playerStore.current.season,
+        episode: playerStore.current.episode,
+        streamFilename: selected.streamFilename,
+        infoHash: selected.infoHash ?? null,
+      });
+    }
+    void detectedTrack; // las filas de audio leen `player.spanishTrack` directamente (reactivo)
+  },
+  onFallbackToNextSource: () => emit('fallback-to-next-source'),
+  // ── Cambio de pista de audio desde el panel ⚙️ — preserva `spSwitchAudio` (líneas ~4406-4414) ──
+  onAudioSwitchStart: () => {
+    isLoading.value = true;
+  },
+  onAudioSwitchEnd: () => {
+    isLoading.value = false;
+  },
+  onAudioTrackChanged: (isEng) => {
+    if (isEng) {
+      // Volvió a inglés: re-enganchar subs si estaban activos y aún no hay .srt cargado
+      if (subtitles.enabled.value && !subtitles.hasSubtitleData.value && lastSelectedStream.value?.imdbId) {
+        const s = lastSelectedStream.value;
+        subtitles.fetchAndInject({
+          imdbId: s.imdbId,
+          type: playerStore.current.type,
+          season: playerStore.current.season,
+          episode: playerStore.current.episode,
+          streamFilename: s.streamFilename,
+          infoHash: s.infoHash,
+        });
+      }
+    } else {
+      // Volvió a español (audio nativo): solo ocultar overlay — preserva
+      // `box.innerHTML=''; _spUpdateSubRows(false)` (líneas ~4412-4413). NO se
+      // usa `subtitles.clear()`: ese borraría `srtRaw`/`offsetMs` (el original
+      // conserva el .srt y el offset cacheados — si el usuario vuelve a inglés,
+      // el guard `!_subSrtRaw` evita re-buscar y el offset persiste). Apagar
+      // `enabled` ya hace que `renderAtCurrentTime` vacíe `activeCueText` (oculta
+      // el overlay) sin tocar `cues`/`srtRaw`/`offsetMs`.
+      subtitles.enabled.value = false;
+    }
+  },
+});
+
+// ── Barra de controles custom (#nfControls) ─────────────────────────────────
+const nfControls = useNetflixControls({
+  videoRef,
+  seekBarRef,
+  onInteraction: () => resetControlsAutoHide(),
+});
+
+const isLoading = ref(true);
+
+// ── Auto-hide de controles (preserva `controls-hidden` del original) ────────
+const controlsHidden = ref(false);
+let hideTimer: ReturnType<typeof setTimeout> | null = null;
+function resetControlsAutoHide() {
+  controlsHidden.value = false;
+  if (hideTimer) clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    if (nfControls.isPlaying.value) controlsHidden.value = true;
+  }, 3500);
+}
+
+// ── Panel ⚙️ Audio/Subtítulos/Velocidad — preserva `nfShowPanel`/`nfHidePanelDelayed`/
+// `nfCancelHide`/`nfOpenPanel`/`_nfWireHover` (líneas ~3955-4021): hover-intent
+// con cierre demorado 350ms (cancelable al entrar al panel) + click para abrir/
+// alternar. En Vue el anclaje dinámico al botón (`getBoundingClientRect`/
+// `requestAnimationFrame`) se reemplaza por el posicionamiento estático
+// `bottom:64px;right:12px` que YA trae `#playerSettingsPanel` como base CSS
+// (línea ~1213-1220) — mismo resultado visual, sin recalcular en cada apertura. ──
+type SettingsPanelMode = 'audiosubs' | 'speed';
+const settingsPanelOpen = ref(false);
+const settingsPanelMode = ref<SettingsPanelMode>('audiosubs');
+let panelHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showSettingsPanel(mode: SettingsPanelMode) {
+  if (panelHideTimer) {
+    clearTimeout(panelHideTimer);
+    panelHideTimer = null;
+  }
+  settingsPanelMode.value = mode;
+  settingsPanelOpen.value = true;
+  resetControlsAutoHide(); // preserva `playerPage.classList.remove('controls-hidden')` (línea ~3965)
+}
+function hideSettingsPanelDelayed() {
+  if (panelHideTimer) clearTimeout(panelHideTimer);
+  panelHideTimer = setTimeout(() => {
+    settingsPanelOpen.value = false;
+  }, 350); // preserva el delay EXACTO de `nfHidePanelDelayed` (línea ~3983)
+}
+function cancelHideSettingsPanel() {
+  if (panelHideTimer) {
+    clearTimeout(panelHideTimer);
+    panelHideTimer = null;
+  }
+}
+/** nfOpenPanel — preserva "click también abre/cierra" (líneas ~3989-3998): si ya está abierto en el mismo modo, lo cierra. */
+function toggleSettingsPanel(mode: SettingsPanelMode) {
+  if (settingsPanelOpen.value && settingsPanelMode.value === mode) {
+    settingsPanelOpen.value = false;
+    return;
+  }
+  showSettingsPanel(mode);
+}
+
+const canSwitchAudio = computed(() => player.dashBaseUrl.value !== null);
+
+/** spSwitchAudio — delega en `usePlayer.switchAudioTrack` (que preserva mutex/toasts/watchdog/loading). */
+function onSwitchAudio(track: string) {
+  void player.switchAudioTrack(track);
+}
+
+/**
+ * spSetSubs — preserva el toggle de doble-etiqueta (ver nota de cabecera de
+ * `PlayerSettingsPanel`) + el guard `!_subSrtRaw && _streamImdbId` que evita
+ * re-buscar si ya hay un .srt cargado (líneas ~4444-4459).
+ */
+function onToggleSubs() {
+  const turningOn = !subtitles.enabled.value;
+  subtitles.enabled.value = turningOn;
+  if (turningOn) {
+    if (!subtitles.hasSubtitleData.value && lastSelectedStream.value?.imdbId) {
+      const s = lastSelectedStream.value;
+      subtitles.fetchAndInject({
+        imdbId: s.imdbId,
+        type: playerStore.current.type,
+        season: playerStore.current.season,
+        episode: playerStore.current.episode,
+        streamFilename: s.streamFilename,
+        infoHash: s.infoHash,
+      });
+    }
+  }
+  showToast(turningOn ? '💬 Subtítulos activados' : '💬 Subtítulos desactivados');
+}
+
+/** spSetSpeed — delega en `nfControls.setSpeed` (mismo patrón que `SubtitleControls`: el toast vive en la UI). */
+function onSetSpeed(value: number) {
+  nfControls.setSpeed(value);
+}
+
+const remainingDisplay = computed(() => '-' + formatNfTime((videoRef.value?.duration || 0) - (videoRef.value?.currentTime || 0)));
+
+/**
+ * onVideoClick — preserva `_nfVideoClick` (índex.html líneas 4076-4081): un
+ * click sobre el video CIERRA el panel ⚙️ si está abierto; si no, alterna
+ * play/pausa. Así el usuario puede pausar/reanudar clicando la pantalla, no
+ * solo el botón de la barra.
+ */
+function onVideoClick() {
+  if (settingsPanelOpen.value) {
+    settingsPanelOpen.value = false;
+    return;
+  }
+  nfControls.togglePlay();
+}
+
+defineExpose({
+  loadRdSource: player.loadRdSource,
+  switchAudioTrack: player.switchAudioTrack,
+  videoRef,
+  fullscreen,
+});
+
+onBeforeUnmount(() => {
+  if (hideTimer) clearTimeout(hideTimer);
+  player.destroy();
+  nfControls.detach();
+  subtitles.clear();
+});
+</script>
+
+<template>
+  <div ref="playerPageRef" class="video-player" :class="{ 'controls-hidden': controlsHidden }">
+    <!-- Overlay de carga — reemplaza #playerLoading (línea ~3740-3746) -->
+    <div v-if="isLoading" class="player-loading">
+      <div class="spinner"></div>
+      <p class="player-loading-text">{{ player.loadingMessage.value || 'Conectando señal...' }}</p>
+      <p class="player-loading-hint">El servidor obtiene el contenido en tiempo real.<br />Puede tardar hasta 15 segundos.</p>
+    </div>
+
+    <div class="player-frame-wrap" @mousemove="resetControlsAutoHide">
+      <video ref="videoRef" class="video-el" playsinline @click="onVideoClick"></video>
+
+      <SubtitleOverlay :text="subtitles.activeCueText.value" :enabled="subtitles.enabled.value" />
+
+      <!-- Barra de controles custom — reemplaza #nfControls (líneas ~3751-3824) -->
+      <div class="nf-controls" :class="{ hidden: controlsHidden }">
+        <div class="nf-seek-wrap">
+          <span class="nf-time-elapsed">{{ nfControls.elapsedLabel.value }}</span>
+          <div
+            ref="seekBarRef"
+            class="nf-seek-bar"
+            @click="nfControls.onSeekBarClick"
+            @mousedown="nfControls.onSeekBarMouseDown"
+            @mousemove="nfControls.onSeekBarMouseMove"
+          >
+            <div class="nf-seek-fill" :style="{ width: nfControls.progressPct.value + '%' }"></div>
+            <div class="nf-seek-dot" :style="{ left: nfControls.progressPct.value + '%' }"></div>
+            <div class="nf-seek-tooltip" :style="{ left: nfControls.tooltipPct.value + '%' }">{{ nfControls.tooltipLabel.value }}</div>
+          </div>
+          <span class="nf-time">{{ remainingDisplay }}</span>
+        </div>
+
+        <div class="nf-row">
+          <div class="nf-left">
+            <button class="nf-btn" title="Play/Pausa" @click="nfControls.togglePlay">
+              <svg v-if="nfControls.isPlaying.value" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
+              <svg v-else viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+            </button>
+            <button class="nf-btn nf-btn-sm" title="Retroceder 10s" @click="nfControls.skip(-10)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M12 5V2L8 6l4 4V7a7 7 0 1 1-6.93 8H3.05A9 9 0 1 0 12 5z" />
+                <text x="7.5" y="15.5" font-size="5.5" fill="currentColor" stroke="none" font-family="sans-serif" font-weight="bold">10</text>
+              </svg>
+            </button>
+            <button class="nf-btn nf-btn-sm" title="Avanzar 10s" @click="nfControls.skip(10)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M12 5V2l4 4-4 4V7a7 7 0 1 0 6.93 8H20.95A9 9 0 1 1 12 5z" />
+                <text x="7.5" y="15.5" font-size="5.5" fill="currentColor" stroke="none" font-family="sans-serif" font-weight="bold">10</text>
+              </svg>
+            </button>
+            <div class="nf-vol-group">
+              <button class="nf-btn" title="Silenciar" @click="nfControls.toggleMute">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <path v-if="!nfControls.isMuted.value" d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
+                  <template v-else>
+                    <line x1="23" y1="9" x2="17" y2="15" />
+                    <line x1="17" y1="9" x2="23" y2="15" />
+                  </template>
+                </svg>
+              </button>
+              <input
+                class="nf-vol-slider"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                :value="nfControls.volume.value"
+                @input="nfControls.setVolume(parseFloat(($event.target as HTMLInputElement).value))"
+              />
+            </div>
+          </div>
+          <div class="nf-center">
+            <span class="nf-title-bar">{{ title }}</span>
+          </div>
+          <div class="nf-right">
+            <!-- #nfCCBtn — preserva línea ~3803-3808 (oculto hasta que `_spInit` llama `_spShowForRD(true)`) -->
+            <button
+              v-if="audioPanelReady"
+              id="nfCCBtn"
+              class="nf-btn nf-btn-sm"
+              title="Audio y subtítulos"
+              @click="toggleSettingsPanel('audiosubs')"
+              @mouseenter="showSettingsPanel('audiosubs')"
+              @mouseleave="hideSettingsPanelDelayed"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <rect x="2" y="5" width="20" height="14" rx="2" /><line x1="6" y1="10" x2="14" y2="10" />
+                <line x1="6" y1="14" x2="11" y2="14" />
+              </svg>
+            </button>
+            <!-- #nfSpeedBtn — preserva línea ~3810-3815 -->
+            <button
+              v-if="audioPanelReady"
+              id="nfSpeedBtn"
+              class="nf-btn nf-btn-sm"
+              title="Velocidad de reproducción"
+              @click="toggleSettingsPanel('speed')"
+              @mouseenter="showSettingsPanel('speed')"
+              @mouseleave="hideSettingsPanelDelayed"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+            </button>
+            <button ref="fullscreenIconRef" class="nf-btn" title="Pantalla completa" @click="fullscreen.toggle">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path :d="fullscreen.isFullscreen.value ? FULLSCREEN_PATH_D.enter : FULLSCREEN_PATH_D.exit" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel ⚙️ Audio+Subtítulos / Velocidad — reemplaza #playerSettingsPanel (líneas ~3613-3673) -->
+      <PlayerSettingsPanel
+        v-if="audioPanelReady"
+        :open="settingsPanelOpen"
+        :mode="settingsPanelMode"
+        :has-native-spanish="hasNativeSpanish"
+        :spanish-track="player.spanishTrack.value"
+        :active-track="player.activeTrack.value"
+        :can-switch-audio="canSwitchAudio"
+        :subs-enabled="subtitles.enabled.value"
+        :offset-ms="subtitles.offsetMs.value"
+        :speed="nfControls.speed.value"
+        @switch-audio="onSwitchAudio"
+        @toggle-subs="onToggleSubs"
+        @adjust-offset="subtitles.adjustOffset"
+        @reset-offset="subtitles.adjustOffset(-subtitles.offsetMs.value)"
+        @set-speed="onSetSpeed"
+        @mouseenter="cancelHideSettingsPanel"
+        @mouseleave="hideSettingsPanelDelayed"
+      />
+    </div>
+  </div>
+</template>
+
+<style scoped>
+/* Preservados de `.player-page`/`.player-loading`/`#nfControls`/`.nf-*` (líneas ~907-1120, ~1305-1313) */
+.video-player {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.player-frame-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.video-el {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+.player-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.75);
+  transition: opacity var(--trans, 0.25s ease);
+}
+.player-loading-text {
+  color: var(--text-muted, #9a9a9a);
+  font-size: 0.83rem;
+  font-weight: 500;
+  text-align: center;
+}
+.player-loading-hint {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.35);
+  text-align: center;
+  max-width: 260px;
+  line-height: 1.4;
+}
+
+.nf-controls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  padding: 6px 16px 12px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.85), transparent);
+  transition: opacity var(--trans, 0.25s ease);
+}
+.nf-controls.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+.nf-seek-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0 4px;
+}
+.nf-time,
+.nf-time-elapsed {
+  font-size: 0.72rem;
+  color: var(--text, #f0f0f0);
+  min-width: 38px;
+  text-align: center;
+}
+.nf-seek-bar {
+  position: relative;
+  flex: 1;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: height 0.15s ease;
+}
+.nf-seek-bar:hover {
+  height: 5px;
+}
+.nf-seek-fill {
+  height: 100%;
+  background: var(--accent, #3d5afe);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.nf-seek-dot {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  background: var(--accent, #3d5afe);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  display: none;
+}
+.nf-seek-bar:hover .nf-seek-dot {
+  display: block;
+}
+.nf-seek-tooltip {
+  position: absolute;
+  bottom: 14px;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+.nf-seek-bar:hover .nf-seek-tooltip {
+  opacity: 1;
+}
+.nf-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nf-left,
+.nf-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.nf-center {
+  flex: 1;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nf-title-bar {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+.nf-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  color: #fff;
+  opacity: 0.85;
+  display: flex;
+  align-items: center;
+  transition: opacity var(--trans, 0.25s ease);
+}
+.nf-btn:hover {
+  opacity: 1;
+}
+.nf-btn svg {
+  width: 22px;
+  height: 22px;
+}
+.nf-btn-sm {
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.nf-vol-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* Preserva `.nf-vol-slider` (líneas ~1137-1142): COLAPSADO por defecto, se
+   expande solo al hover/focus del grupo de volumen — no siempre visible. */
+.nf-vol-slider {
+  width: 0;
+  overflow: hidden;
+  transition: width 0.2s ease;
+  accent-color: var(--accent, #3d5afe);
+}
+.nf-vol-group:hover .nf-vol-slider,
+.nf-vol-group:focus-within .nf-vol-slider {
+  width: 76px;
+}
+
+@media (max-width: 640px) {
+  .nf-vol-group {
+    display: none; /* el original también simplifica controles en mobile */
+  }
+}
+</style>

@@ -1,0 +1,206 @@
+import { describe, test, expect } from 'vitest';
+import {
+  scoreStream,
+  rankStreams,
+  selectBestStream,
+  hasBadAudio,
+  hasAAC,
+  hasH264,
+  hasSpa,
+  hasBadLang,
+  isX265,
+  pickFallbackUrl,
+  matchInDownloads,
+  resolveActiveStream,
+} from '../src/services/streamSelector';
+import type { TorrentioStream, RDDownload } from '../src/types';
+
+// Helper para crear streams de prueba con forma realista de Torrentio
+const stream = (over: Partial<TorrentioStream>): TorrentioStream => ({
+  name: 'RD',
+  title: '',
+  url: 'https://example.com/resolve/realdebrid/abc/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/file.mkv',
+  ...over,
+});
+
+describe('"El Padrino" — debe elegir H264+AAC sobre AC3', () => {
+  // Caso real documentado: hay un release con mejor calidad (AC3 5.1, más GB)
+  // pero con audio incompatible con reproducción nativa, y otro con
+  // H264 + AAC que SÍ reproduce nativamente — el segundo debe ganar.
+  const ac3Release = stream({
+    title: 'El Padrino 1972 1080p BluRay x264 AC3 5.1 Spanish 💾 12.4 GB',
+    behaviorHints: { filename: 'El.Padrino.1972.1080p.BluRay.x264.AC3.5.1-GROUP.mkv' },
+  });
+  const aacRelease = stream({
+    title: 'El Padrino (1972) 1080p H264 AAC Spanish 💾 3.1 GB',
+    behaviorHints: { filename: 'El.Padrino.1972.1080p.H264.AAC-RARBG.mkv' },
+  });
+  const streams = [ac3Release, aacRelease];
+
+  test('detecta el release AC3 como audio incompatible', () => {
+    expect(hasBadAudio(ac3Release)).toBe(true);
+    expect(hasBadAudio(aacRelease)).toBe(false);
+  });
+
+  test('el release H264+AAC obtiene más puntaje (gana tamaño + AAC + H264)', () => {
+    const ptsAac = scoreStream(aacRelease);
+    const ptsAc3 = scoreStream(ac3Release);
+    expect(ptsAac).toBeGreaterThan(ptsAc3);
+  });
+
+  test('selectBestStream elige el release H264+AAC ("AAC-RARBG")', () => {
+    const { best } = selectBestStream(streams);
+    expect(best?.behaviorHints?.filename).toContain('AAC-RARBG');
+  });
+
+  test('rankStreams pone primero el de mayor puntaje', () => {
+    const { pool } = rankStreams(streams);
+    expect(pool[0].s.behaviorHints?.filename).toContain('AAC-RARBG');
+  });
+});
+
+describe('"Alien" — idiomas mixtos / mal etiquetados', () => {
+  const spaRelease = stream({
+    title: 'Alien 1979 1080p BluRay x264 Spanish Latino 💾 4.2 GB',
+    behaviorHints: { filename: 'Alien.1979.1080p.BluRay.x264.Latino.mkv' },
+  });
+  const itaOnlyRelease = stream({
+    title: 'Alien 1979 1080p BluRay x264 ITA AC3 💾 6.0 GB',
+    behaviorHints: { filename: 'Alien.1979.1080p.ITA.mkv' },
+  });
+  const dualRelease = stream({
+    title: 'Alien 1979 1080p BluRay x264 ITA ENG AAC 💾 5.5 GB',
+    behaviorHints: { filename: 'Alien.1979.1080p.Dual.ITA.ENG.mkv' },
+  });
+
+  test('release solo-italiano se marca como idioma malo (descartable)', () => {
+    expect(hasBadLang(itaOnlyRelease)).toBe(true);
+  });
+
+  test('release dual ITA+ENG NO se descarta (acompaña ENG)', () => {
+    expect(hasBadLang(dualRelease)).toBe(false);
+  });
+
+  test('scoreStream descarta el release solo-italiano con -1000', () => {
+    expect(scoreStream(itaOnlyRelease)).toBe(-1000);
+  });
+
+  test('selectBestStream prioriza el release en español sobre el dual/italiano', () => {
+    const { best } = selectBestStream([itaOnlyRelease, dualRelease, spaRelease]);
+    expect(hasSpa(best!)).toBe(true);
+  });
+
+  test('rankStreams filtra los streams con pts <= -500 del listado "scored"', () => {
+    const { scored } = rankStreams([itaOnlyRelease, dualRelease, spaRelease]);
+    expect(scored.find((x) => x.s === itaOnlyRelease)).toBeUndefined();
+  });
+
+  test('si TODOS son descartables, el pool cae a la lista completa con pts=0 (siempre reproducir algo)', () => {
+    const onlyBad1 = stream({ title: 'Alien ITA only 💾 4 GB', behaviorHints: { filename: 'a.ita.mkv' } });
+    const onlyBad2 = stream({ title: 'Alien KOR only 💾 4 GB', behaviorHints: { filename: 'a.kor.mkv' } });
+    const { pool, scored } = rankStreams([onlyBad1, onlyBad2]);
+    expect(scored.length).toBe(0);
+    expect(pool.length).toBe(2);
+    expect(pool[0].pts).toBe(0);
+  });
+});
+
+describe('"Punisher" — detecta audio AC3/DTS incompatible y busca alternativa reproducible', () => {
+  test('hasBadAudio detecta AC3, DTS, TrueHD, Atmos, DD+, FLAC, PCM', () => {
+    expect(hasBadAudio(stream({ title: 'x AC3 5.1' }))).toBe(true);
+    expect(hasBadAudio(stream({ title: 'x DTS-HD MA' }))).toBe(true);
+    expect(hasBadAudio(stream({ title: 'x TrueHD 7.1' }))).toBe(true);
+    expect(hasBadAudio(stream({ title: 'x Atmos' }))).toBe(true);
+    // ⚠️ "DDP5.1" (sin '+' ni dígito pegado a "dd") NO matchea `\bdd[\d\+]` ni
+    // `\bddp\b` en el original (`_badAudioCheck`, índex.html línea ~4883) — es
+    // un punto ciego conocido del regex original que NO se debe "arreglar" en
+    // la migración (preservar 1:1). "DD+5.1" sí matchea vía `\bdd[\d\+]` (el '+').
+    expect(hasBadAudio(stream({ title: 'x DD+5.1' }))).toBe(true);
+    expect(hasBadAudio(stream({ title: 'x FLAC' }))).toBe(true);
+    expect(hasBadAudio(stream({ title: 'x AAC 2.0' }))).toBe(false);
+  });
+
+  test('resolveActiveStream: sin match directo y audio incompatible, busca alternativa en "scored" (ronda 3)', () => {
+    // El release con DTS gana el scoring (H264 + 1080p + poco peso + RD = 128 pts)
+    // aunque su audio sea incompatible — scoreStream no penaliza el audio,
+    // por eso resolveActiveStream necesita su propia ronda de alternativas.
+    const ac3Best = stream({
+      url: 'https://example.com/a',
+      title: 'The Punisher 2017 1080p BluRay x264 DTS 5.1 💾 4 GB',
+      behaviorHints: { filename: 'Punisher.2017.1080p.x264.DTS.mkv' },
+    });
+    // El release AAC pesa menos en puntaje (720p + más GB) pero SÍ es
+    // reproducible nativamente y tiene match en `downloads` de RD.
+    const aacAlt = stream({
+      url: 'https://example.com/b',
+      title: 'The Punisher 2017 720p WEB-DL AAC 💾 8 GB',
+      behaviorHints: { filename: 'Punisher.2017.AAC.mkv' },
+    });
+    const downloads: RDDownload[] = [
+      { id: 'rd-aac-1', download: 'https://real-debrid.com/d/aac1', filename: 'Punisher.2017.AAC.mkv', filesize: 3_000_000_000 },
+    ];
+    const { scored, pool } = rankStreams([ac3Best, aacAlt]);
+    const result = resolveActiveStream(
+      ac3Best,
+      ac3Best.url!,
+      'Punisher.2017.DTS.mkv',
+      pool,
+      scored,
+      downloads
+    );
+    // No había match para el DTS, pero sí para el AAC -> debe adoptarlo como activo
+    expect(result.rdId).toBe('rd-aac-1');
+    expect(result.activeFilename).toBe('Punisher.2017.AAC.mkv');
+    expect(hasAAC(result.activeBest)).toBe(true);
+  });
+
+  test('matchInDownloads encuentra por URL resuelta, luego por filename, luego por filename sin extensión', () => {
+    const downloads: RDDownload[] = [
+      { id: '1', download: 'https://real-debrid.com/d/xyz?token=abc', filename: 'Movie.Name.2020.mkv', filesize: 100 },
+    ];
+    // 1. match por URL (normalizada, sin query string)
+    expect(matchInDownloads('https://real-debrid.com/d/xyz', 'orig', null, downloads)?.id).toBe('1');
+    // 2. match por filename exacto
+    expect(matchInDownloads('nope', 'nope', 'Movie.Name.2020.mkv', downloads)?.id).toBe('1');
+    // 3. match por filename sin extensión
+    expect(matchInDownloads('nope', 'nope', 'Movie.Name.2020.mp4', downloads)?.id).toBe('1');
+  });
+});
+
+describe('pickFallbackUrl — Plan B cuando el elegido es x265', () => {
+  test('si el best es x265, busca alternativa h264 priorizando RD', () => {
+    const x265Best = stream({ url: 'https://e.com/1', name: 'RD', title: 'Movie x265 HEVC' });
+    const h264NoRD = stream({ url: 'https://e.com/2', name: 'OtroGrupo', title: 'Movie x264' });
+    const h264RD = stream({ url: 'https://e.com/3', name: 'RD', title: 'Movie x264' });
+    const fb = pickFallbackUrl(x265Best, [x265Best, h264NoRD, h264RD]);
+    expect(fb).toBe('https://e.com/3'); // prioriza RD + h264
+  });
+
+  test('si el best NO es x265, no hay fallback (null)', () => {
+    const h264Best = stream({ url: 'https://e.com/1', title: 'Movie x264' });
+    expect(pickFallbackUrl(h264Best, [h264Best])).toBeNull();
+  });
+
+  test('isX265 detecta x265, HEVC y H.265 indistintamente', () => {
+    expect(isX265(stream({ title: 'Movie x265' }))).toBe(true);
+    expect(isX265(stream({ title: 'Movie HEVC' }))).toBe(true);
+    expect(isX265(stream({ title: 'Movie H.265' }))).toBe(true);
+    expect(isX265(stream({ title: 'Movie x264' }))).toBe(false);
+  });
+});
+
+describe('detectores básicos de formato', () => {
+  test('hasH264 reconoce h264, h.264 y x264', () => {
+    expect(hasH264(stream({ title: 'a H264 b' }))).toBe(true);
+    expect(hasH264(stream({ title: 'a H.264 b' }))).toBe(true);
+    expect(hasH264(stream({ title: 'a x264 b' }))).toBe(true);
+    expect(hasH264(stream({ title: 'a x265 b' }))).toBe(false);
+  });
+
+  test('hasSpa reconoce variantes en español', () => {
+    expect(hasSpa(stream({ title: 'Spanish' }))).toBe(true);
+    expect(hasSpa(stream({ title: 'Castellano' }))).toBe(true);
+    expect(hasSpa(stream({ title: 'Latino' }))).toBe(true);
+    expect(hasSpa(stream({ title: 'English' }))).toBe(false);
+  });
+});

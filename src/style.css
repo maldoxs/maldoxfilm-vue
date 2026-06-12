@@ -1,0 +1,116 @@
+/**
+ * style.css — design tokens centralizados de MaldoxFilm.
+ *
+ * Reemplaza el scaffold de Vite y centraliza la paleta de colores EXACTA
+ * que vivía repetida/dispersa por el `<style>` gigante de assets/index.html
+ * (bloque `:root`, líneas ~520-540). Requisito del usuario: "centralizar
+ * estilos, evitar CSS duplicado" — cada componente consume estas variables
+ * vía `var(--token)` en su `<style scoped>`, en vez de redefinir colores.
+ *
+ * Las reglas de layout/reset globales (body, scrollbars, etc) también viven
+ * aquí porque son transversales — el resto de los estilos son scoped por
+ * componente (Fase 4 del plan de migración).
+ */
+
+:root {
+  /* Paleta MaldoxFilm — preservada 1:1 del original */
+  --bg: #0e0e0e;
+  --bg2: #181818;
+  --bg3: #222222;
+  --surface: #1c1c1c;
+  --surface2: #252525;
+  --surface3: #2e2e2e;
+  --border: #333333;
+  --accent: #3d5afe; /* Índigo/azul — color principal MaldoxFilm */
+  --accent2: #2a46e0;
+  --accent-glow: rgba(61, 90, 254, 0.25);
+  --text: #f0f0f0;
+  --text-muted: #9a9a9a;
+  --text-dim: #555555;
+  --green: #4caf7d;
+  --red: #e05c3a;
+  --radius: 5px;
+  --radius-lg: 8px;
+  --trans: 0.25s ease;
+
+  color-scheme: dark;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+a {
+  color: inherit;
+}
+
+/* Scrollbars oscuros — preservados del original (selectors `::-webkit-scrollbar`) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg2);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--surface3);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent2);
+}
+
+/* Spinner reutilizable — preservado de `.spinner` (usado en player-loading y carousels) */
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--surface3);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Toast — usado por varios composables/vistas vía useToast */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 18px;
+  border-radius: var(--radius-lg);
+  font-size: 0.82rem;
+  z-index: 5000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}

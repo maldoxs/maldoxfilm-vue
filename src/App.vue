@@ -1,0 +1,94 @@
+<script setup lang="ts">
+/**
+ * App — el shell raíz: monta la navbar correspondiente al modo de
+ * dispositivo (`NavDesktop`/`NavMobile`/`NavTV`), el `<router-view>` y el
+ * `<Toast>` global.
+ *
+ * Reemplaza `window.setAppMode(mode)` (líneas ~6358-6403): el original
+ * mostraba/ocultaba `#mainNav`/`#bottomNav`/`#tvSidebar`/`#tvTopNav` con
+ * `style.display` inline y ajustaba el `padding-top` del body a mano; aquí
+ * cada nav se autogestiona su propia visibilidad por CSS (`html.tv-mode
+ * .tv-topnav { display:flex }`, etc., ver estilos de cada componente) — el
+ * shell solo decide CUÁL montar según `deviceStore.mode`, evitando montar
+ * (y suscribir listeners de) navs que no se van a usar.
+ */
+import { computed } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
+import NavDesktop from './components/layout/NavDesktop.vue';
+import NavMobile from './components/layout/NavMobile.vue';
+import NavTV from './components/layout/NavTV.vue';
+import Toast from './components/Toast.vue';
+import { useDeviceStore } from './stores/device';
+import type { RouteKey } from './services/navigation';
+
+const deviceStore = useDeviceStore();
+const router = useRouter();
+const route = useRoute();
+
+// ── Mapea la ruta activa → RouteKey de las navbars (deriva el "active" de cada nav) ──
+const ROUTE_NAME_TO_KEY: Record<string, RouteKey> = {
+  home: 'home',
+  movies: 'movies',
+  series: 'series',
+  anime: 'anime',
+  mylist: 'mylist',
+  search: 'search',
+  // 'channels' se omite — Fase 6 (Canales/IPTV) excluida a pedido del usuario,
+  // la ruta `/canales` ya no existe (ver `router/index.ts`).
+};
+const activeKey = computed<RouteKey>(() => {
+  const name = String(route.name ?? '');
+  return ROUTE_NAME_TO_KEY[name] ?? 'home';
+});
+
+// ── Navegación — reemplaza showHome()/loadSection()/showChannelsPage()/... ──
+const KEY_TO_PATH: Record<RouteKey, string> = {
+  home: '/',
+  movies: '/peliculas',
+  series: '/series',
+  anime: '/anime',
+  mylist: '/mi-lista',
+  search: '/buscar',
+};
+function onNavigate(key: RouteKey) {
+  router.push(KEY_TO_PATH[key]);
+}
+function onSearch(query: string) {
+  router.push({ path: '/buscar', query: { q: query } });
+}
+function onOpenSearch() {
+  router.push('/buscar');
+}
+
+// ── Fullscreen de toda la app (botón del NavTV — toggleAppFullscreen, línea ~8550+) ──
+function onToggleAppFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  else document.documentElement.requestFullscreen?.().catch(() => {});
+}
+</script>
+
+<template>
+  <div id="app-shell">
+    <NavDesktop v-if="deviceStore.mode === 'desktop'" :active="activeKey" @navigate="onNavigate" @search="onSearch" />
+    <NavMobile v-else-if="deviceStore.mode === 'mobile'" :active="activeKey" @navigate="onNavigate" @open-search="onOpenSearch" />
+    <NavTV v-else :active="activeKey" @navigate="onNavigate" @open-search="onOpenSearch" @toggle-fullscreen="onToggleAppFullscreen" />
+
+    <main class="app-main" :class="`mode-${deviceStore.mode}`">
+      <router-view />
+    </main>
+
+    <Toast />
+  </div>
+</template>
+
+<style scoped>
+.app-main {
+  min-height: 100vh;
+}
+.app-main.mode-tv {
+  padding-top: 76px; /* preserva el ajuste de `#hero`/body en tv-mode (línea ~6390-6403) */
+}
+.app-main.mode-mobile {
+  padding-bottom: 64px; /* deja espacio para `.bottom-nav` fija */
+}
+</style>

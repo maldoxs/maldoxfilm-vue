@@ -1,0 +1,1004 @@
+/**
+ * usePlayer — orquestación de la carga de la fuente Real-Debrid del
+ * reproductor: HEVC directo, transcode (DASH/HLS), watchdogs, fallback de
+ * fuentes y selector de pista en español.
+ *
+ * Capa de ORQUESTACIÓN sobre `services/playback.ts` (decisiones puras, ya
+ * testeadas) + `services/rdStream.ts` (resolución de stream RD) +
+ * `services/realdebrid.ts` (transcode/probing). Reemplaza el bloque
+ * `if(_activeSrcIdx === RD_SRC_IDX){ rdGetStream(...).then(...) }` completo
+ * de `loadPlayerSource` (líneas ~7824-8186 de assets/index.html) — la rama
+ * MÁS COMPLEJA de todo el reproductor (HEVC nativo → transcode DASH/Shaka →
+ * transcode HLS/hls.js → fallback x265 → play directo, cada uno con sus
+ * watchdogs y timelines de mensajes).
+ *
+ * ⚠️ Esta capa toca DOM (`<video>`, scripts CDN de hls.js/Shaka),
+ * `MediaSource`, red (RD transcode/HEAD probes) y `setTimeout` reales — no es
+ * testeable con Vitest puro. TODA decisión ("¿hay audio incompatible?",
+ * "¿qué mensaje toca a los X ms?", "¿cuál es la URL de la pista en
+ * español?") ya vive en `services/playback.ts` con 18 tests; aquí solo se
+ * ENCADENAN esas decisiones sobre el DOM real, preservando el ORDEN EXACTO
+ * y los mismos guards de `_playerGen`/`isStale`.
+ *
+ * GANANCIA REAL vs el original: el árbol de 6 niveles de `if/else` anidados
+ * (HEVC → rdId → DASH/HLS → x265 fallback → directo) se vuelve una cascada
+ * lineal de funciones `async` con early-returns — cada rama es una función
+ * nombrada en vez de un bloque anónimo de 80 líneas.
+ */
+
+import { ref, type Ref } from 'vue';
+import {
+  detectHevcSupport,
+  checkBadAudioForDirectPlay,
+  isDualLatFilename,
+  MIN_VALID_DURATION_SEC,
+  HEVC_DIRECT_PLAY_TIMEOUT_MS,
+  BLOCKED_MESSAGE_WAIT_MS,
+  SPANISH_TRACK_CANDIDATES,
+  buildSpanishTrackUrl,
+  buildDashBaseUrl,
+  buildLoadingMessageTimeline,
+  PLAYBACK_STARTED_THRESHOLD_SEC,
+  SHAKA_WATCHDOG_MS,
+  HLS_WATCHDOG_MS,
+  HLS_CONFIG,
+  isDashManifest,
+  type MediaSourceLike,
+} from '../services/playback';
+import { pickHlsFallbackFromTranscode, pickDashUrlFromTranscode } from '../services/realdebrid';
+import type { RealDebridClient } from '../services/realdebrid';
+import type { RdStreamResolver } from '../services/rdStream';
+import { usePlayerStore } from '../stores/player';
+import type { SelectedStream } from '../types';
+
+// Watchdog del cambio de pista de audio del panel ⚙️ — preserva el `90000`
+// literal de `spSwitchAudio` (línea ~4378): si el transcode en frío de la
+// nueva pista no arranca en 90s, revierte a la anterior.
+const AUDIO_SWITCH_WATCHDOG_MS = 90000;
+
+// ── Recuperación de stall a MITAD de reproducción ───────────────────────────
+// El watchdog original (`SHAKA_WATCHDOG_MS`) solo vigila el ARRANQUE. Si pausás
+// varios minutos, las URLs de streaming de RD caducan y al volver Shaka deja de
+// avanzar → la peli "se pega". Esto vigila que `currentTime` avance mientras
+// está en play y, si se traba, recarga el DASH actual desde la posición.
+const STALL_CHECK_INTERVAL_MS = 2000; // cada cuánto se revisa el avance
+const STALL_RECOVER_MS = 8000; // sin avanzar (en play) este tiempo → recuperar
+const MAX_STALL_RECOVERIES = 3; // recuperaciones seguidas sin éxito → cambiar de fuente
+
+// ── Carga dinámica de hls.js / Shaka Player (líneas ~3884-3937) ─────────────
+// Se preserva el patrón "singleton + polling" del original: solo un <script>
+// se inyecta a la vez, los llamadores concurrentes esperan al mismo callback.
+let _hlsLoading = false;
+function loadHlsIfNeeded(): Promise<void> {
+  return new Promise((resolve) => {
+    const w = window as unknown as { Hls?: unknown };
+    if (w.Hls) return resolve();
+    if (_hlsLoading) {
+      const t = setInterval(() => {
+        if (w.Hls) {
+          clearInterval(t);
+          resolve();
+        }
+      }, 60);
+      return;
+    }
+    _hlsLoading = true;
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.4.12/hls.min.js';
+    // ⚠️ SEGURIDAD — Subresource Integrity: el original cargaba este script de
+    // un CDN de terceros SIN verificación de integridad — si cdnjs sufriera un
+    // compromiso/MITM, el script ejecutaría con privilegios completos de la
+    // página (podría exfiltrar el token RD, leer localStorage, etc. — la
+    // superficie de ataque de cadena de suministro más peligrosa de toda la
+    // app). Se agrega el hash SRI publicado oficialmente por cdnjs para esta
+    // versión exacta (1.4.12) — verificado contra https://api.cdnjs.com — de
+    // forma que el navegador rechace cualquier respuesta que no coincida byte
+    // a byte. No cambia ningún comportamiento funcional.
+    s.integrity = 'sha512-livj3YhgdqpYdRFIbB6vkXJYGrCURfkc19oK1WZWW2RfIaxFYfsWEiu1VysTT4VuodWvYL2Irbb5kv67I1g6Qg==';
+    s.crossOrigin = 'anonymous';
+    s.onload = () => resolve();
+    document.head.appendChild(s);
+  });
+}
+
+let _shakaLoading = false;
+function loadShakaIfNeeded(): Promise<void> {
+  return new Promise((resolve) => {
+    const w = window as unknown as { shaka?: { polyfill: { installAll(): void } } };
+    if (w.shaka) return resolve();
+    if (_shakaLoading) {
+      const t = setInterval(() => {
+        if (w.shaka) {
+          clearInterval(t);
+          resolve();
+        }
+      }, 60);
+      return;
+    }
+    _shakaLoading = true;
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.7.6/shaka-player.compiled.js';
+    // ⚠️ SEGURIDAD — mismo razonamiento de Subresource Integrity que en
+    // `loadHlsIfNeeded`: hash SRI oficial de cdnjs para shaka-player 4.7.6,
+    // verificado contra https://api.cdnjs.com.
+    s.integrity = 'sha512-085ivZ5s6z+Qk9InxYMJoXF6JuMRfnTJGpeOph6TKmgsnkqxMhcauQIWINE6FnBt/KJBvcx7JjRAXc+ZvNJuyQ==';
+    s.crossOrigin = 'anonymous';
+    s.onload = () => {
+      w.shaka!.polyfill.installAll();
+      resolve();
+    };
+    document.head.appendChild(s);
+  });
+}
+
+// ── Shaka Player — instancia única (líneas ~3901-3937) ──────────────────────
+// Variables de módulo (no `ref`): son punteros a instancias de terceros, no
+// estado reactivo de UI — exactamente lo que eran en el original (`var _shakaPlayer`).
+let _shakaPlayer: ShakaPlayerLike | null = null;
+// NOTA — el original también declaraba `_shakaCurrentUrl` ("URL actual (para
+// cast)", línea ~3902) pero NUNCA la leía en ningún punto del archivo: era
+// vestigial (probablemente para una integración de cast que no llegó a
+// implementarse). JS no se queja de variables solo-escritas; TS sí
+// (`noUnusedLocals`/TS6133) — se omite aquí por ser muerta en el original
+// también, no porque se haya quitado funcionalidad real.
+
+interface ShakaPlayerLike {
+  attach(video: HTMLVideoElement): Promise<void>;
+  destroy(): Promise<void> | void;
+  addEventListener(ev: string, cb: (e: { detail?: { code?: number } }) => void): void;
+  configure(cfg: unknown): void;
+  load(url: string, startTime?: number | null): Promise<void>;
+}
+
+// PERF/MEMORIA — TV y móviles de poca RAM se "pegan" si Shaka acumula un buffer
+// grande de un stream de alta tasa. Detección self-contained (no toca el resto):
+// `navigator.deviceMemory` ≤ 4 GB, o UA de móvil/TV. Solo se usa para RECORTAR el
+// `bufferBehind` (video ya reproducido que Shaka guarda para rebobinar — pura RAM,
+// sin riesgo de stutter); en desktop NO se toca nada (defaults de Shaka).
+function isLowMemoryDevice(): boolean {
+  try {
+    const mem = (navigator as unknown as { deviceMemory?: number }).deviceMemory;
+    if (typeof mem === 'number' && mem > 0 && mem <= 4) return true;
+    const ua = navigator.userAgent || '';
+    return /Mobi|Android|iPhone|iPad|iPod|SmartTV|SMART-TV|Tizen|Web0S|webOS|NetCast|HbbTV|BRAVIA|AFT/i.test(ua);
+  } catch {
+    return false;
+  }
+}
+
+async function _shakaLoad(video: HTMLVideoElement, url: string, startTime?: number) {
+  if (_shakaPlayer) {
+    try {
+      await _shakaPlayer.destroy();
+    } catch {
+      /* silenciar — igual que el original */
+    }
+    _shakaPlayer = null;
+  }
+  // ⚠️ El constructor es `shaka.Player`, NO `shaka` (que es el namespace).
+  // Preserva índex.html línea 3920: `var p = new shaka.Player();`.
+  const w = window as unknown as { shaka: { Player: new () => ShakaPlayerLike } };
+  const p = new w.shaka.Player();
+  await p.attach(video);
+  _shakaPlayer = p;
+  p.addEventListener('error', (e) => {
+    const code = e.detail ? e.detail.code : null;
+    if (code === 1003) return; // LOAD_INTERRUPTED — normal al cambiar audio/fuente
+    console.warn('Shaka error:', code ?? e);
+  });
+  // En desktop: solo los retries (comportamiento original intacto). En TV/móvil de
+  // poca RAM: además se recorta `bufferBehind` (30s→10s por defecto de Shaka) para
+  // bajar el uso de memoria sin afectar el buffer hacia adelante (sin stutter).
+  const streamingCfg: Record<string, unknown> = { retryParameters: { maxAttempts: 3 } };
+  if (isLowMemoryDevice()) streamingCfg.bufferBehind = 10;
+  p.configure({ streaming: streamingCfg });
+  await p.load(url, typeof startTime === 'number' && startTime > 0 ? startTime : null);
+}
+
+function _shakaDestroy() {
+  if (_shakaPlayer) {
+    try {
+      const r = _shakaPlayer.destroy();
+      if (r && typeof (r as Promise<void>).catch === 'function') (r as Promise<void>).catch(() => {});
+    } catch {
+      /* silenciar */
+    }
+    _shakaPlayer = null;
+  }
+}
+
+export interface UsePlayerOptions {
+  /** Ref al elemento <video> activo. */
+  videoRef: Ref<HTMLVideoElement | null | undefined>;
+  /** Resuelve el stream RD (IMDB → Torrentio → match en downloads). */
+  rdStreamResolver: RdStreamResolver;
+  /** Cliente RD — se usa para `fetchTranscode` (probing DASH/HLS). */
+  rdClient: RealDebridClient;
+  /** Callback: ocultar overlay de carga + arrancar tracking de progreso (equiv. `hideLoadingAndStart`). */
+  onStarted: () => void;
+  /** Callback: mostrar un toast (equiv. `showToast`). */
+  onToast: (msg: string) => void;
+  /** Callback: el stream tiene audio nativo en español detectado en DASH (subs OFF por defecto). */
+  onNativeSpanishDetected?: () => void;
+  /** Callback: stream listo — para inicializar buscador de subtítulos / selector de audio. */
+  onStreamReady?: (info: { selected: SelectedStream; hasNativeSpanish: boolean; spanishTrack: string | null }) => void;
+  /** Callback: cambiar a la siguiente fuente / reintentar (equiv. `playerState._srcIdx = 0; loadPlayerSource()`). */
+  onFallbackToNextSource: () => void;
+  /**
+   * Callback: arrancó un cambio de pista de audio desde el panel — mostrar el
+   * overlay de carga (equiv. a `playerLoading.classList.remove('hidden')`,
+   * línea ~4349, dentro de `spSwitchAudio`). `loadingMessage` ya trae el
+   * texto correcto ("🇬🇧/🇪🇸 Cargando audio en...").
+   */
+  onAudioSwitchStart?: () => void;
+  /** Callback: terminó (con éxito o no) el cambio de pista — ocultar el overlay (línea ~4370/4382/4420). */
+  onAudioSwitchEnd?: () => void;
+  /**
+   * Callback: la pista de audio cambió con éxito — el llamador decide qué
+   * hacer con los subtítulos según el nuevo idioma (preserva el bloque
+   * `if(isEng){ if(_subsEnabled...) fetchAndInjectSubtitle(...) } else { box.innerHTML=''; _spUpdateSubRows(false) }`,
+   * líneas ~4406-4414): si se pasó a inglés y los subs estaban activos, volver
+   * a buscarlos; si se pasó a español (audio nativo), limpiar el overlay.
+   */
+  onAudioTrackChanged?: (isEng: boolean) => void;
+  /** `MediaSource` real (inyectable para tests — por defecto el global). */
+  mediaSource?: MediaSourceLike | undefined;
+  /**
+   * serverCleanup — borra en RD el torrent que `rd-stream` creó para este stream
+   * (ADR-004/006), al cerrar el reproductor o cambiar de título. Inyectable y
+   * opcional: default no-op para no tocar la red en tests. El llamador real usa
+   * `navigator.sendBeacon('/.netlify/functions/rd-cleanup?id=...')`.
+   */
+  serverCleanup?: (torrentId: string) => void;
+}
+
+export interface UsePlayerReturn {
+  /** Mensaje vigente del overlay de carga ("📡 Conectando...", "⏱️ 1 minuto...", etc). */
+  loadingMessage: Ref<string>;
+  /** ¿Hay una carga RD en curso? */
+  isLoadingRd: Ref<boolean>;
+  /** URL base DASH para el panel de ajustes de audio (o null si no aplica). */
+  dashBaseUrl: Ref<string | null>;
+  /** Pista de audio activa actualmente (p.ej. 'eng1', 'spa1'). */
+  activeTrack: Ref<string>;
+  /** Pista en español detectada (o null). */
+  spanishTrack: Ref<string | null>;
+  /** Carga la fuente RD completa — equivalente al bloque `if(_activeSrcIdx === RD_SRC_IDX)`. */
+  loadRdSource(params: { id: string | number; type: 'movie' | 'tv'; season?: number; episode?: number }): Promise<void>;
+  /** Cambia la pista de audio activa en un manifest DASH ya cargado (panel de ajustes). */
+  switchAudioTrack(track: string): Promise<void>;
+  /** Limpia instancias activas (HLS.js / Shaka) — llamar al cerrar el reproductor. */
+  destroy(): void;
+}
+
+export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
+  const playerStore = usePlayerStore();
+
+  const loadingMessage = ref('');
+  const isLoadingRd = ref(false);
+  const dashBaseUrl = ref<string | null>(null);
+  const activeTrack = ref('eng1');
+  const spanishTrack = ref<string | null>(null);
+
+  // ── Limpieza del torrent que `rd-stream` creó en RD (ADR-006) ─────────────
+  // Se borra al cerrar el reproductor o al cambiar de título, para que no se
+  // acumulen torrents (error 21). Solo el camino server-side setea este id.
+  let currentServerTorrentId: string | null = null;
+  function cleanupServerTorrent() {
+    if (currentServerTorrentId) {
+      opts.serverCleanup?.(currentServerTorrentId);
+      currentServerTorrentId = null;
+    }
+  }
+
+  let activeMsgTimers: ReturnType<typeof setTimeout>[] = [];
+  function clearMsgTimers() {
+    activeMsgTimers.forEach(clearTimeout);
+    activeMsgTimers = [];
+  }
+
+  // ── Programa el timeline de mensajes — reemplaza los `_msgsS.map(setTimeout...)`
+  // y `_msgs.map(setTimeout...)` (líneas ~7983-7985 y ~8071-8077), unificados
+  // porque ambas listas son IDÉNTICAS salvo por `isBadAudio` (ya unificado en
+  // `buildLoadingMessageTimeline`).
+  function scheduleLoadingMessages(isBadAudio: boolean, hasStarted: () => boolean) {
+    const timeline = buildLoadingMessageTimeline(isBadAudio);
+    activeMsgTimers = timeline.map(([delay, msg]) =>
+      setTimeout(() => {
+        if (!hasStarted()) loadingMessage.value = msg;
+      }, delay)
+    );
+  }
+
+  function getMediaSource(): MediaSourceLike | undefined {
+    if (opts.mediaSource !== undefined) return opts.mediaSource;
+    return typeof MediaSource !== 'undefined' ? (MediaSource as unknown as MediaSourceLike) : undefined;
+  }
+
+  // ── Intento de reproducción directa HEVC (líneas ~7878-7913) ────────────
+  // Devuelve `true` si reprodujo de verdad (duration > 35s), `false` si falló
+  // o no aplica — el llamador decide si continuar al transcode.
+  async function tryHevcDirectPlay(video: HTMLVideoElement, streamUrl: string): Promise<boolean> {
+    let played = false;
+    await new Promise<void>((resolve) => {
+      const tmo = setTimeout(() => {
+        if (!played) {
+          video.src = '';
+          resolve();
+        }
+      }, HEVC_DIRECT_PLAY_TIMEOUT_MS);
+      video.addEventListener(
+        'loadedmetadata',
+        () => {
+          clearTimeout(tmo);
+          if (video.duration && isFinite(video.duration) && video.duration > MIN_VALID_DURATION_SEC) {
+            played = true;
+            video.muted = false;
+            video.volume = 1;
+            video.play().catch(() => {});
+            opts.onStarted();
+            resolve();
+          } else {
+            video.src = '';
+            resolve();
+          }
+        },
+        { once: true }
+      );
+      video.addEventListener(
+        'error',
+        () => {
+          clearTimeout(tmo);
+          video.src = '';
+          resolve();
+        },
+        { once: true }
+      );
+      video.src = streamUrl;
+      video.load();
+    });
+    return played;
+  }
+
+  // ── Probing de pista en español dentro del manifest DASH (líneas ~7929-7960) ──
+  async function probeSpanishDashTrack(
+    dashUrlBase: string,
+    fetchImpl: typeof fetch
+  ): Promise<{ finalUrl: string; hasNativeSpanish: boolean; track: string | null }> {
+    for (const track of SPANISH_TRACK_CANDIDATES) {
+      const candidateUrl = buildSpanishTrackUrl(dashUrlBase, track);
+      if (!candidateUrl) break; // la URL no matchea el patrón — cortar el loop (línea ~7943)
+      try {
+        const r = await fetchImpl(candidateUrl, { method: 'HEAD' });
+        if (r.ok) return { finalUrl: candidateUrl, hasNativeSpanish: true, track };
+      } catch {
+        /* silenciar — igual que el catch vacío del original */
+      }
+    }
+    return { finalUrl: dashUrlBase, hasNativeSpanish: false, track: null };
+  }
+
+  // ── Monitor de stall a mitad de reproducción (solo DASH/Shaka) ───────────
+  let stallTimer: ReturnType<typeof setInterval> | null = null;
+  let stallLastTime = 0;
+  let stallStuckSince = 0;
+  let stallRecoveries = 0;
+  let stallRecovering = false;
+  let currentDashUrl: string | null = null;
+
+  function clearStallMonitor() {
+    if (stallTimer) {
+      clearInterval(stallTimer);
+      stallTimer = null;
+    }
+    stallStuckSince = 0;
+    stallRecoveries = 0;
+    stallRecovering = false;
+    currentDashUrl = null;
+  }
+
+  async function recoverDashStall(video: HTMLVideoElement, myGen: number) {
+    if (stallRecovering || !currentDashUrl) return;
+    if (playerStore.isStale(myGen)) {
+      clearStallMonitor();
+      return;
+    }
+    stallRecovering = true;
+    stallRecoveries += 1;
+    // Demasiadas recuperaciones seguidas sin lograr avanzar → rendirse y cambiar de fuente.
+    if (stallRecoveries > MAX_STALL_RECOVERIES) {
+      clearStallMonitor();
+      opts.onToast('⚠️ La reproducción se interrumpió — cambiando de reproductor');
+      opts.onFallbackToNextSource();
+      return;
+    }
+    const pos = video.currentTime;
+    opts.onToast('🔄 Reconectando con el servidor...');
+    try {
+      // Recargar el MISMO DASH desde la posición actual → reabre la sesión de
+      // streaming de RD (segmentos frescos). _shakaLoad destruye y recrea Shaka.
+      await _shakaLoad(video, currentDashUrl, pos > 3 ? pos : undefined);
+      video.play().catch(() => {});
+      stallLastTime = video.currentTime;
+      stallStuckSince = 0;
+    } catch (e) {
+      console.warn('[STALL] Falló la recuperación DASH:', e);
+      clearStallMonitor();
+      if (playerStore.isStale(myGen)) return;
+      opts.onToast('⚠️ No se pudo reanudar — cambiando de reproductor');
+      opts.onFallbackToNextSource();
+      return;
+    } finally {
+      stallRecovering = false;
+    }
+  }
+
+  function startStallMonitor(video: HTMLVideoElement, url: string, myGen: number) {
+    clearStallMonitor();
+    currentDashUrl = url;
+    stallLastTime = video.currentTime;
+    stallTimer = setInterval(() => {
+      if (playerStore.isStale(myGen)) {
+        clearStallMonitor();
+        return;
+      }
+      // No interferir durante recuperación, cambio de audio, pausa, seek o fin
+      // (una pausa normal NO debe disparar recuperación).
+      if (stallRecovering || switchingAudio || video.paused || video.seeking || video.ended) {
+        stallLastTime = video.currentTime;
+        stallStuckSince = 0;
+        return;
+      }
+      const t = video.currentTime;
+      if (t > stallLastTime + 0.1) {
+        // Avanza con normalidad → resetear contadores.
+        stallLastTime = t;
+        stallStuckSince = 0;
+        stallRecoveries = 0;
+        return;
+      }
+      // En play pero sin avanzar → cronometrar cuánto lleva trabado.
+      if (stallStuckSince === 0) {
+        stallStuckSince = Date.now();
+        return;
+      }
+      if (Date.now() - stallStuckSince >= STALL_RECOVER_MS) {
+        void recoverDashStall(video, myGen);
+      }
+    }, STALL_CHECK_INTERVAL_MS);
+  }
+
+  // ── Carga DASH vía Shaka (líneas ~7966-8023) ────────────────────────────
+  async function loadDashViaShaka(params: {
+    video: HTMLVideoElement;
+    url: string;
+    isBadAudio: boolean;
+    hasNativeSpanish: boolean;
+    spanishTrackName: string | null;
+    myGen: number;
+  }) {
+    const { video, url, isBadAudio, hasNativeSpanish, spanishTrackName, myGen } = params;
+    let started = false;
+    scheduleLoadingMessages(isBadAudio, () => started);
+
+    const onPlaying = () => {
+      if (started) return;
+      if (video.currentTime > PLAYBACK_STARTED_THRESHOLD_SEC) {
+        started = true;
+        clearMsgTimers();
+        video.removeEventListener('timeupdate', onPlaying);
+        opts.onStarted();
+      }
+    };
+    video.addEventListener('timeupdate', onPlaying);
+
+    const watchdog = setTimeout(() => {
+      if (!started) {
+        clearMsgTimers();
+        video.removeEventListener('timeupdate', onPlaying);
+        _shakaDestroy();
+        if (playerStore.isStale(myGen)) return;
+        opts.onToast('⚡ RD DASH tardó demasiado — cambiando de reproductor');
+        opts.onFallbackToNextSource();
+      }
+    }, SHAKA_WATCHDOG_MS);
+    const clearWatchdogIfStarted = () => {
+      if (started) clearTimeout(watchdog);
+    };
+    video.addEventListener('timeupdate', clearWatchdogIfStarted);
+
+    await loadShakaIfNeeded();
+    try {
+      await _shakaLoad(video, url);
+      if (hasNativeSpanish) opts.onNativeSpanishDetected?.();
+      spanishTrack.value = spanishTrackName;
+      activeTrack.value = spanishTrackName ?? 'eng1';
+      video.play().catch(() => {});
+      // Vigilar stalls a mitad de reproducción (pausa larga → URL RD caducada).
+      startStallMonitor(video, url, myGen);
+    } catch (e) {
+      console.warn('[SHAKA] Error DASH:', e);
+      clearMsgTimers();
+      clearTimeout(watchdog);
+      video.removeEventListener('timeupdate', onPlaying);
+      video.removeEventListener('timeupdate', clearWatchdogIfStarted);
+      _shakaDestroy();
+      if (playerStore.isStale(myGen)) return;
+      opts.onToast('⚡ DASH falló — cambiando de reproductor');
+      opts.onFallbackToNextSource();
+    }
+  }
+
+  // ── Carga HLS vía hls.js (líneas ~8024-8134) ────────────────────────────
+  async function loadHlsTranscoded(params: {
+    video: HTMLVideoElement;
+    url: string;
+    isBadAudio: boolean;
+    streamFilename: string | null;
+    myGen: number;
+  }) {
+    const { video, url, isBadAudio, myGen } = params;
+    const w = window as unknown as {
+      hlsInstance?: { destroy(): void } | null;
+      Hls?: new (cfg: unknown) => HlsInstanceLike;
+    };
+    interface HlsInstanceLike {
+      loadSource(u: string): void;
+      attachMedia(v: HTMLVideoElement): void;
+      destroy(): void;
+      startLoad(): void;
+      on(ev: string, cb: (...args: unknown[]) => void): void;
+    }
+
+    if (w.hlsInstance) {
+      w.hlsInstance.destroy();
+      w.hlsInstance = null;
+    }
+
+    await loadHlsIfNeeded();
+    const HlsCtor = (window as unknown as { Hls?: { new (cfg: unknown): HlsInstanceLike; isSupported(): boolean; Events: Record<string, string>; ErrorTypes: Record<string, string> } }).Hls;
+
+    if (HlsCtor && HlsCtor.isSupported()) {
+      const hls = new HlsCtor(HLS_CONFIG);
+      w.hlsInstance = hls;
+      hls.loadSource(url);
+      hls.attachMedia(video);
+
+      let started = false;
+      scheduleLoadingMessages(isBadAudio, () => started);
+
+      const onReallyPlaying = () => {
+        if (started) return;
+        if (video.currentTime > PLAYBACK_STARTED_THRESHOLD_SEC) {
+          started = true;
+          clearMsgTimers();
+          video.removeEventListener('timeupdate', onReallyPlaying);
+          opts.onStarted();
+        }
+      };
+      video.addEventListener('timeupdate', onReallyPlaying);
+
+      const watchdog = setTimeout(() => {
+        if (!started) {
+          clearMsgTimers();
+          video.removeEventListener('timeupdate', onReallyPlaying);
+          if (w.hlsInstance) {
+            w.hlsInstance.destroy();
+            w.hlsInstance = null;
+          }
+          if (playerStore.isStale(myGen)) return;
+          opts.onToast('⚡ RD tardó demasiado — cambiando de reproductor');
+          opts.onFallbackToNextSource();
+        }
+      }, HLS_WATCHDOG_MS);
+      const clearWatchdogIfStarted = () => {
+        if (started) clearTimeout(watchdog);
+      };
+      video.addEventListener('timeupdate', clearWatchdogIfStarted);
+
+      hls.on(HlsCtor.Events.MANIFEST_PARSED, () => {
+        video.play().catch(() => {});
+      });
+
+      hls.on(HlsCtor.Events.ERROR, (...args: unknown[]) => {
+        const data = args[1] as { fatal?: boolean; type?: string } | undefined;
+        if (data?.fatal) {
+          if (data.type === HlsCtor.ErrorTypes.NETWORK_ERROR && !started) {
+            console.warn('[RD] HLS network error durante transcode, reintentando...');
+            try {
+              hls.startLoad();
+            } catch {
+              /* silenciar */
+            }
+            return;
+          }
+          clearMsgTimers();
+          clearTimeout(watchdog);
+          hls.destroy();
+          w.hlsInstance = null;
+          if (playerStore.isStale(myGen)) return;
+          opts.onToast('⚡ RD: error HLS — cambiando de reproductor');
+          opts.onFallbackToNextSource();
+        }
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = url;
+      video.addEventListener(
+        'loadedmetadata',
+        () => {
+          video.play().catch(() => {});
+          opts.onStarted();
+        },
+        { once: true }
+      );
+    } else {
+      opts.onToast('⚡ RD: HLS no soportado — cambiando de reproductor');
+      opts.onFallbackToNextSource();
+    }
+  }
+
+  // ── Plan B: x265 sin transcode → alternativa H.264 (líneas ~8135-8156) ──
+  function loadX265FallbackDirect(video: HTMLVideoElement, fallbackUrl: string) {
+    opts.onToast('🔄 x265 sin transcode — probando alternativa H.264...');
+    video.src = fallbackUrl;
+    video.load();
+    const tmo = setTimeout(() => {
+      if (video.readyState < 2) {
+        video.src = '';
+        opts.onToast('⚡ RD: sin compatible — cambiando de reproductor');
+        opts.onFallbackToNextSource();
+      }
+    }, 12000);
+    video.addEventListener(
+      'loadedmetadata',
+      () => {
+        clearTimeout(tmo);
+        if (video.duration && isFinite(video.duration) && video.duration <= MIN_VALID_DURATION_SEC) {
+          video.src = '';
+          opts.onFallbackToNextSource();
+          return;
+        }
+        video.play().catch(() => {});
+        opts.onStarted();
+      },
+      { once: true }
+    );
+    video.addEventListener(
+      'error',
+      () => {
+        clearTimeout(tmo);
+        video.src = '';
+        opts.onFallbackToNextSource();
+      },
+      { once: true }
+    );
+  }
+
+  // ── Sin transcode disponible → play directo (líneas ~8157-8178) ─────────
+  function loadDirectPlay(video: HTMLVideoElement, streamUrl: string) {
+    video.src = streamUrl;
+    video.load();
+    const tmo = setTimeout(() => {
+      if (video.readyState < 2) {
+        video.src = '';
+        opts.onToast('⚡ RD: no compatible — cambiando de reproductor');
+        opts.onFallbackToNextSource();
+      }
+    }, 10000);
+    video.addEventListener(
+      'loadedmetadata',
+      () => {
+        clearTimeout(tmo);
+        if (video.duration && isFinite(video.duration) && video.duration <= MIN_VALID_DURATION_SEC) {
+          video.src = '';
+          opts.onFallbackToNextSource();
+          return;
+        }
+        video.play().catch(() => {});
+        opts.onStarted();
+      },
+      { once: true }
+    );
+    video.addEventListener(
+      'error',
+      () => {
+        clearTimeout(tmo);
+        video.src = '';
+        opts.onFallbackToNextSource();
+      },
+      { once: true }
+    );
+  }
+
+  // ── Punto de entrada — equivalente al bloque RD completo (líneas ~7824-8186) ──
+  async function loadRdSource(params: {
+    id: string | number;
+    type: 'movie' | 'tv';
+    season?: number;
+    episode?: number;
+  }) {
+    const video = opts.videoRef.value;
+    if (!video) return;
+
+    clearStallMonitor(); // cortar cualquier monitor DASH de una reproducción anterior
+    cleanupServerTorrent(); // borrar en RD el torrent del título anterior (ADR-006)
+    const myGen = playerStore.generation; // capturado ANTES del fetch — equiv. `const myGen = ++_playerGen`
+    isLoadingRd.value = true;
+    loadingMessage.value = '🔍 Buscando en Real-Debrid...';
+
+    let selected: SelectedStream;
+    try {
+      selected = await opts.rdStreamResolver.getStream(params.id, params.type, params.season, params.episode);
+    } catch {
+      if (playerStore.isStale(myGen)) return;
+      clearMsgTimers();
+      opts.onToast('⚡ Error con RD — cambiando de reproductor');
+      opts.onFallbackToNextSource();
+      return;
+    }
+
+    if (playerStore.isStale(myGen)) return; // usuario cambió de fuente — ignorar este resultado (línea ~7827)
+    clearMsgTimers();
+
+    const { url: streamUrl, rdId, isX265: streamIsX265, fallbackUrl, streamFilename: streamFn } = selected;
+
+    // ── Resolución SERVER-SIDE (ADR-004): contenido NO cacheado resuelto por la
+    //    Netlify Function `rd-stream` → reproducir su DASH/HLS/liveMP4 directo, sin
+    //    pasar por el proxy de Torrentio (Range OK, token fuera del cliente). Solo
+    //    aplica cuando `rdId` es null y la function devolvió una URL lista. El camino
+    //    cacheado (`rdId` presente) NO entra aquí → intacto.
+    const serverUrl =
+      selected.serverDashUrl || selected.serverHlsUrl || selected.serverLiveMp4Url || selected.serverDirectUrl;
+    if (serverUrl) {
+      // Recordar el torrent creado por rd-stream para borrarlo al cerrar/cambiar (ADR-006).
+      currentServerTorrentId = selected.serverTorrentId ?? null;
+      opts.onToast('🔄 Optimizando video para tu navegador...');
+      opts.onStreamReady?.({ selected, hasNativeSpanish: false, spanishTrack: null });
+      if (selected.serverDashUrl) {
+        // DASH → Shaka (multi-audio + Range). Habilita el panel de cambio de audio.
+        dashBaseUrl.value = buildDashBaseUrl(selected.serverDashUrl);
+        await loadDashViaShaka({
+          video,
+          url: selected.serverDashUrl,
+          isBadAudio: false,
+          hasNativeSpanish: false,
+          spanishTrackName: null,
+          myGen,
+        });
+      } else if (selected.serverHlsUrl) {
+        await loadHlsTranscoded({ video, url: selected.serverHlsUrl, isBadAudio: false, streamFilename: streamFn, myGen });
+      } else {
+        loadDirectPlay(video, serverUrl);
+      }
+      isLoadingRd.value = false;
+      return;
+    }
+
+    if (!streamUrl) {
+      opts.onToast('⚡ Sin resultados en RD — cambiando de reproductor');
+      opts.onFallbackToNextSource();
+      return;
+    }
+
+    // ── Toast informativo "no cacheado" (líneas ~4899-4900 dentro de `rdGetStream`) ──
+    // El original lo dispara DESDE `rdGetStream` mismo, antes de retornar — tras
+    // agotar la Ronda 3 sin encontrar alternativa reproducible. Es solo informativo:
+    // el playback CONTINÚA con `rdId=null` hacia la cascada HEVC/transcode/"bloqueada"
+    // (NO cambia de fuente aquí). `selected.unavailableInRd` propaga esa señal desde
+    // `resolveActiveStream` (función pura, sin acceso a `showToast`) hasta acá.
+    if (selected.unavailableInRd) {
+      opts.onToast('⚠️ No disponible en RD — cambiando de reproductor');
+    }
+
+    // ── Toast x265 (línea ~7860) ──
+    if (streamIsX265) opts.onToast('🔄 Optimizando video para tu navegador...');
+
+    // ── Detección HEVC nativa + cascada de audio incompatible (líneas ~7864-7877) ──
+    const hevcOk = detectHevcSupport(getMediaSource());
+    const { hasBadAudio } = checkBadAudioForDirectPlay(streamFn, !!rdId);
+
+    if (hevcOk && !hasBadAudio) {
+      const played = await tryHevcDirectPlay(video, streamUrl);
+      if (played) {
+        const hasSpaDirect = isDualLatFilename(streamFn);
+        opts.onStreamReady?.({ selected, hasNativeSpanish: hasSpaDirect, spanishTrack: null });
+        isLoadingRd.value = false;
+        return;
+      }
+      // HEVC directo falló → si no hay rdId, contenido bloqueado/no disponible (líneas ~7905-7911)
+      if (!rdId) {
+        loadingMessage.value =
+          '🚫 Película bloqueada o no disponible en RD — cambiando al reproductor alternativo en 4 segundos...';
+        await new Promise((r) => setTimeout(r, BLOCKED_MESSAGE_WAIT_MS));
+        if (playerStore.isStale(myGen)) return;
+      }
+      // continúa al transcode
+    }
+
+    // ── Transcode vía RD API + probe de audio español (líneas ~7915-7964) ──
+    let hlsUrl: string | null = null;
+    let hasNativeSpanish = false;
+    let detectedSpanishTrack: string | null = null;
+    dashBaseUrl.value = null;
+    activeTrack.value = 'eng1';
+    spanishTrack.value = null;
+
+    if (rdId) {
+      try {
+        const tcData = await opts.rdClient.fetchTranscode(rdId);
+        const dashUrlBase = pickDashUrlFromTranscode(tcData);
+        const hlsFallback = pickHlsFallbackFromTranscode(tcData as Parameters<typeof pickHlsFallbackFromTranscode>[0]);
+
+        let finalDashUrl = dashUrlBase;
+        const isDualLat = isDualLatFilename(streamFn);
+
+        if (dashUrlBase && isDualLat) {
+          const probe = await probeSpanishDashTrack(dashUrlBase, fetch);
+          finalDashUrl = probe.finalUrl;
+          hasNativeSpanish = probe.hasNativeSpanish;
+          detectedSpanishTrack = probe.track;
+        }
+
+        if (dashUrlBase) dashBaseUrl.value = buildDashBaseUrl(dashUrlBase);
+
+        hlsUrl = finalDashUrl || hlsFallback;
+      } catch (e) {
+        hlsUrl = null;
+        console.log('[RD] Error transcode:', e);
+      }
+    }
+
+    if (hlsUrl) {
+      opts.onStreamReady?.({ selected, hasNativeSpanish, spanishTrack: detectedSpanishTrack });
+      if (isDashManifest(hlsUrl)) {
+        await loadDashViaShaka({
+          video,
+          url: hlsUrl,
+          isBadAudio: hasBadAudio,
+          hasNativeSpanish,
+          spanishTrackName: detectedSpanishTrack,
+          myGen,
+        });
+      } else {
+        await loadHlsTranscoded({ video, url: hlsUrl, isBadAudio: hasBadAudio, streamFilename: streamFn, myGen });
+      }
+    } else if (streamIsX265 && fallbackUrl) {
+      loadX265FallbackDirect(video, fallbackUrl);
+    } else {
+      loadDirectPlay(video, streamUrl);
+    }
+
+    isLoadingRd.value = false;
+  }
+
+  // ── Switching de pista de audio en el panel de ajustes ───────────────────
+  // Preserva `spSwitchAudio` COMPLETO (líneas ~4324-4426): mutex anti-doble-click,
+  // toasts de progreso, overlay de carga con mensajes escalonados, watchdog de
+  // 90s que revierte a la pista anterior si el transcode en frío no arranca, y
+  // re-enganche de subtítulos según el idioma resultante (delegado al llamador
+  // vía `onAudioTrackChanged`, que conoce `subtitles`/`streamImdbId`).
+  let switchingAudio = false; // equivalente a `_switchingAudio` (línea ~4324)
+
+  function buildAudioSwitchTimeline(): [number, string][] {
+    // Preserva `_msgs` EXACTO (líneas ~4356-4361) — distinto del timeline de
+    // `buildLoadingMessageTimeline` (ese es para la carga inicial del stream).
+    return [
+      [3000, '⏳ El servidor está preparando el audio...'],
+      [10000, '🎬 Transcodificando audio (puede tardar)...'],
+      [25000, '⚙️ Aún procesando, casi listo...'],
+      [50000, '⏱️ Transcode en frío — un poco más...'],
+    ];
+  }
+
+  async function switchAudioTrack(track: string) {
+    const video = opts.videoRef.value;
+    if (!video || !dashBaseUrl.value || track === activeTrack.value) return;
+    if (switchingAudio) {
+      opts.onToast('⏳ Espera, cambiando audio...');
+      return;
+    }
+    switchingAudio = true;
+
+    const candidateUrl = dashBaseUrl.value + track + '/none/aac/full.mpd';
+    const startTime = video.currentTime;
+    const isEng = track === 'eng1';
+    const prevTrack = (isEng ? spanishTrack.value : 'eng1') ?? 'eng1';
+
+    activeTrack.value = track;
+    opts.onToast(isEng ? '🇬🇧 Cambiando a inglés...' : '🇪🇸 Cambiando a español...');
+
+    // Overlay de carga — preserva líneas ~4347-4350
+    loadingMessage.value = isEng ? '🇬🇧 Cargando audio en inglés...' : '🇪🇸 Cargando audio en español...';
+    opts.onAudioSwitchStart?.();
+
+    let started = false;
+    const timers = buildAudioSwitchTimeline().map(([delay, msg]) =>
+      setTimeout(() => {
+        if (!started) loadingMessage.value = msg;
+      }, delay)
+    );
+    const clearAudioTimers = () => timers.forEach(clearTimeout);
+
+    // Detectar reproducción real — preserva `_onAdvance` (líneas ~4366-4374)
+    const onAdvance = () => {
+      if (video.currentTime > 0.15 && !video.paused) {
+        started = true;
+        clearAudioTimers();
+        opts.onAudioSwitchEnd?.();
+        video.removeEventListener('timeupdate', onAdvance);
+        clearTimeout(failWatchdog);
+      }
+    };
+    const tryPlay = () => video.play().catch(() => {});
+
+    // Watchdog de fallo: si tras 90s no arrancó → revertir — preserva líneas ~4378-4388
+    const failWatchdog = setTimeout(() => {
+      if (!started) {
+        clearAudioTimers();
+        video.removeEventListener('timeupdate', onAdvance);
+        opts.onAudioSwitchEnd?.();
+        opts.onToast('⚠️ El audio tardó demasiado — volviendo al anterior');
+        switchingAudio = false;
+        activeTrack.value = prevTrack;
+        void switchAudioTrack(track === 'eng1' ? prevTrack : 'eng1'); // revertir
+      }
+    }, AUDIO_SWITCH_WATCHDOG_MS);
+
+    try {
+      // Cargar desde el inicio (RD lo tiene listo); luego saltar a la posición —
+      // preserva el comentario y el flujo de líneas ~4391-4404
+      await _shakaLoad(video, candidateUrl);
+      // Si el monitor de stall está activo, que recargue ESTA pista si hay que recuperar.
+      if (stallTimer) currentDashUrl = candidateUrl;
+      if (startTime > 3) {
+        const seekWhenReady = () => {
+          try {
+            video.currentTime = startTime;
+          } catch {
+            /* silenciar — preserva el `catch(e){}` vacío de la línea ~4397 */
+          }
+          video.removeEventListener('loadeddata', seekWhenReady);
+        };
+        video.addEventListener('loadeddata', seekWhenReady);
+      }
+      video.addEventListener('timeupdate', onAdvance);
+      video.addEventListener('canplay', tryPlay);
+      tryPlay();
+
+      opts.onAudioTrackChanged?.(isEng);
+      opts.onToast(isEng ? '🇬🇧 Audio en inglés' : '🇪🇸 Audio en español');
+    } catch (e) {
+      console.warn('[SHAKA] Error cambiando de pista de audio:', e);
+      clearAudioTimers();
+      clearTimeout(failWatchdog);
+      opts.onAudioSwitchEnd?.();
+      opts.onToast('⚠️ Error al cambiar audio — intenta de nuevo');
+      activeTrack.value = prevTrack;
+    } finally {
+      switchingAudio = false;
+    }
+  }
+
+  function destroy() {
+    clearMsgTimers();
+    clearStallMonitor();
+    cleanupServerTorrent(); // borrar en RD el torrent activo al cerrar (ADR-006)
+    _shakaDestroy();
+    const w = window as unknown as { hlsInstance?: { destroy(): void } | null };
+    if (w.hlsInstance) {
+      w.hlsInstance.destroy();
+      w.hlsInstance = null;
+    }
+  }
+
+  return {
+    loadingMessage,
+    isLoadingRd,
+    dashBaseUrl,
+    activeTrack,
+    spanishTrack,
+    loadRdSource,
+    switchAudioTrack,
+    destroy,
+  };
+}

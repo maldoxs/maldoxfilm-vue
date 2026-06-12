@@ -1,0 +1,22 @@
+# netlify.toml — configuración de build + functions + dev server.
+#
+# Para probar Real-Debrid en LOCAL hay que usar `netlify dev` (NO `npm run dev`),
+# porque solo `netlify dev`:
+#   1) levanta las Netlify Functions (sirve /.netlify/functions/rd-token), y
+#   2) inyecta las variables del archivo `.env` (RD_TOKEN) en esas functions.
+# `netlify dev` detecta Vite (framework), lo arranca UNA vez en targetPort 5173,
+# y lo proxea en el puerto 8888 sirviendo además las functions en el mismo
+# origen — así `fetch('/.netlify/functions/rd-token')` resuelve y RD se activa.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+# OJO: no se define `command` aquí — `netlify dev` autodetecta Vite y lo arranca
+# solo. Definir `command = "npm run dev"` ADEMÁS hacía que Vite arrancara DOS
+# veces en el 5173 → "Port 5173 is already in use".
+[dev]
+  framework = "vite"
+  targetPort = 5173
+  port = 8888
