@@ -86,12 +86,6 @@ const skeletons = (n: number) => Array.from({ length: n }, (_, i) => i);
 /* Preservados de `.section`/`.carousel-wrapper`/`.carousel`/`.carousel-arrow` (líneas ~494-513, ~2368-2429) */
 .section {
   margin: 28px 0;
-  /* PERF/MEMORIA (preserva índex.html ~líneas de `.section`): el navegador NO
-     renderiza las secciones fuera de viewport hasta que se acercan — clave para
-     que TV/móvil (poca RAM) no se "peguen" en el Inicio con muchos carruseles e
-     imágenes. `contain-intrinsic-size` reserva el alto estimado para no romper el scroll. */
-  content-visibility: auto;
-  contain-intrinsic-size: 0 400px;
 }
 .section-header {
   display: flex;

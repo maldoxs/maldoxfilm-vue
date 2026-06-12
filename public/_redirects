@@ -1,0 +1,6 @@
+# SPA fallback — el router usa history mode (createWebHistory). Sin esto, entrar
+# directo a una ruta (/peliculas, /ver/movie/123) o volver atrás da 404 en Netlify,
+# porque no existe ese archivo en el server. Esta regla sirve index.html (200) para
+# CUALQUIER ruta que no sea un archivo/function real, y el router de Vue resuelve.
+# Las Netlify Functions (/.netlify/functions/*) se resuelven ANTES que esta regla.
+/*    /index.html   200

@@ -148,9 +148,6 @@ function clearHistory() {
 /* Preservados de `#continueSection`/`.continue-*` (índex.html líneas ~583-616). */
 .continue-section {
   margin-bottom: 8px;
-  /* PERF/MEMORIA — no renderizar fuera de viewport (ver nota en Carousel.vue). */
-  content-visibility: auto;
-  contain-intrinsic-size: 0 360px;
 }
 .section-header {
   display: flex;

@@ -90,9 +90,6 @@ function onSelect(item: MediaItem) {
    con la numeración re-estilizada a "estilo Netflix" (oscura con contorno gris). */
 .top-section {
   padding: 0 52px 40px;
-  /* PERF/MEMORIA — no renderizar fuera de viewport (ver nota en Carousel.vue). */
-  content-visibility: auto;
-  contain-intrinsic-size: 0 420px;
 }
 .top-section-header {
   display: flex;
