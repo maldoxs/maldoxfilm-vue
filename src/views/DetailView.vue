@@ -630,8 +630,7 @@ onBeforeUnmount(() => {
   font-size: 0.9rem;
   cursor: pointer;
   transition: all var(--trans, 0.2s);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
 }
 .dp-play-btn:hover {
   background: var(--accent2, #5b73ff);

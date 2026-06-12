@@ -204,8 +204,7 @@ function goToDetail() {
   font-size: 0.88rem;
   cursor: pointer;
   transition: all var(--trans, 0.25s ease);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
 }
 .btn-play:hover {
   background: var(--accent2, #2a46e0);
