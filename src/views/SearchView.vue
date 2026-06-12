@@ -94,13 +94,20 @@ function onTypeSearch(q: string) {
 function onClearSearch() {
   if (props.query) router.replace({ path: '/buscar' });
 }
+
+// En TV cuesta acertarle al input finito con el puntero; hacer clic en CUALQUIER
+// parte de la barra enfoca el input (abre el teclado de la TV).
+const tvSearchBarRef = ref<HTMLElement | null>(null);
+function focusSearchInput() {
+  tvSearchBarRef.value?.querySelector('input')?.focus();
+}
 </script>
 
 <template>
   <div class="search-results-page">
     <!-- Barra de búsqueda TV (input) — replica `.tv-search-bar` del original.
          En desktop la búsqueda se tipea desde el nav, así que aquí solo se muestra en TV. -->
-    <div v-if="deviceStore.isTV" class="tv-search-bar">
+    <div v-if="deviceStore.isTV" ref="tvSearchBarRef" class="tv-search-bar" @click="focusSearchInput">
       <SearchBar
         :model-value="props.query"
         placeholder="Buscar películas, series, canales..."
@@ -152,20 +159,23 @@ function onClearSearch() {
   align-items: center;
   margin: -24px -40px 22px;
   padding: 0 24px;
-  height: 58px;
+  height: 66px;
   background: rgba(14, 14, 14, 0.98);
   border-bottom: 1px solid rgba(61, 90, 254, 0.2);
+  cursor: text; /* indica que toda la barra enfoca el input */
 }
 .tv-search-bar :deep(.search-bar) {
   width: 100%;
+  height: 100%;
 }
 .tv-search-bar :deep(.search-input) {
   background: none;
   border: none;
   border-radius: 0;
-  font-size: 1.05rem;
+  height: 100%; /* el input ocupa todo el alto → click target grande y fácil en TV */
+  font-size: 1.1rem;
   font-weight: 400;
-  padding: 10px 14px 10px 42px;
+  padding: 0 14px 0 44px;
   caret-color: var(--accent, #3d5afe);
 }
 .tv-search-bar :deep(.search-input):focus {

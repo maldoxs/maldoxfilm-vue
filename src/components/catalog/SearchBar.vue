@@ -75,6 +75,9 @@ function onEnter() {
   if (trimmed) emit('search', trimmed);
   else emit('clear');
   emit('submit', trimmed); // el overlay de búsqueda se cierra en este momento (como el original)
+  // Desenfocar el input cierra el teclado en pantalla de TV (LG/webOS, Android TV)
+  // al confirmar con Enter — preserva el `closeTvSearchBar()` del original.
+  inputRef.value?.blur();
 }
 
 onBeforeUnmount(clearTimer);
