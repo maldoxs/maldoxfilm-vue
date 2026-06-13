@@ -81,7 +81,8 @@ export interface RdStreamResolver {
     tmdbId: string | number,
     type: 'movie' | 'tv',
     season?: number,
-    episode?: number
+    episode?: number,
+    isTv?: boolean
   ): Promise<SelectedStream>;
 }
 
@@ -119,7 +120,8 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
     tmdbId: string | number,
     type: 'movie' | 'tv',
     season?: number,
-    episode?: number
+    episode?: number,
+    isTv = false
   ): Promise<SelectedStream> {
     // Guard inicial — línea ~4709: `if(!RD_TOKEN) return {url:null, rdId:null};`
     if (!rdToken) return emptySelectedStream();
@@ -155,7 +157,9 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
       );
 
       // ── Selección + scoring (líneas ~4731-4809) — función pura ya testeada ──
-      const selection = selectBestStream(streams);
+      // `isTv` ajusta el scoring para preferir H264 1080p en TV (evita HEVC/4K que
+      // el navegador de la smart-TV no renderiza → audio sin imagen).
+      const selection = selectBestStream(streams, isTv);
       if (!selection.best || !selection.best.url) return emptySelectedStream();
 
       const { best, withUrl, scored, pool, streamFilename, infoHash } = selection;

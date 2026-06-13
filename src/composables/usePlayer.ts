@@ -216,6 +216,12 @@ export interface UsePlayerOptions {
   rdStreamResolver: RdStreamResolver;
   /** Cliente RD — se usa para `fetchTranscode` (probing DASH/HLS). */
   rdClient: RealDebridClient;
+  /**
+   * ¿Estamos en modo TV? En TV se prefiere H264 1080p (el scoring penaliza HEVC/4K)
+   * y se trata HEVC como NO soportado (el navegador de la smart-TV no renderiza el
+   * video HEVC por MSE → audio sin imagen). Default false (escritorio/móvil).
+   */
+  isTv?: () => boolean;
   /** Callback: ocultar overlay de carga + arrancar tracking de progreso (equiv. `hideLoadingAndStart`). */
   onStarted: () => void;
   /** Callback: mostrar un toast (equiv. `showToast`). */
@@ -829,9 +835,10 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     isLoadingRd.value = true;
     loadingMessage.value = '🔍 Buscando en Real-Debrid...';
 
+    const isTvNow = opts.isTv?.() ?? false;
     let selected: SelectedStream;
     try {
-      selected = await opts.rdStreamResolver.getStream(params.id, params.type, params.season, params.episode);
+      selected = await opts.rdStreamResolver.getStream(params.id, params.type, params.season, params.episode, isTvNow);
     } catch {
       if (playerStore.isStale(myGen)) return;
       clearMsgTimers();
@@ -897,7 +904,10 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     if (streamIsX265) opts.onToast('🔄 Optimizando video para tu navegador...');
 
     // ── Detección HEVC nativa + cascada de audio incompatible (líneas ~7864-7877) ──
-    const hevcOk = detectHevcSupport(getMediaSource());
+    // En TV forzamos hevcOk=false: el navegador de la smart-TV reporta soporte HEVC
+    // (`isTypeSupported` → true) pero NO renderiza el video por MSE (4K/10-bit) →
+    // audio sin imagen. Así el x265 va al transcode (H264) en vez del HEVC directo negro.
+    const hevcOk = !isTvNow && detectHevcSupport(getMediaSource());
     const { hasBadAudio } = checkBadAudioForDirectPlay(streamFn, !!rdId);
 
     if (hevcOk && !hasBadAudio) {

@@ -92,7 +92,7 @@ export function isJunkMatch(d: RDDownload): boolean {
  *   Tamaño:     ≤5GB +10 | ≤10GB +5 | >15GB -20
  *   RD:         +8
  */
-export function scoreStream(s: TorrentioStream): number {
+export function scoreStream(s: TorrentioStream, isTv = false): number {
   let pts = 0;
   // Archivo basura (sample/trailer/"length test") → descarte directo. Evita el
   // caso "Scary Movie" (se elegía un .mp4 de prueba en vez de la película).
@@ -103,12 +103,16 @@ export function scoreStream(s: TorrentioStream): number {
   else pts += 80; // ENG explícito o sin etiqueta
   // Video
   if (hasH264(s)) pts += 20;
-  if (isX265(s)) pts -= 5;
+  // x265/HEVC: en escritorio penaliza poco (-5); en TV penaliza FUERTE porque el
+  // navegador de la smart-TV (webOS) "dice" soportar HEVC pero NO renderiza el
+  // video por MSE (4K/10-bit) → audio sin imagen. Mejor preferir H264 reproducible.
+  if (isX265(s)) pts -= isTv ? 60 : 5;
   // Audio
   if (hasAAC(s)) pts += 15;
-  // Resolución
+  // Resolución — en TV el 4K (sobre todo HEVC/10-bit) queda en negro; se penaliza
+  // para preferir 1080p H264, que el navegador de la TV sí muestra.
   if (is1080(s)) pts += 10;
-  else if (is4k(s)) pts += 5;
+  else if (is4k(s)) pts += isTv ? -45 : 5;
   else if (is720(s)) pts += 3;
   // Tamaño
   const gb = getGb(s);
@@ -126,14 +130,17 @@ export function scoreStream(s: TorrentioStream): number {
  * lista completa con pts=0 (preserva el comportamiento original — siempre
  * intentar reproducir algo en vez de no reproducir nada).
  */
-export function rankStreams(streams: TorrentioStream[]): {
+export function rankStreams(
+  streams: TorrentioStream[],
+  isTv = false
+): {
   withUrl: TorrentioStream[];
   scored: ScoredStream[];
   pool: ScoredStream[];
 } {
   const withUrl = streams.filter((s) => !!s.url);
   const scored = withUrl
-    .map((s) => ({ s, pts: scoreStream(s) }))
+    .map((s) => ({ s, pts: scoreStream(s, isTv) }))
     .filter((x) => x.pts > -500)
     .sort((a, b) => b.pts - a.pts);
   const pool = scored.length ? scored : withUrl.map((s) => ({ s, pts: 0 }));
@@ -396,7 +403,10 @@ export function buildSelectedStream(params: {
  * Esta es la función que se debe testear con los casos reales documentados
  * (Padrino, Alien, Punisher).
  */
-export function selectBestStream(streams: TorrentioStream[]): {
+export function selectBestStream(
+  streams: TorrentioStream[],
+  isTv = false
+): {
   best: TorrentioStream | null;
   withUrl: TorrentioStream[];
   scored: ScoredStream[];
@@ -405,7 +415,7 @@ export function selectBestStream(streams: TorrentioStream[]): {
   streamFilename: string;
   infoHash: string;
 } {
-  const { withUrl, scored, pool } = rankStreams(streams);
+  const { withUrl, scored, pool } = rankStreams(streams, isTv);
   const best = pool[0]?.s || withUrl[0] || streams[0] || null;
 
   if (!best || !best.url) {
