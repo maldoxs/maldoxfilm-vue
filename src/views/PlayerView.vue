@@ -779,6 +779,20 @@ function persistProgressOnClose() {
 }
 
 function closePlayer() {
+  // ── TV: re-ocultar la BARRA DEL NAVEGADOR (webOS) al volver ──────────────────
+  // Síntoma: en la primera entrada el nav se ve perfecto (chrome del navegador
+  // oculto), pero tras reproducir y volver con "Volver" la barra del navegador
+  // reaparece y tapa el nav fijo. Este clic en "Volver" es un GESTO del usuario,
+  // así que podemos pedir fullscreen del documento → vuelve a ocultar el chrome.
+  // (En TV no hacemos `exitFullscreen` —ver useFullscreen—, así que esto no se
+  // deshace solo.) Fuera de TV no aplica.
+  if (deviceStore.isTV) {
+    try {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } catch {
+      /* silenciar */
+    }
+  }
   fullscreen.exit();
   persistProgressOnClose();
   stopProgressTracking();

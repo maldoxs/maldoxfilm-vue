@@ -21,6 +21,47 @@
 import { ref, shallowRef, type Ref } from 'vue';
 import type { TmdbClient } from '../services/tmdb';
 import type { MediaItem } from '../types';
+import { safeStorage } from '../services/safeStorage';
+
+/**
+ * Cache de listas TMDB (stale-while-revalidate). MOTIVO: al volver del reproductor
+ * `HomeView` se RE-MONTA y volvía a pedir TODOS los carruseles → mostraba las
+ * "tarjetas grises (skeleton) que se están cargando" cada vez. Con cache, una lista
+ * ya vista se pinta AL INSTANTE (sin `loading` → sin skeleton) y se revalida en
+ * segundo plano. El usuario pidió justamente esto ("antes persistían con localStorage").
+ *
+ * - `memCache`: vive durante la sesión SPA → cubre el caso clave (play → volver, sin
+ *   recargar la página).
+ * - `safeStorage` (localStorage con fallback a memoria, no lanza en TVs viejas): cubre
+ *   el arranque en frío entre sesiones, con un TTL para no servir datos muy viejos.
+ */
+const memCache = new Map<string, MediaItem[]>();
+const LS_PREFIX = 'tmdblist:';
+const LS_TTL_MS = 1000 * 60 * 60 * 6; // 6 h
+
+function readCache(endpoint: string): MediaItem[] | null {
+  const mem = memCache.get(endpoint);
+  if (mem) return mem;
+  try {
+    const raw = safeStorage.getItem(LS_PREFIX + endpoint);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { t: number; d: MediaItem[] };
+    if (!parsed || Date.now() - parsed.t > LS_TTL_MS || !Array.isArray(parsed.d)) return null;
+    memCache.set(endpoint, parsed.d);
+    return parsed.d;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(endpoint: string, data: MediaItem[]): void {
+  memCache.set(endpoint, data);
+  try {
+    safeStorage.setItem(LS_PREFIX + endpoint, JSON.stringify({ t: Date.now(), d: data }));
+  } catch {
+    /* silenciar — cuota/serialización; el memCache ya quedó */
+  }
+}
 
 export interface UseTmdbListReturn {
   items: Ref<MediaItem[]>;
@@ -39,12 +80,35 @@ export function useTmdbList(tmdbClient: TmdbClient): UseTmdbListReturn {
 
   async function load(endpoint: string): Promise<void> {
     const myGen = ++generation;
-    loading.value = true;
     error.value = null;
+
+    // Cache hit → pintar al instante SIN skeleton, y revalidar en 2º plano (SWR).
+    const cached = readCache(endpoint);
+    if (cached) {
+      items.value = cached;
+      loading.value = false;
+      try {
+        const fresh = await tmdbClient.get<{ results?: MediaItem[] }>(endpoint);
+        if (myGen !== generation) return;
+        const results = Array.isArray(fresh?.results) ? fresh.results : [];
+        if (results.length) {
+          items.value = results;
+          writeCache(endpoint, results);
+        }
+      } catch {
+        /* mantener lo cacheado — sin skeleton, sin error visible */
+      }
+      return;
+    }
+
+    // Sin cache (primera vez) → skeleton mientras llega la respuesta.
+    loading.value = true;
     try {
       const data = await tmdbClient.get<{ results?: MediaItem[] }>(endpoint);
       if (myGen !== generation) return; // respuesta obsoleta — el usuario ya pidió otra cosa
-      items.value = Array.isArray(data?.results) ? data.results : [];
+      const results = Array.isArray(data?.results) ? data.results : [];
+      items.value = results;
+      if (results.length) writeCache(endpoint, results);
     } catch (e) {
       if (myGen !== generation) return;
       error.value = e instanceof Error ? e.message : 'Error desconocido';
