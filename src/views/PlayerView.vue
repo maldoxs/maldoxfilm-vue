@@ -779,20 +779,6 @@ function persistProgressOnClose() {
 }
 
 function closePlayer() {
-  // ── TV: re-ocultar la BARRA DEL NAVEGADOR (webOS) al volver ──────────────────
-  // Síntoma: en la primera entrada el nav se ve perfecto (chrome del navegador
-  // oculto), pero tras reproducir y volver con "Volver" la barra del navegador
-  // reaparece y tapa el nav fijo. Este clic en "Volver" es un GESTO del usuario,
-  // así que podemos pedir fullscreen del documento → vuelve a ocultar el chrome.
-  // (En TV no hacemos `exitFullscreen` —ver useFullscreen—, así que esto no se
-  // deshace solo.) Fuera de TV no aplica.
-  if (deviceStore.isTV) {
-    try {
-      document.documentElement.requestFullscreen?.().catch(() => {});
-    } catch {
-      /* silenciar */
-    }
-  }
   fullscreen.exit();
   persistProgressOnClose();
   stopProgressTracking();
@@ -808,6 +794,20 @@ function closePlayer() {
   playerStore.close();
   document.body.style.overflow = '';
   router.back();
+  // ── TV: ocultar la BARRA DEL NAVEGADOR (webOS) al volver, SIN Fullscreen API ──
+  // El Fullscreen API ocultaba la barra pero ROMPE el `position:fixed` del nav en
+  // webOS (deja de pegarse al scrollear) — bug conocido de webkit con `:fullscreen`.
+  // En Home el nav queda fijo y la barra se oculta sola al hacer scroll; replicamos
+  // ese gesto con un micro-scroll tras volver, manteniendo el nav fijo.
+  if (deviceStore.isTV) {
+    setTimeout(() => {
+      try {
+        window.scrollTo(0, 1);
+      } catch {
+        /* silenciar */
+      }
+    }, 180);
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
