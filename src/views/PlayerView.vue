@@ -871,6 +871,15 @@ onBeforeUnmount(() => {
   clearIframeMsgTimers();
   if (iframeAutoFallbackTimer) clearTimeout(iframeAutoFallbackTimer);
   if (controlsHideTimeout) clearTimeout(controlsHideTimeout);
+  // Vaciar el iframe (UnlimPlay/vidlink) → corta su audio al volver (igual que el
+  // <video> de RD, que se pausa en usePlayer.destroy()).
+  if (frameRef.value) {
+    try {
+      frameRef.value.src = 'about:blank';
+    } catch {
+      /* silenciar */
+    }
+  }
   document.body.style.overflow = '';
   playerStore.close();
 });

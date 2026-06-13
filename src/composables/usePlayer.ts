@@ -979,6 +979,19 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   }
 
   function destroy() {
+    // CRÍTICO: pausar y vaciar el <video>. Un <video> que quedó reproduciendo sigue
+    // sonando (audio) aunque se quite del DOM hasta hacer pause() explícito → era el
+    // "se escucha el sonido aunque volví al menú".
+    const v = opts.videoRef.value;
+    if (v) {
+      try {
+        v.pause();
+        v.removeAttribute('src');
+        v.load();
+      } catch {
+        /* silenciar */
+      }
+    }
     clearMsgTimers();
     clearStallMonitor();
     cleanupServerTorrent(); // borrar en RD el torrent activo al cerrar (ADR-006)
