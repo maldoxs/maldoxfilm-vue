@@ -63,6 +63,8 @@ const AUDIO_SWITCH_WATCHDOG_MS = 90000;
 // está en play y, si se traba, recarga el DASH actual desde la posición.
 const STALL_CHECK_INTERVAL_MS = 2000; // cada cuánto se revisa el avance
 const STALL_RECOVER_MS = 8000; // sin avanzar (en play) este tiempo → recuperar
+const STALL_RECOVER_SEEK_MS = 4500; // tras un seek (adelantar/retroceder), recuperar más rápido
+const SEEK_RECENT_WINDOW_MS = 20000; // ventana en la que un stall cuenta como "post-seek"
 const MAX_STALL_RECOVERIES = 3; // recuperaciones seguidas sin éxito → cambiar de fuente
 
 // ── Carga dinámica de hls.js / Shaka Player (líneas ~3884-3937) ─────────────
@@ -378,27 +380,105 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     return { finalUrl: dashUrlBase, hasNativeSpanish: false, track: null };
   }
 
-  // ── Monitor de stall a mitad de reproducción (solo DASH/Shaka) ───────────
+  // ── Monitor de stall a mitad de reproducción (TODOS los caminos: DASH/HLS/directo) ──
+  // Antes solo vigilaba DASH/Shaka; ahora es genérico (recibe una función de recuperación
+  // específica del camino) y reacciona MÁS RÁPIDO tras un seek (que es justo cuando algunas
+  // pelis se "pegaban" al adelantar/retroceder). Aplica igual en escritorio, TV y móvil.
   let stallTimer: ReturnType<typeof setInterval> | null = null;
   let stallLastTime = 0;
   let stallStuckSince = 0;
   let stallRecoveries = 0;
   let stallRecovering = false;
   let currentDashUrl: string | null = null;
+  let stallRecoverFn: ((video: HTMLVideoElement) => Promise<void>) | null = null;
+  let stallVideo: HTMLVideoElement | null = null;
+  let onStallSeeked: (() => void) | null = null;
+  let lastSeekAt = 0;
 
   function clearStallMonitor() {
     if (stallTimer) {
       clearInterval(stallTimer);
       stallTimer = null;
     }
+    if (stallVideo && onStallSeeked) stallVideo.removeEventListener('seeked', onStallSeeked);
+    onStallSeeked = null;
+    stallVideo = null;
     stallStuckSince = 0;
     stallRecoveries = 0;
     stallRecovering = false;
     currentDashUrl = null;
+    stallRecoverFn = null;
+    lastSeekAt = 0;
   }
 
-  async function recoverDashStall(video: HTMLVideoElement, myGen: number) {
-    if (stallRecovering || !currentDashUrl) return;
+  // ── Recuperaciones por camino (recargan el stream desde la posición actual) ──
+  /** DASH/Shaka: recarga el MISMO manifest desde la posición → reabre la sesión RD. */
+  async function recoverDash(video: HTMLVideoElement) {
+    if (!currentDashUrl) throw new Error('sin DASH url');
+    const pos = video.currentTime;
+    await _shakaLoad(video, currentDashUrl, pos > 3 ? pos : undefined);
+    await video.play().catch(() => {});
+  }
+  /** hls.js: reanuda la carga desde la posición; si no hay instancia (HLS nativo) recarga el src. */
+  function recoverHls(url: string) {
+    return async (video: HTMLVideoElement) => {
+      const w = window as unknown as {
+        hlsInstance?: { startLoad(p?: number): void; stopLoad?(): void } | null;
+      };
+      const hls = w.hlsInstance;
+      const pos = video.currentTime;
+      if (hls && typeof hls.startLoad === 'function') {
+        try {
+          hls.stopLoad?.();
+        } catch {
+          /* noop */
+        }
+        hls.startLoad(pos > 3 ? pos : -1);
+        try {
+          if (pos > 3) video.currentTime = pos;
+        } catch {
+          /* noop */
+        }
+        await video.play().catch(() => {});
+      } else {
+        await recoverReloadSrc(url)(video);
+      }
+    };
+  }
+  /** Directo / HLS nativo: re-asigna `src` y restaura la posición (reabre el Range del archivo). */
+  function recoverReloadSrc(url: string) {
+    return (video: HTMLVideoElement) =>
+      new Promise<void>((resolve) => {
+        const pos = video.currentTime;
+        let done = false;
+        const onMeta = () => {
+          if (done) return;
+          done = true;
+          video.removeEventListener('loadedmetadata', onMeta);
+          try {
+            if (pos > 3) video.currentTime = pos;
+          } catch {
+            /* noop */
+          }
+          video.play().catch(() => {});
+          resolve();
+        };
+        video.addEventListener('loadedmetadata', onMeta);
+        video.src = url;
+        video.load();
+        // No colgar la promesa si nunca llega `loadedmetadata`.
+        setTimeout(() => {
+          if (done) return;
+          done = true;
+          video.removeEventListener('loadedmetadata', onMeta);
+          resolve();
+        }, 6000);
+      });
+  }
+
+  /** Orquestador genérico: cuenta recuperaciones, avisa, y si se agotan cae a otra fuente. */
+  async function runStallRecovery(video: HTMLVideoElement, myGen: number) {
+    if (stallRecovering || !stallRecoverFn) return;
     if (playerStore.isStale(myGen)) {
       clearStallMonitor();
       return;
@@ -410,33 +490,44 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       clearStallMonitor();
       opts.onToast('⚠️ La reproducción se interrumpió — cambiando de reproductor');
       opts.onFallbackToNextSource();
+      stallRecovering = false;
       return;
     }
-    const pos = video.currentTime;
     opts.onToast('🔄 Reconectando con el servidor...');
     try {
-      // Recargar el MISMO DASH desde la posición actual → reabre la sesión de
-      // streaming de RD (segmentos frescos). _shakaLoad destruye y recrea Shaka.
-      await _shakaLoad(video, currentDashUrl, pos > 3 ? pos : undefined);
-      video.play().catch(() => {});
+      await stallRecoverFn(video);
       stallLastTime = video.currentTime;
       stallStuckSince = 0;
     } catch (e) {
-      console.warn('[STALL] Falló la recuperación DASH:', e);
+      console.warn('[STALL] Falló la recuperación:', e);
       clearStallMonitor();
-      if (playerStore.isStale(myGen)) return;
-      opts.onToast('⚠️ No se pudo reanudar — cambiando de reproductor');
-      opts.onFallbackToNextSource();
-      return;
+      if (!playerStore.isStale(myGen)) {
+        opts.onToast('⚠️ No se pudo reanudar — cambiando de reproductor');
+        opts.onFallbackToNextSource();
+      }
     } finally {
       stallRecovering = false;
     }
   }
 
-  function startStallMonitor(video: HTMLVideoElement, url: string, myGen: number) {
+  /**
+   * startStallMonitor — vigila que `currentTime` avance en CUALQUIER camino. Si se traba
+   * (en play, sin avanzar) recupera vía `recover` (recarga desde la posición). Tras un seek
+   * usa un umbral MÁS CORTO (`STALL_RECOVER_SEEK_MS`): ahí es donde algunas pelis se "pegaban".
+   */
+  function startStallMonitor(
+    video: HTMLVideoElement,
+    myGen: number,
+    recover: (video: HTMLVideoElement) => Promise<void>
+  ) {
     clearStallMonitor();
-    currentDashUrl = url;
+    stallVideo = video;
+    stallRecoverFn = recover;
     stallLastTime = video.currentTime;
+    onStallSeeked = () => {
+      lastSeekAt = Date.now();
+    };
+    video.addEventListener('seeked', onStallSeeked);
     stallTimer = setInterval(() => {
       if (playerStore.isStale(myGen)) {
         clearStallMonitor();
@@ -462,8 +553,11 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         stallStuckSince = Date.now();
         return;
       }
-      if (Date.now() - stallStuckSince >= STALL_RECOVER_MS) {
-        void recoverDashStall(video, myGen);
+      // Tras un seek reciente, recuperar más rápido (es donde más se notaba el "pegado").
+      const recentSeek = lastSeekAt > 0 && Date.now() - lastSeekAt < SEEK_RECENT_WINDOW_MS;
+      const threshold = recentSeek ? STALL_RECOVER_SEEK_MS : STALL_RECOVER_MS;
+      if (Date.now() - stallStuckSince >= threshold) {
+        void runStallRecovery(video, myGen);
       }
     }, STALL_CHECK_INTERVAL_MS);
   }
@@ -514,8 +608,9 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       spanishTrack.value = spanishTrackName;
       activeTrack.value = spanishTrackName ?? 'eng1';
       video.play().catch(() => {});
-      // Vigilar stalls a mitad de reproducción (pausa larga → URL RD caducada).
-      startStallMonitor(video, url, myGen);
+      // Vigilar stalls a mitad de reproducción (pausa larga → URL RD caducada, o seek).
+      currentDashUrl = url;
+      startStallMonitor(video, myGen, recoverDash);
     } catch (e) {
       console.warn('[SHAKA] Error DASH:', e);
       clearMsgTimers();
@@ -546,7 +641,8 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       loadSource(u: string): void;
       attachMedia(v: HTMLVideoElement): void;
       destroy(): void;
-      startLoad(): void;
+      startLoad(startPosition?: number): void;
+      stopLoad?(): void;
       on(ev: string, cb: (...args: unknown[]) => void): void;
     }
 
@@ -621,6 +717,9 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
           opts.onFallbackToNextSource();
         }
       });
+
+      // Recuperación de stall/seek también en HLS (antes solo DASH la tenía).
+      startStallMonitor(video, myGen, recoverHls(url));
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = url;
       video.addEventListener(
@@ -628,6 +727,8 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         () => {
           video.play().catch(() => {});
           opts.onStarted();
+          // HLS nativo (Safari/iOS): recuperar recargando el src desde la posición.
+          startStallMonitor(video, myGen, recoverReloadSrc(url));
         },
         { once: true }
       );
@@ -638,7 +739,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   }
 
   // ── Plan B: x265 sin transcode → alternativa H.264 (líneas ~8135-8156) ──
-  function loadX265FallbackDirect(video: HTMLVideoElement, fallbackUrl: string) {
+  function loadX265FallbackDirect(video: HTMLVideoElement, fallbackUrl: string, myGen: number) {
     opts.onToast('🔄 x265 sin transcode — probando alternativa H.264...');
     video.src = fallbackUrl;
     video.load();
@@ -660,6 +761,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         }
         video.play().catch(() => {});
         opts.onStarted();
+        startStallMonitor(video, myGen, recoverReloadSrc(fallbackUrl));
       },
       { once: true }
     );
@@ -675,7 +777,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   }
 
   // ── Sin transcode disponible → play directo (líneas ~8157-8178) ─────────
-  function loadDirectPlay(video: HTMLVideoElement, streamUrl: string) {
+  function loadDirectPlay(video: HTMLVideoElement, streamUrl: string, myGen: number) {
     video.src = streamUrl;
     video.load();
     const tmo = setTimeout(() => {
@@ -696,6 +798,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         }
         video.play().catch(() => {});
         opts.onStarted();
+        startStallMonitor(video, myGen, recoverReloadSrc(streamUrl));
       },
       { once: true }
     );
@@ -768,7 +871,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       } else if (selected.serverHlsUrl) {
         await loadHlsTranscoded({ video, url: selected.serverHlsUrl, isBadAudio: false, streamFilename: streamFn, myGen });
       } else {
-        loadDirectPlay(video, serverUrl);
+        loadDirectPlay(video, serverUrl, myGen);
       }
       isLoadingRd.value = false;
       return;
@@ -862,9 +965,9 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         await loadHlsTranscoded({ video, url: hlsUrl, isBadAudio: hasBadAudio, streamFilename: streamFn, myGen });
       }
     } else if (streamIsX265 && fallbackUrl) {
-      loadX265FallbackDirect(video, fallbackUrl);
+      loadX265FallbackDirect(video, fallbackUrl, myGen);
     } else {
-      loadDirectPlay(video, streamUrl);
+      loadDirectPlay(video, streamUrl, myGen);
     }
 
     isLoadingRd.value = false;
