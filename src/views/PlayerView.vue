@@ -778,33 +778,8 @@ function persistProgressOnClose() {
   }
 }
 
-/**
- * forceExitNativeFullscreen — sale del fullscreen NATIVO del documento sin depender
- * del flag `isFullscreen` de ninguna instancia de `useFullscreen`. En TV el <video>
- * de RD entra a fullscreen nativo a través de la instancia de `VideoPlayer`, no de
- * la de `PlayerView`; por eso `fullscreen.exit()` de acá (cuya `isFullscreen` está en
- * `false`) hace early-return y NO sale del fullscreen. Si por timing/orden de desmonte
- * tampoco lo revierte la otra instancia, la TV queda "pegada" al elemento ya desmontado
- * y se PIERDE el nav fijo en todas las vistas hasta recargar. Esto lo garantiza.
- */
-function forceExitNativeFullscreen() {
-  try {
-    const doc = document as Document & {
-      webkitFullscreenElement?: Element | null;
-      webkitExitFullscreen?: () => void;
-    };
-    if (doc.fullscreenElement || doc.webkitFullscreenElement) {
-      if (doc.exitFullscreen) void doc.exitFullscreen();
-      else doc.webkitExitFullscreen?.();
-    }
-  } catch {
-    /* silenciar */
-  }
-}
-
 function closePlayer() {
   fullscreen.exit();
-  forceExitNativeFullscreen();
   persistProgressOnClose();
   stopProgressTracking();
   cancelAutoNext();
@@ -891,7 +866,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   fullscreen.exit();
-  forceExitNativeFullscreen();
   stopProgressTracking();
   cancelAutoNext();
   clearIframeMsgTimers();

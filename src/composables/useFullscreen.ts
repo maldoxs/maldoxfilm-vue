@@ -121,13 +121,20 @@ export function useFullscreen(opts: UseFullscreenOptions): UseFullscreenReturn {
       lockOrientationLandscape();
     }
 
-    // Intentar fullscreen nativo también (por si el WebView lo soporta) — línea ~8649
-    try {
-      const wkPage = page as WebkitFullscreenElement | null;
-      if (wkPage?.requestFullscreen) wkPage.requestFullscreen();
-      else if (wkPage?.webkitRequestFullscreen) wkPage.webkitRequestFullscreen();
-    } catch {
-      /* silenciar */
+    // Intentar fullscreen nativo también (por si el WebView lo soporta) — línea ~8649.
+    // ⚠️ EN TV NO: en el navegador de la smart-TV (webOS) tocar el Fullscreen API
+    // muestra/oculta la BARRA DEL NAVEGADOR (URL/controles). Al salir del player esa
+    // barra reaparecía y TAPABA el nav fijo de la app — pero solo "después de
+    // reproducir". El overlay CSS (`.player-page` fixed inset:0 z-9999) ya cubre toda
+    // la pantalla en TV, así que el fullscreen nativo no aporta y solo molesta.
+    if (!opts.isTvMode()) {
+      try {
+        const wkPage = page as WebkitFullscreenElement | null;
+        if (wkPage?.requestFullscreen) wkPage.requestFullscreen();
+        else if (wkPage?.webkitRequestFullscreen) wkPage.webkitRequestFullscreen();
+      } catch {
+        /* silenciar */
+      }
     }
   }
 
@@ -143,16 +150,21 @@ export function useFullscreen(opts: UseFullscreenOptions): UseFullscreenReturn {
       unlockOrientation();
     }
 
-    // Salir de fullscreen nativo si estaba activo — línea ~8682
-    try {
-      const wkDoc = document as WebkitFullscreenDocument;
-      const fsEl = wkDoc.fullscreenElement || wkDoc.webkitFullscreenElement;
-      if (fsEl) {
-        if (wkDoc.exitFullscreen) wkDoc.exitFullscreen();
-        else if (wkDoc.webkitExitFullscreen) wkDoc.webkitExitFullscreen();
+    // Salir de fullscreen nativo si estaba activo — línea ~8682.
+    // ⚠️ EN TV NO (ver nota en `enter()`): si nunca entramos al fullscreen nativo en
+    // TV, tampoco debemos salir — hacerlo revelaría la barra del navegador y taparía
+    // el nav. Salir del fullscreen nativo solo aplica fuera de TV (desktop/mobile/WebView).
+    if (!opts.isTvMode()) {
+      try {
+        const wkDoc = document as WebkitFullscreenDocument;
+        const fsEl = wkDoc.fullscreenElement || wkDoc.webkitFullscreenElement;
+        if (fsEl) {
+          if (wkDoc.exitFullscreen) wkDoc.exitFullscreen();
+          else if (wkDoc.webkitExitFullscreen) wkDoc.webkitExitFullscreen();
+        }
+      } catch {
+        /* silenciar */
       }
-    } catch {
-      /* silenciar */
     }
   }
 

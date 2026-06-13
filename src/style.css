@@ -199,9 +199,15 @@ html.tv-mode .top-card:hover {
   transform: none !important;
   box-shadow: 0 0 0 2px var(--accent) !important;
 }
-/* TV: sin shimmer del skeleton (perf) — original ~líneas 522-525. */
+/* TV: skeletons INVISIBLES. El usuario no quiere ver las "tarjetas grises que se
+   están cargando" al scrollear (los carruseles cargan sus datos async y mostraban
+   `.card-skeleton` gris #232323 mientras tanto, sobre todo al re-montar HomeView tras
+   volver del reproductor). Se reserva el espacio (aspect-ratio) para no causar layout
+   shift, pero el fondo iguala al de la página → no se ve gris ni shimmer; las cards
+   simplemente aparecen al llegar los datos. (Desktop/mobile mantienen el shimmer.) */
 html.tv-mode .card-skeleton {
   animation: none !important;
+  background: transparent !important;
 }
 
 /* ── Foco de botones de Detalle/Player/MiLista en TV — MOVIDO ACÁ desde los
