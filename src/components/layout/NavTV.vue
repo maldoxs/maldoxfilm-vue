@@ -156,7 +156,14 @@ function onFullscreenClick() {
   align-items: center;
   gap: 0;
   padding: 0 52px;
-  position: fixed;
+  /* `position: sticky` (NO `fixed`): el nav debe sobrevivir al Fullscreen API que
+     usamos en TV para ocultar la barra del navegador webOS (ver PlayerView.closePlayer).
+     En webkit, un `position: fixed` DENTRO del elemento en `:fullscreen` deja de
+     pegarse al scrollear (bug conocido) → el nav "desaparecía" al bajar tras
+     reproducir. `sticky` se basa en el scroll-container y sí mantiene el nav pegado
+     arriba, dentro y fuera de fullscreen. Como el nav es el primer elemento del flujo,
+     queda pegado en top:0 desde el inicio — visualmente idéntico a `fixed`. */
+  position: sticky;
   top: 0;
   left: 0;
   right: 0;

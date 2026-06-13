@@ -91,7 +91,10 @@ function onToggleAppFullscreen() {
   min-height: 100vh;
 }
 .app-main.mode-tv {
-  padding-top: 76px; /* preserva el ajuste de `#hero`/body en tv-mode (línea ~6390-6403) */
+  /* SIN padding-top: el NavTV ahora es `position: sticky` (no `fixed`), así que ocupa
+     sus 76px en el flujo del documento y empuja el contenido naturalmente. Con `fixed`
+     hacía falta este padding para compensar; con `sticky` lo duplicaría. */
+  padding-top: 0;
 }
 .app-main.mode-mobile {
   padding-bottom: 64px; /* deja espacio para `.bottom-nav` fija */

@@ -794,19 +794,19 @@ function closePlayer() {
   playerStore.close();
   document.body.style.overflow = '';
   router.back();
-  // ── TV: ocultar la BARRA DEL NAVEGADOR (webOS) al volver, SIN Fullscreen API ──
-  // El Fullscreen API ocultaba la barra pero ROMPE el `position:fixed` del nav en
-  // webOS (deja de pegarse al scrollear) — bug conocido de webkit con `:fullscreen`.
-  // En Home el nav queda fijo y la barra se oculta sola al hacer scroll; replicamos
-  // ese gesto con un micro-scroll tras volver, manteniendo el nav fijo.
+  // ── TV: ocultar la BARRA DEL NAVEGADOR (webOS) al volver ─────────────────────
+  // Tras el ciclo de reproducción, webOS re-muestra su barra (URL/controles) y tapa
+  // el nav. El ÚNICO modo fiable de ocultarla es el Fullscreen API; el clic en
+  // "Volver" es un GESTO del usuario, así que está permitido pedirlo. El nav usa
+  // `position: sticky` (NO `fixed`) justamente para que SOBREVIVA al fullscreen de
+  // webkit (donde `fixed` deja de pegarse al scrollear). No hacemos `exitFullscreen`
+  // en TV (ver useFullscreen), así que queda oculta de forma estable.
   if (deviceStore.isTV) {
-    setTimeout(() => {
-      try {
-        window.scrollTo(0, 1);
-      } catch {
-        /* silenciar */
-      }
-    }, 180);
+    try {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } catch {
+      /* silenciar */
+    }
   }
 }
 
