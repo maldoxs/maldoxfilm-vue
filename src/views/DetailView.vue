@@ -1200,9 +1200,7 @@ onBeforeUnmount(() => {
   font-size: 0.9rem !important;
   padding: 12px 20px !important;
 }
-:global(html.tv-mode) .dp-play-btn:focus,
-:global(html.tv-mode) .dp-sec-btn:focus {
-  outline: 2px solid var(--accent, #3d5afe);
-  outline-offset: 2px;
-}
+/* El foco de los botones del detalle en TV se define en `style.css` (global):
+   `:global(html.tv-mode) .x:focus` en scoped rompía el compilador y aplicaba el
+   outline a `<html>` entero (la "línea azul"). */
 </style>

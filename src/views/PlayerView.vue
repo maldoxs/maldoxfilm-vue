@@ -1589,9 +1589,7 @@ html.tv-mode .source-btn:focus {
   height: 32px;
   stroke-width: 2.2;
 }
-:global(html.tv-mode) .player-back:hover,
-:global(html.tv-mode) .player-back:focus {
-  background: rgba(61, 90, 254, 0.6);
-  border-color: var(--accent, #3d5afe);
-}
+/* El hover/foco del botón Volver en TV se define en `style.css` (global): aquí en
+   scoped, `:global(html.tv-mode) .x:focus` rompía el compilador y aplicaba los
+   estilos a `<html>` entero (fondo azul tras ver una película). */
 </style>

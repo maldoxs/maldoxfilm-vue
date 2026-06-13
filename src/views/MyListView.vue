@@ -223,11 +223,9 @@ function onDeleteKeydown(e: KeyboardEvent, id: string) {
   height: 32px;
   font-size: 1rem;
 }
-:global(html.tv-mode) .ml-del-btn:focus {
-  opacity: 1;
-  background: rgba(220, 50, 50, 0.9);
-  outline: 2px solid #f55;
-}
+/* El foco del botón borrar en TV se define en `style.css` (global): aquí en scoped,
+   `:global(html.tv-mode) .x:focus` rompía el compilador y aplicaba el outline a
+   `<html>` entero. */
 
 @media (max-width: 640px) {
   .ml-header,

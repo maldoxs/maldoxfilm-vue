@@ -180,3 +180,24 @@ html.tv-mode .top-card:hover {
 html.tv-mode .card-skeleton {
   animation: none !important;
 }
+
+/* ── Foco de botones de Detalle/Player/MiLista en TV — MOVIDO ACÁ desde los
+   componentes: en scoped, `:global(html.tv-mode) .x:focus` rompía el compilador
+   de Vue y aplicaba el estilo a `<html>` entero → "línea/contorno azul" en toda
+   la pantalla (sobre todo tras ver una película). Acá (global) funciona bien y se
+   usa `:focus-visible` para que solo aparezca al navegar con el control. */
+html.tv-mode .dp-play-btn:focus-visible,
+html.tv-mode .dp-sec-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+html.tv-mode .player-back:hover,
+html.tv-mode .player-back:focus-visible {
+  background: rgba(61, 90, 254, 0.6);
+  border-color: var(--accent);
+}
+html.tv-mode .ml-del-btn:focus-visible {
+  opacity: 1;
+  background: rgba(220, 50, 50, 0.9);
+  outline: 2px solid #f55;
+}
