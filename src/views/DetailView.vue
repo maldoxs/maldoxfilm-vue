@@ -309,14 +309,20 @@ function toggleList() {
 }
 
 /**
- * goBack — el botón "← Volver". Por decisión de producto va SIEMPRE a Inicio
- * (no a `router.back()`): el original reconstruía la sección/género previos vía
- * `_navState` (líneas ~6564-6581) — es decir, "volvía al filtro" —, pero aquí
- * se prefiere que "Volver" lleve siempre al Inicio (más predecible: tras buscar
- * o filtrar y abrir un detalle, no se regresa al filtro sino a la home).
+ * goBack — el botón "← Volver". Vuelve a la pantalla ANTERIOR (`router.back()`),
+ * preservando la sección y el filtro de donde vino el usuario: p.ej. desde
+ * Películas → género Terror → ficha → "Volver" regresa a `/peliculas?genero=27`
+ * (el género ya viaja en la URL). Esto restaura el comportamiento del original
+ * (`_navState`, líneas ~6564-6581) que el usuario pidió explícitamente.
+ *
+ * Fallback a Inicio SOLO si no hay historial previo (entrada directa/deep-link):
+ * `window.history.state.back` lo setea Vue Router cuando existe una entrada anterior;
+ * si es null estamos en la primera página y `router.back()` saldría de la app.
  */
 function goBack() {
-  router.push('/');
+  const hasPrev = typeof window !== 'undefined' && window.history.state && window.history.state.back != null;
+  if (hasPrev) router.back();
+  else router.push('/');
 }
 
 // ── Tráilers — preserva `dpOpenTM`/`dpCloseTM` (líneas ~9129-9130) ──────────
