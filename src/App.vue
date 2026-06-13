@@ -12,7 +12,7 @@
  * shell solo decide CUÁL montar según `deviceStore.mode`, evitando montar
  * (y suscribir listeners de) navs que no se van a usar.
  */
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import NavDesktop from './components/layout/NavDesktop.vue';
 import NavMobile from './components/layout/NavMobile.vue';
@@ -41,9 +41,24 @@ const ROUTE_NAME_TO_KEY: Record<string, RouteKey> = {
   // 'channels' se omite — Fase 6 (Canales/IPTV) excluida a pedido del usuario,
   // la ruta `/canales` ya no existe (ver `router/index.ts`).
 };
+// Última SECCIÓN visitada (home/movies/series/anime/mylist/search). Sirve para que,
+// al entrar a una ficha (`movie-detail`/`series-detail`), al reproductor (`player`) o
+// a "Ver todo" (`all-results`) —rutas que NO son secciones del nav— el nav siga
+// marcando la sección de la que vino el usuario (p.ej. quedarse en "Películas" al abrir
+// una peli), en vez de saltar a "Inicio". El género ya se preserva aparte vía la URL
+// (`/peliculas?genero=27`), así que al Volver se mantiene el filtro de Terror, etc.
+const lastSection = ref<RouteKey>('home');
+watch(
+  () => route.name,
+  (name) => {
+    const key = ROUTE_NAME_TO_KEY[String(name ?? '')];
+    if (key) lastSection.value = key;
+  },
+  { immediate: true }
+);
 const activeKey = computed<RouteKey>(() => {
   const name = String(route.name ?? '');
-  return ROUTE_NAME_TO_KEY[name] ?? 'home';
+  return ROUTE_NAME_TO_KEY[name] ?? lastSection.value;
 });
 
 // ── Navegación — reemplaza showHome()/loadSection()/showChannelsPage()/... ──
