@@ -194,22 +194,20 @@ function onSetSpeed(value: number) {
             </button>
           </template>
 
-          <!-- Offset sincronización — preserva `#spOffsetRow` (líneas ~3637-3648):
-               vive DENTRO del panel ⚙️ y solo se muestra cuando los subtítulos
-               están activos (en el original era `display:none` hasta `subsOn`). -->
-          <div v-if="subsEnabled" class="sp-offset-row">
-            <div class="sp-offset-head">
-              Sincronización · <span class="sp-offset-display">{{ offsetLabel }}</span>
-            </div>
-            <div class="sp-offset-btns">
-              <button class="sp-offset-btn" @click="emit('adjust-offset', -5000)">−5s</button>
-              <button class="sp-offset-btn" @click="emit('adjust-offset', -1000)">−1s</button>
-              <button class="sp-offset-btn sp-offset-reset" @click="emit('reset-offset')">reset</button>
-              <button class="sp-offset-btn" @click="emit('adjust-offset', 1000)">+1s</button>
-              <button class="sp-offset-btn" @click="emit('adjust-offset', 5000)">+5s</button>
-            </div>
-          </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Sincronización a TODO EL ANCHO, debajo de las dos columnas (antes quedaba apretada
+         dentro de la columna de Subtítulos). Solo visible con subtítulos activos. -->
+    <div v-if="mode === 'audiosubs' && subsEnabled" class="sp-offset-row">
+      <div class="sp-offset-head">Sincronización · <span class="sp-offset-display">{{ offsetLabel }}</span></div>
+      <div class="sp-offset-btns">
+        <button class="sp-offset-btn" @click="emit('adjust-offset', -5000)">−5s</button>
+        <button class="sp-offset-btn" @click="emit('adjust-offset', -1000)">−1s</button>
+        <button class="sp-offset-btn sp-offset-reset" @click="emit('reset-offset')">reset</button>
+        <button class="sp-offset-btn" @click="emit('adjust-offset', 1000)">+1s</button>
+        <button class="sp-offset-btn" @click="emit('adjust-offset', 5000)">+5s</button>
       </div>
     </div>
 
@@ -338,23 +336,28 @@ function onSetSpeed(value: number) {
   margin: 4px 0;
 }
 
-/* Offset sincronización — preserva `#spOffsetRow` + `.sp-offset-btn` (líneas ~3637-3648, ~1274-1281) */
+/* Offset sincronización — fila a TODO EL ANCHO debajo de las columnas (no dentro de Subtítulos) */
+.sp-offset-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
 .sp-offset-head {
   font-size: 0.62rem;
   text-transform: uppercase;
   letter-spacing: 1px;
   color: rgba(255, 255, 255, 0.4);
-  padding: 12px 28px 8px;
+  padding: 12px 24px 8px;
 }
 .sp-offset-display {
   color: #3d5afe;
 }
 .sp-offset-btns {
   display: flex;
-  gap: 5px;
-  padding: 0 16px 16px;
-  justify-content: center; /* sincronización centrada, no cortada */
-  flex-wrap: wrap;
+  gap: 7px;
+  padding: 0 24px 16px; /* ocupa todo el ancho de la fila */
+}
+.sp-offset-btn {
+  flex: 1; /* los 5 botones se reparten TODO el ancho de abajo */
+  text-align: center;
 }
 
 /* ── TV: panel más ancho para que el audio no se corte y la sincronización entre ── */
