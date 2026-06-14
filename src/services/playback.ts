@@ -131,6 +131,26 @@ export function buildDashBaseUrl(dashUrlBase: string): string | null {
   return dashUrlBase.replace(DASH_TRACK_SEGMENT_RE, '/');
 }
 
+/**
+ * Calidad de transcode de RD. `full` = resolución original (más pesada → segmentos
+ * grandes → seek lento/se cae). Para FLUIDEZ pedimos 720p: segmentos livianos que RD
+ * genera/sirve rápido → el seek deja de pegarse en los casos AC3/MKV/HEVC que van a
+ * transcode. Tokens reales del endpoint mediaInfos de RD: full | 720p_4mbps | 720p_2mbps
+ * | 480p_2mbps | 480p_1mbps.
+ */
+export const TRANSCODE_QUALITY = '720p_4mbps';
+const DASH_QUALITY_SEGMENT_RE = /\/(full|\d+p_\d+mbps)(\.mpd|\.m3u8)(\?|$)/;
+
+/**
+ * applyTranscodeQuality — cambia el segmento de calidad de una URL de transcode RD
+ * (DASH `.mpd` o HLS `.m3u8`) por la calidad pedida (default 720p). Si la URL no
+ * matchea el patrón (p.ej. server-side rd-stream), la devuelve intacta (no-op seguro).
+ */
+export function applyTranscodeQuality(url: string, quality: string = TRANSCODE_QUALITY): string {
+  if (!url) return url;
+  return url.replace(DASH_QUALITY_SEGMENT_RE, '/' + quality + '$2$3');
+}
+
 // ── Timeline de mensajes de "cargando" durante transcode (DASH y HLS) ────────
 export type LoadingMessageEntry = readonly [delayMs: number, message: string];
 

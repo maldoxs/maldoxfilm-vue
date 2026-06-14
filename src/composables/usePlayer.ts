@@ -37,6 +37,8 @@ import {
   SPANISH_TRACK_CANDIDATES,
   buildSpanishTrackUrl,
   buildDashBaseUrl,
+  applyTranscodeQuality,
+  TRANSCODE_QUALITY,
   buildLoadingMessageTimeline,
   PLAYBACK_STARTED_THRESHOLD_SEC,
   SHAKA_WATCHDOG_MS,
@@ -1009,6 +1011,10 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         if (dashUrlBase) dashBaseUrl.value = buildDashBaseUrl(dashUrlBase);
 
         hlsUrl = finalDashUrl || hlsFallback;
+        // FASE 2 — pedir el transcode en 720p (segmentos livianos → seek viable en
+        // los casos AC3/MKV/HEVC que caen acá). `full` (resolución original) es lo que
+        // hacía que el seek se cayera. No-op si la URL no es de transcode RD.
+        if (hlsUrl) hlsUrl = applyTranscodeQuality(hlsUrl);
       } catch (e) {
         hlsUrl = null;
         console.log('[RD] Error transcode:', e);
@@ -1066,7 +1072,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     }
     switchingAudio = true;
 
-    const candidateUrl = dashBaseUrl.value + track + '/none/aac/full.mpd';
+    const candidateUrl = dashBaseUrl.value + track + '/none/aac/' + TRANSCODE_QUALITY + '.mpd';
     const startTime = video.currentTime;
     const isEng = track === 'eng1';
     const prevTrack = (isEng ? spanishTrack.value : 'eng1') ?? 'eng1';

@@ -7,10 +7,27 @@ import {
   buildLoadingMessageTimeline,
   messageAtElapsed,
   isDashManifest,
+  applyTranscodeQuality,
+  TRANSCODE_QUALITY,
   SPANISH_TRACK_CANDIDATES,
   MIN_VALID_DURATION_SEC,
   PLAYBACK_STARTED_THRESHOLD_SEC,
 } from '../src/services/playback';
+
+describe('applyTranscodeQuality — pedir transcode en 720p (seek fluido)', () => {
+  test('cambia full.mpd → 720p en DASH', () => {
+    const url = 'https://28.stream.real-debrid.com/t/ID/spa1/none/aac/full.mpd';
+    expect(applyTranscodeQuality(url)).toBe(`https://28.stream.real-debrid.com/t/ID/spa1/none/aac/${TRANSCODE_QUALITY}.mpd`);
+  });
+  test('cambia full.m3u8 → 720p en HLS', () => {
+    const url = 'https://28.stream.real-debrid.com/t/ID/eng1/none/aac/full.m3u8';
+    expect(applyTranscodeQuality(url)).toContain(`${TRANSCODE_QUALITY}.m3u8`);
+  });
+  test('URL que NO es de transcode RD → intacta (no-op seguro)', () => {
+    const direct = 'https://torrentio.strem.fun/resolve/realdebrid/abc/hash/null/0/Movie.mp4';
+    expect(applyTranscodeQuality(direct)).toBe(direct);
+  });
+});
 
 describe('detectHevcSupport — soporte HEVC nativo del navegador', () => {
   test('detecta soporte si CUALQUIERA de los 3 mime-types HEVC está soportado', () => {
