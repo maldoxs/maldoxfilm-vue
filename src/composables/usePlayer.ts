@@ -65,8 +65,9 @@ const STALL_CHECK_INTERVAL_MS = 2000; // cada cuánto se revisa el avance
 const STALL_RECOVER_MS = 8000; // sin avanzar (en play) este tiempo → recuperar
 const STALL_RECOVER_SEEK_MS = 4500; // tras un seek (adelantar/retroceder), recuperar más rápido
 const SEEK_RECENT_WINDOW_MS = 20000; // ventana en la que un stall cuenta como "post-seek"
-const SEEK_STUCK_MS = 6000; // `video.seeking=true` colgado este tiempo (salto lejano) → recuperar
-const MAX_STALL_RECOVERIES = 3; // recuperaciones seguidas sin éxito → cambiar de fuente
+const SEEK_STUCK_MS = 8000; // `video.seeking=true` colgado este tiempo (salto lejano) → recuperar
+const STALL_BACKOFF_MS = 8000; // por cada recuperación previa, esperar este extra (dar tiempo al transcoder)
+const MAX_STALL_RECOVERIES = 4; // recuperaciones sin éxito → cambiar de fuente (con backoff, ~más paciencia)
 
 // ── Carga dinámica de hls.js / Shaka Player (líneas ~3884-3937) ─────────────
 // Se preserva el patrón "singleton + polling" del original: solo un <script>
@@ -558,9 +559,15 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       if (video.seeking) {
         if (seekingSince === 0) {
           seekingSince = Date.now();
-        } else if (!stallRecovering && Date.now() - seekingSince >= SEEK_STUCK_MS) {
-          seekingSince = 0;
-          void runStallRecovery(video, myGen);
+        } else {
+          // Backoff: tras cada recarga esperar MÁS. Recargar reinicia la sesión de
+          // transcode de RD; si se recarga muy seguido, el transcoder nunca alcanza a
+          // preparar el tramo lejano → caía al iframe. Con backoff se le da tiempo.
+          const seekThreshold = SEEK_STUCK_MS + stallRecoveries * STALL_BACKOFF_MS;
+          if (!stallRecovering && Date.now() - seekingSince >= seekThreshold) {
+            seekingSince = 0;
+            void runStallRecovery(video, myGen);
+          }
         }
         stallLastTime = video.currentTime;
         stallStuckSince = 0;
@@ -588,8 +595,11 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         return;
       }
       // Tras un seek reciente, recuperar más rápido (es donde más se notaba el "pegado").
+      // Backoff por cada recuperación previa: darle tiempo al transcoder a alcanzar el
+      // tramo en vez de recargar (reiniciar) una y otra vez → menos caídas al iframe.
       const recentSeek = lastSeekAt > 0 && Date.now() - lastSeekAt < SEEK_RECENT_WINDOW_MS;
-      const threshold = recentSeek ? STALL_RECOVER_SEEK_MS : STALL_RECOVER_MS;
+      const base = recentSeek ? STALL_RECOVER_SEEK_MS : STALL_RECOVER_MS;
+      const threshold = base + stallRecoveries * STALL_BACKOFF_MS;
       if (Date.now() - stallStuckSince >= threshold) {
         void runStallRecovery(video, myGen);
       }
