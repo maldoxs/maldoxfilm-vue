@@ -39,6 +39,8 @@ const props = defineProps<{
   rdStreamResolver: RdStreamResolver;
   rdClient: RealDebridClient;
   title: string;
+  /** Duración de la peli (seg, de TMDB) — fallback cuando `video.duration` es Infinity (transcode RD). */
+  runtimeSec?: number;
 }>();
 
 const emit = defineEmits<{
@@ -170,6 +172,7 @@ const nfControls = useNetflixControls({
   videoRef,
   seekBarRef,
   onInteraction: () => resetControlsAutoHide(),
+  durationFallback: () => props.runtimeSec || 0,
 });
 
 const isLoading = ref(true);
@@ -263,7 +266,11 @@ function onSetSpeed(value: number) {
   nfControls.setSpeed(value);
 }
 
-const remainingDisplay = computed(() => '-' + formatNfTime((videoRef.value?.duration || 0) - (videoRef.value?.currentTime || 0)));
+const remainingDisplay = computed(() => {
+  const d = videoRef.value?.duration;
+  const eff = d && isFinite(d) && d > 0 ? d : props.runtimeSec || 0;
+  return '-' + formatNfTime(eff - (videoRef.value?.currentTime || 0));
+});
 
 /**
  * onVideoClick — preserva `_nfVideoClick` (índex.html líneas 4076-4081): un
@@ -328,24 +335,24 @@ onBeforeUnmount(() => {
 
         <div class="nf-row">
           <div class="nf-left">
-            <button class="nf-btn" title="Play/Pausa" @click="nfControls.togglePlay">
+            <button class="nf-btn" @click="nfControls.togglePlay">
               <svg v-if="nfControls.isPlaying.value" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
               <svg v-else viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>
             </button>
-            <button class="nf-btn nf-btn-sm" title="Retroceder 10s" @click="nfControls.skip(-10)">
+            <button class="nf-btn nf-btn-sm" @click="nfControls.skip(-10)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                 <path d="M12 5V2L8 6l4 4V7a7 7 0 1 1-6.93 8H3.05A9 9 0 1 0 12 5z" />
                 <text x="7.5" y="15.5" font-size="5.5" fill="currentColor" stroke="none" font-family="sans-serif" font-weight="bold">10</text>
               </svg>
             </button>
-            <button class="nf-btn nf-btn-sm" title="Avanzar 10s" @click="nfControls.skip(10)">
+            <button class="nf-btn nf-btn-sm" @click="nfControls.skip(10)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                 <path d="M12 5V2l4 4-4 4V7a7 7 0 1 0 6.93 8H20.95A9 9 0 1 1 12 5z" />
                 <text x="7.5" y="15.5" font-size="5.5" fill="currentColor" stroke="none" font-family="sans-serif" font-weight="bold">10</text>
               </svg>
             </button>
             <div class="nf-vol-group">
-              <button class="nf-btn" title="Silenciar" @click="nfControls.toggleMute">
+              <button class="nf-btn" @click="nfControls.toggleMute">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
                   <path v-if="!nfControls.isMuted.value" d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
@@ -374,8 +381,7 @@ onBeforeUnmount(() => {
             <button
               v-if="audioPanelReady"
               id="nfCCBtn"
-              class="nf-btn nf-btn-sm"
-              title="Audio y subtítulos"
+              class="nf-btn nf-btn-sm" 
               @click="toggleSettingsPanel('audiosubs')"
               @mouseenter="showSettingsPanel('audiosubs')"
               @mouseleave="hideSettingsPanelDelayed"
@@ -389,8 +395,7 @@ onBeforeUnmount(() => {
             <button
               v-if="audioPanelReady"
               id="nfSpeedBtn"
-              class="nf-btn nf-btn-sm"
-              title="Velocidad de reproducción"
+              class="nf-btn nf-btn-sm" 
               @click="toggleSettingsPanel('speed')"
               @mouseenter="showSettingsPanel('speed')"
               @mouseleave="hideSettingsPanelDelayed"
@@ -400,7 +405,7 @@ onBeforeUnmount(() => {
                 <polyline points="12 6 12 12 16 14" />
               </svg>
             </button>
-            <button ref="fullscreenIconRef" class="nf-btn" title="Pantalla completa" @click="fullscreen.toggle">
+            <button ref="fullscreenIconRef" class="nf-btn" @click="fullscreen.toggle">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path :d="fullscreen.isFullscreen.value ? FULLSCREEN_PATH_D.enter : FULLSCREEN_PATH_D.exit" />
               </svg>

@@ -330,6 +330,7 @@ function onSetSpeed(value: number) {
 }
 .sp-row-label {
   flex: 1;
+  white-space: nowrap; /* "Inglés [Original]" en UNA línea (al lado del check, no debajo) */
 }
 .sp-sep {
   height: 1px;
@@ -351,7 +352,22 @@ function onSetSpeed(value: number) {
 .sp-offset-btns {
   display: flex;
   gap: 5px;
-  padding: 0 28px 16px;
+  padding: 0 16px 16px;
+  justify-content: center; /* sincronización centrada, no cortada */
+  flex-wrap: wrap;
+}
+
+/* ── TV: panel más ancho para que el audio no se corte y la sincronización entre ── */
+:global(html.tv-mode) .player-settings-panel {
+  width: 560px;
+}
+:global(html.tv-mode) .sp-row {
+  font-size: 1rem;
+  padding: 13px 28px;
+}
+:global(html.tv-mode) .sp-offset-btn {
+  font-size: 0.82rem;
+  padding: 8px 13px;
 }
 .sp-offset-btn {
   background: rgba(255, 255, 255, 0.08);

@@ -817,6 +817,7 @@ interface DetailPayload {
   title?: string;
   name?: string;
   number_of_seasons?: number | null;
+  runtime?: number | null;
 }
 
 async function init() {
@@ -834,11 +835,13 @@ async function init() {
 
   let detailTitle = '';
   let totalSeasons = 1;
+  let movieRuntime = 0;
   try {
     const endpoint = type === 'tv' ? `/tv/${id}?language=${LANG}` : `/movie/${id}?language=${LANG}`;
     const data = await tmdbClient.get<DetailPayload>(endpoint);
     detailTitle = data.title || data.name || '';
     totalSeasons = data.number_of_seasons || 1;
+    movieRuntime = data.runtime || 0; // duración de la peli (min) → fallback de duración del player
   } catch {
     /* silenciar — preserva el modo degradado del original (título queda vacío, totalSeasons=1) */
   }
@@ -851,7 +854,7 @@ async function init() {
     totalSeasons,
     totalEpisodes: 0,
     title: detailTitle,
-    runtimeMin: 0,
+    runtimeMin: type === 'movie' ? movieRuntime : 0,
   });
 
   if (type === 'tv') {
@@ -970,7 +973,7 @@ onBeforeUnmount(() => {
 
       <!-- Real-Debrid — siempre montado, mostrado vía v-show -->
       <div v-show="isRdSource" class="rd-wrap">
-        <VideoPlayer ref="videoPlayerRef" :rd-stream-resolver="rdStreamResolver" :rd-client="rdClient" :title="title" @started="onRdStarted" @fallback-to-next-source="fallbackToFirstSource" />
+        <VideoPlayer ref="videoPlayerRef" :rd-stream-resolver="rdStreamResolver" :rd-client="rdClient" :title="title" :runtime-sec="(playerStore.current.runtimeMin || 0) * 60" @started="onRdStarted" @fallback-to-next-source="fallbackToFirstSource" />
       </div>
 
       <!-- Iframe (UnlimPlay/vidlink/Anime1V) — siempre montado, mostrado vía v-show -->

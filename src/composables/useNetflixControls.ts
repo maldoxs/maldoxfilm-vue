@@ -26,6 +26,11 @@ export interface UseNetflixControlsOptions {
   seekBarRef: Ref<HTMLElement | null | undefined>;
   /** Llamado en cada interacción que debe "resetear" el auto-hide de controles (equiv. `window._nfShowControls`). */
   onInteraction?: () => void;
+  /**
+   * Duración (seg) de respaldo cuando `video.duration` no es finita (streams transcodeados
+   * de RD reportan `Infinity` → la barra/tiempo marcaban 0). Se usa el runtime de TMDB.
+   */
+  durationFallback?: () => number;
 }
 
 /**
@@ -97,14 +102,20 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     return opts.videoRef.value ?? null;
   }
 
+  /** Duración efectiva: la real si es finita, si no el runtime de TMDB (transcode RD = Infinity). */
+  function effDur(vv: HTMLVideoElement): number {
+    const d = vv.duration;
+    return d && isFinite(d) && d > 0 ? d : opts.durationFallback?.() || 0;
+  }
+
   // ── Tick — reemplaza `_nfTick` (línea ~4103-4117) ────────────────────────
   function tick() {
     const v = video();
     if (!v) return;
-    const pct = v.duration ? (v.currentTime / v.duration) * 100 : 0;
+    const pct = effDur(v) ? (v.currentTime / effDur(v)) * 100 : 0;
     if (!seeking) progressPct.value = pct;
     elapsedLabel.value = formatNfTime(v.currentTime);
-    remainingLabel.value = formatNfTime((v.duration || 0) - v.currentTime);
+    remainingLabel.value = formatNfTime((effDur(v) || 0) - v.currentTime);
   }
 
   const onPlay = () => {
@@ -139,12 +150,12 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
   function skip(seconds: number) {
     const v = video();
     if (!v) return;
-    if (v.duration) {
-      const target = Math.max(0, Math.min(v.duration, v.currentTime + seconds));
+    if (effDur(v)) {
+      const target = Math.max(0, Math.min(effDur(v), v.currentTime + seconds));
       seeking = true;
-      progressPct.value = (target / v.duration) * 100;
+      progressPct.value = (target / effDur(v)) * 100;
       elapsedLabel.value = formatNfTime(target);
-      remainingLabel.value = formatNfTime(v.duration - target);
+      remainingLabel.value = formatNfTime(effDur(v) - target);
       v.currentTime = target;
       const onSeeked = () => {
         seeking = false;
@@ -186,7 +197,7 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
   function pctFromEvent(e: MouseEvent): number | null {
     const bar = opts.seekBarRef.value;
     const v = video();
-    if (!bar || !v || !v.duration) return null;
+    if (!bar || !v || !effDur(v)) return null;
     const rect = bar.getBoundingClientRect();
     return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
   }
@@ -194,7 +205,7 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
   function onSeekBarClick(e: MouseEvent) {
     const v = video();
     const pct = pctFromEvent(e);
-    if (v && pct !== null) v.currentTime = pct * v.duration;
+    if (v && pct !== null) v.currentTime = pct * effDur(v);
     opts.onInteraction?.();
   }
 
@@ -221,10 +232,10 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
   function onSeekBarMouseMove(e: MouseEvent) {
     const bar = opts.seekBarRef.value;
     const v = video();
-    if (!bar || !v || !v.duration) return;
+    if (!bar || !v || !effDur(v)) return;
     const rect = bar.getBoundingClientRect();
     const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    tooltipLabel.value = formatNfTime(pct * v.duration);
+    tooltipLabel.value = formatNfTime(pct * effDur(v));
     tooltipPct.value = pct * 100;
   }
 

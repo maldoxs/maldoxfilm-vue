@@ -151,7 +151,16 @@ function onDeleteKeydown(e: KeyboardEvent, id: string) {
 .all-results-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+/* TV: posters y texto más grandes en Mi Lista (a pedido) */
+:global(html.tv-mode) .all-results-grid {
+  gap: 22px;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+}
+:global(html.tv-mode) .card-title {
+  font-size: 1.05rem;
+  margin-top: 10px;
 }
 .all-results-grid .card {
   min-width: unset;

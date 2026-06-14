@@ -1199,12 +1199,12 @@ onBeforeUnmount(() => {
   line-height: 1.7 !important;
 }
 :global(html.tv-mode) .dp-play-btn {
-  font-size: 1rem !important;
-  padding: 14px 30px !important;
+  font-size: 1.18rem !important;
+  padding: 18px 38px !important;
 }
 :global(html.tv-mode) .dp-sec-btn {
-  font-size: 0.9rem !important;
-  padding: 12px 20px !important;
+  font-size: 1.05rem !important;
+  padding: 16px 28px !important;
 }
 /* El foco de los botones del detalle en TV se define en `style.css` (global):
    `:global(html.tv-mode) .x:focus` en scoped rompía el compilador y aplicaba el
