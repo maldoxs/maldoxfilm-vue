@@ -948,12 +948,18 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     const hevcOk = !isTvNow && detectHevcSupport(getMediaSource());
     const { hasBadAudio } = checkBadAudioForDirectPlay(streamFn, !!rdId);
 
-    // Play DIRECTO (seek por HTTP Range = casi instantáneo, anda igual en TV). Se intenta
-    // cuando el stream es H264 (reproducible en cualquier navegador) o HEVC con soporte real
-    // (escritorio). ⚠️ FIX: antes el gate era solo `hevcOk`, que ATABA el H264 al soporte HEVC
-    // → en TV (hevcOk=false) mandaba TODO al transcode, y el seek lejano se caía. Ahora el H264
-    // juega directo también en TV; solo el HEVC en TV va al transcode (evita "audio sin imagen").
-    const canTryDirect = (!streamIsX265 || hevcOk) && !hasBadAudio;
+    // ── FASE 1 — PLAY DIRECTO solo si el contenedor es reproducible por <video> ──────
+    // (TV / desktop / móvil por igual). El play directo (HTTP Range = seek instantáneo,
+    // sin transcode RD) requiere:
+    //   1) Contenedor MP4 — el <video> NO reproduce MKV en ningún navegador → un MKV
+    //      "directo" siempre falla tras un timeout; mejor ir DERECHO al transcode RD.
+    //   2) Audio compatible (no AC3/DTS/TrueHD) — si no, transcode para sacar AAC.
+    //   3) Códec de video que el device decodifique: H264 siempre; HEVC solo si `hevcOk`
+    //      (escritorio/iOS sí, webOS/TV no → "audio sin imagen").
+    // Todo lo que no cumpla → pipeline de transcode RD (mediaInfos → DASH/HLS H264/AAC).
+    const containerHint = (streamFn || streamUrl || '').toLowerCase();
+    const isMp4Container = /\.mp4\b|\bmp4\b/.test(containerHint);
+    const canTryDirect = isMp4Container && !hasBadAudio && (!streamIsX265 || hevcOk);
     if (canTryDirect) {
       const played = await tryHevcDirectPlay(video, streamUrl);
       if (played) {
