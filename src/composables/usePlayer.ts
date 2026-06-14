@@ -653,8 +653,11 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       activeTrack.value = spanishTrackName ?? 'eng1';
       video.play().catch(() => {});
       // Vigilar stalls a mitad de reproducción (pausa larga → URL RD caducada, o seek).
-      currentDashUrl = url;
+      // ⚠️ ORDEN: `startStallMonitor` llama internamente a `clearStallMonitor()`, que pone
+      // `currentDashUrl = null`. Por eso `currentDashUrl` se asigna DESPUÉS del start (si se
+      // asigna antes, queda en null → `recoverDash` falla con "sin DASH url" → iframe).
       startStallMonitor(video, myGen, recoverDash);
+      currentDashUrl = url;
     } catch (e) {
       console.warn('[SHAKA] Error DASH:', e);
       clearMsgTimers();
