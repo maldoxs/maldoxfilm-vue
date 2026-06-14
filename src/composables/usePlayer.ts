@@ -964,6 +964,11 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       if (played) {
         const hasSpaDirect = isDualLatFilename(streamFn);
         opts.onStreamReady?.({ selected, hasNativeSpanish: hasSpaDirect, spanishTrack: null });
+        // Recuperación de stall/seek también en el camino DIRECTO (antes solo DASH/HLS/
+        // loadDirectPlay la tenían). Sin esto, un directo que se traba al adelantar quedaba
+        // CONGELADO sin red de seguridad (caso general: HEVC directo o MKV cacheada). Recarga
+        // el mismo `src` desde la posición destino.
+        startStallMonitor(video, myGen, recoverReloadSrc(streamUrl));
         isLoadingRd.value = false;
         return;
       }
