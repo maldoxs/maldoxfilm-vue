@@ -34,6 +34,13 @@ export const hasRD = (s: TorrentioStream): boolean =>
 export const isX265 = (s: TorrentioStream): boolean =>
   /\bx265\b|\bhevc\b|\bh\.?265\b/i.test(streamInfo(s));
 
+// ── Contenedor (clave para SEEKABILIDAD en TV) ───────────────────────────────
+// El `<video>` reproduce MP4 directo (seek por HTTP Range = casi instantáneo). El MKV
+// no se reproduce directo en el navegador → obliga a transcode (seek lejano lento). Por
+// eso en TV preferimos MP4 con fuerza (ver `scoreStream`). Detección por extensión/etiqueta.
+export const isMp4 = (s: TorrentioStream): boolean => /\.mp4\b|\bmp4\b/i.test(streamInfo(s));
+export const isMkv = (s: TorrentioStream): boolean => /\.mkv\b|\bmkv\b|\bmatroska\b/i.test(streamInfo(s));
+
 // ── Detección de idioma ──────────────────────────────────────────────────────
 export const hasSpa = (s: TorrentioStream): boolean =>
   /\bspa\b|\bspanish\b|\bcastellano\b|\blatino\b|\blat\b|\bes\b/.test(streamInfo(s));
@@ -114,6 +121,13 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
   if (is1080(s)) pts += 10;
   else if (is4k(s)) pts += isTv ? -45 : 5;
   else if (is720(s)) pts += 3;
+  // Contenedor — SOLO en TV: preferir MP4 (play directo, seek por Range = fluido) y
+  // penalizar MKV (no se reproduce directo → transcode → seek lejano lento). Es una
+  // preferencia FUERTE, no excluyente: si solo hay MKV, igual se elige (y va a transcode).
+  if (isTv) {
+    if (isMp4(s)) pts += 25;
+    else if (isMkv(s)) pts -= 25;
+  }
   // Tamaño
   const gb = getGb(s);
   if (gb <= 5) pts += 10;
