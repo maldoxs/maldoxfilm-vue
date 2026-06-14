@@ -37,8 +37,6 @@ import {
   SPANISH_TRACK_CANDIDATES,
   buildSpanishTrackUrl,
   buildDashBaseUrl,
-  applyTranscodeQuality,
-  TRANSCODE_QUALITY,
   buildLoadingMessageTimeline,
   PLAYBACK_STARTED_THRESHOLD_SEC,
   SHAKA_WATCHDOG_MS,
@@ -67,7 +65,9 @@ const STALL_CHECK_INTERVAL_MS = 2000; // cada cuánto se revisa el avance
 const STALL_RECOVER_MS = 8000; // sin avanzar (en play) este tiempo → recuperar
 const STALL_RECOVER_SEEK_MS = 4500; // tras un seek (adelantar/retroceder), recuperar más rápido
 const SEEK_RECENT_WINDOW_MS = 20000; // ventana en la que un stall cuenta como "post-seek"
-const SEEK_STUCK_MS = 8000; // `video.seeking=true` colgado este tiempo (salto lejano) → recuperar
+const SEEK_STUCK_MS = 45000; // `video.seeking` colgado → recuperar. ALTO a propósito: en seek
+// lejano RD genera el segmento on-demand y Shaka lo ESPERA paciente (config retryParameters);
+// recargar antes (como hacía a los 8s) SABOTEABA esa espera. Solo es último recurso si Shaka se rinde.
 const STALL_BACKOFF_MS = 8000; // por cada recuperación previa, esperar este extra (dar tiempo al transcoder)
 const MAX_STALL_RECOVERIES = 4; // recuperaciones sin éxito → cambiar de fuente (con backoff, ~más paciencia)
 
@@ -192,11 +192,27 @@ async function _shakaLoad(video: HTMLVideoElement, url: string, startTime?: numb
     if (code === 1003) return; // LOAD_INTERRUPTED — normal al cambiar audio/fuente
     console.warn('Shaka error:', code ?? e);
   });
-  // En desktop: solo los retries (comportamiento original intacto). En TV/móvil de
-  // poca RAM: además se recorta `bufferBehind` (30s→10s por defecto de Shaka) para
-  // bajar el uso de memoria sin afectar el buffer hacia adelante (sin stutter).
-  const streamingCfg: Record<string, unknown> = { retryParameters: { maxAttempts: 3 } };
-  if (isLowMemoryDevice()) streamingCfg.bufferBehind = 10;
+  // ── Config PACIENTE para el transcode on-demand de RD ───────────────────────
+  // RD genera los segmentos `.m4s` sobre la marcha: al hacer seek lejano, el request
+  // del segmento QUEDA COLGADO hasta que RD lo produce (varios segundos). El player
+  // oficial de RD simplemente ESPERA → seek fluido. Con la config mínima anterior
+  // (3 intentos, timeout corto) Shaka se rendía y caía al iframe. Ahora reintenta
+  // con paciencia (timeout largo, más intentos, backoff) → espera al segmento como
+  // hace RD. Es el fix real del "se pega/cae al adelantar" en pelis que transcodean.
+  const streamingCfg: Record<string, unknown> = {
+    retryParameters: {
+      maxAttempts: 6,
+      baseDelay: 1000,
+      backoffFactor: 1.5,
+      fuzzFactor: 0.5,
+      timeout: 60000, // 60s por segmento: tiempo para que RD lo genere (request colgado)
+      connectionTimeout: 0, // sin límite de conexión (RD long-pollea el segmento)
+      stallTimeout: 0,
+    },
+    bufferingGoal: 30, // buffer hacia adelante generoso (menos rebuffer)
+    rebufferingGoal: 2,
+    bufferBehind: isLowMemoryDevice() ? 10 : 30,
+  };
   p.configure({ streaming: streamingCfg });
   await p.load(url, typeof startTime === 'number' && startTime > 0 ? startTime : null);
 }
@@ -1011,10 +1027,9 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         if (dashUrlBase) dashBaseUrl.value = buildDashBaseUrl(dashUrlBase);
 
         hlsUrl = finalDashUrl || hlsFallback;
-        // FASE 2 — pedir el transcode en 720p (segmentos livianos → seek viable en
-        // los casos AC3/MKV/HEVC que caen acá). `full` (resolución original) es lo que
-        // hacía que el seek se cayera. No-op si la URL no es de transcode RD.
-        if (hlsUrl) hlsUrl = applyTranscodeQuality(hlsUrl);
+        // NOTA: el player oficial de RD reproduce estos AC3/MKV fluido con `profile=full`
+        // (no 720p). Forzar 720p ROMPÍA la reproducción → se usa la calidad original `full`
+        // que devuelve el transcode (la receta que RD mismo usa).
       } catch (e) {
         hlsUrl = null;
         console.log('[RD] Error transcode:', e);
@@ -1072,7 +1087,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     }
     switchingAudio = true;
 
-    const candidateUrl = dashBaseUrl.value + track + '/none/aac/' + TRANSCODE_QUALITY + '.mpd';
+    const candidateUrl = dashBaseUrl.value + track + '/none/aac/full.mpd';
     const startTime = video.currentTime;
     const isEng = track === 'eng1';
     const prevTrack = (isEng ? spanishTrack.value : 'eng1') ?? 'eng1';
