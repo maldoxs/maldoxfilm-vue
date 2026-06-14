@@ -300,3 +300,25 @@ describe('Seekabilidad (Fase 1) — MP4+H264 manda sobre MKV/4K', () => {
     expect(scoreStream(mp4H264, true)).toBeGreaterThan(scoreStream(mkv4kHevc, true));
   });
 });
+
+describe('Disponibilidad RD — cacheado [RD+] manda sobre no cacheado [RD download]', () => {
+  const cachedMkvSpa = stream({
+    name: '[RD+] Torrentio',
+    title: 'Movie 1080p Dual 💾 3 GB',
+    behaviorHints: { filename: 'Movie.2026.1080p-Dual-Lat.mkv' },
+  });
+  const uncachedMp4Eng = stream({
+    name: '[RD download] Torrentio',
+    title: 'Movie 720p 💾 1.2 GB',
+    behaviorHints: { filename: 'Movie.2026.720p.x264.AAC.mp4' },
+  });
+
+  test('una MKV CACHEADA (lista para stream) puntúa más que un MP4 NO cacheado', () => {
+    expect(scoreStream(cachedMkvSpa)).toBeGreaterThan(scoreStream(uncachedMp4Eng));
+  });
+
+  test('selectBestStream elige la versión cacheada (no deja la peli "afuera")', () => {
+    const { best } = selectBestStream([uncachedMp4Eng, cachedMkvSpa]);
+    expect(best?.name).toContain('[RD+]');
+  });
+});

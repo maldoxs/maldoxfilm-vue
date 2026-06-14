@@ -135,8 +135,15 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
   if (gb <= 5) pts += 10;
   else if (gb <= 10) pts += 5;
   else if (gb > 15) pts -= 20;
-  // RD
-  if (hasRD(s)) pts += 8;
+  // RD — DISPONIBILIDAD = prioridad #1 REAL (por encima de MP4/codec/resolución):
+  //   [RD+]        → CACHEADO en RD, se reproduce YA → bonus alto.
+  //   [RD download]→ NO cacheado: RD debe descargarlo (lento/incierto, suele fallar) → penaliza.
+  // Sin esto, el scoring elegía un MP4 720p NO cacheado sobre una MKV cacheada que SÍ
+  // reproduce — y "se caía". De nada sirve el mejor formato si no está listo en RD.
+  const nm = (s.name || '').toLowerCase();
+  if (/\[rd\+\]/.test(nm)) pts += 50; // cacheado → reproduce ya (gana incluso siendo MKV)
+  else if (/\[rd download\]/.test(nm)) pts -= 15; // no cacheado → RD debe bajarlo
+  else if (hasRD(s)) pts += 8; // RD genérico (otros casos / tests)
   return pts;
 }
 
