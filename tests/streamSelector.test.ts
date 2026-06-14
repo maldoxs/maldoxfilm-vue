@@ -65,7 +65,7 @@ describe('"El Padrino" — debe elegir H264+AAC sobre AC3', () => {
 
 describe('"Alien" — idiomas mixtos / mal etiquetados', () => {
   const spaRelease = stream({
-    title: 'Alien 1979 1080p BluRay x264 Spanish Latino 💾 4.2 GB',
+    title: 'Alien 1979 1080p BluRay x264 AAC Spanish Latino 💾 4.2 GB',
     behaviorHints: { filename: 'Alien.1979.1080p.BluRay.x264.Latino.mkv' },
   });
   const itaOnlyRelease = stream({
@@ -85,8 +85,8 @@ describe('"Alien" — idiomas mixtos / mal etiquetados', () => {
     expect(hasBadLang(dualRelease)).toBe(false);
   });
 
-  test('scoreStream descarta el release solo-italiano con -1000', () => {
-    expect(scoreStream(itaOnlyRelease)).toBe(-1000);
+  test('scoreStream descarta el release solo-italiano (descarte fuerte)', () => {
+    expect(scoreStream(itaOnlyRelease)).toBe(-10000);
   });
 
   test('selectBestStream prioriza el release en español sobre el dual/italiano', () => {
@@ -220,9 +220,9 @@ describe('Archivo basura — caso "Scary Movie" (no reproducir samples/test)', (
     expect(isJunkStream(stream({ behaviorHints: { filename: 'La.Pelicula.1080p.H264.AAC.mkv' } }))).toBe(false);
   });
 
-  test('scoreStream descarta el stream basura (-1000 → fuera del ranking)', () => {
+  test('scoreStream descarta el stream basura (descarte fuerte → fuera del ranking)', () => {
     const junk = stream({ title: 'Movie 1080p H264 AAC Spanish 💾 5 GB', behaviorHints: { filename: '6 - Pec Minor Length Test.mp4' } });
-    expect(scoreStream(junk)).toBe(-1000);
+    expect(scoreStream(junk)).toBe(-10000);
     const { scored } = rankStreams([junk]);
     expect(scored).toHaveLength(0); // descartado, no entra al ranking
   });

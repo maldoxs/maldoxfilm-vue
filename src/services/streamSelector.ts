@@ -72,6 +72,27 @@ export const BAD_AUDIO_RE =
   /\bac3\b|\bac-3\b|\bdts\b|\btruehd\b|\batmos\b|\bdd[\d\+]|\bddp\b|\bflac\b|\bpcm\b/i;
 export const hasBadAudio = (s: TorrentioStream): boolean => BAD_AUDIO_RE.test(streamInfo(s));
 
+// ── AV1 — soporte de navegador/TV pobre y decode pesado → evitar ─────────────
+export const isAV1 = (s: TorrentioStream): boolean => /\bav1\b|\bavo1\b/i.test(streamInfo(s));
+
+/**
+ * audioCompatScore — compatibilidad del audio para Direct Play (PRIORIDAD 3).
+ * Orden: AAC > AC3 > EAC3/DDP > DTS > TrueHD > Atmos. AAC reproduce nativo (sin
+ * transcode); el resto fuerza transcode RD o falla — peor cuanto más "avanzado".
+ * Se evalúa del MÁS pesado al más liviano (Atmos/TrueHD suelen venir junto a DDP).
+ */
+export function audioCompatScore(s: TorrentioStream): number {
+  const t = streamInfo(s);
+  if (/\baac\b/.test(t)) return 50; // nativo → Direct Play
+  if (/\batmos\b/.test(t)) return -30;
+  if (/\btruehd\b/.test(t)) return -30;
+  if (/\bdts\b/.test(t)) return -20;
+  if (/\beac3\b|\bddp\b|\bdd\+|\bdd[57]\b|\bdd\b/.test(t)) return 10; // EAC3/DDP
+  if (/\bac3\b|\bac-3\b/.test(t)) return 20;
+  if (/\bflac\b|\bpcm\b/.test(t)) return -20;
+  return 5; // sin etiqueta de audio → asumir aceptable
+}
+
 // ── Detección de archivos "basura" (NO son la peli/episodio real) ────────────
 // Caso real "Scary Movie": Torrentio devolvió un torrent cuyo archivo elegido era
 // "6 - Pec Minor Length Test.mp4" (7 MB) → se reproducía basura (pantalla azul,
@@ -90,60 +111,65 @@ export function isJunkMatch(d: RDDownload): boolean {
 }
 
 /**
- * scoreStream — sistema de puntaje para elegir el mejor stream disponible.
- * Pesos exactos preservados del original (rdGetStream línea ~4757-4780):
- *   Idioma:     SPA +120 | ENG/sin-tag +80 | idioma malo → descarte (-1000)
- *   Contenedor: MP4 +30 | MKV -25   (PRIORIDAD #1 — seekabilidad: MP4=play directo/Range)
- *   Video:      H264 +20 | x265 -5 (TV: -60)
- *   Audio:      AAC +15
- *   Resolución: 1080p +10 | 4k +5 (TV: -45) | 720p +3   (desempate, no prioridad)
- *   Tamaño:     ≤5GB +10 | ≤10GB +5 | >15GB -20
- *   RD:         +8
+ * scoreStream — puntaje orientado a FLUIDEZ/ESTABILIDAD (que NUNCA se congele),
+ * no a máxima calidad. Tiers por prioridad (rangos no solapados → respetan el orden):
+ *
+ *   P1 Disponibilidad RD:  [RD+] +200 · [RD download] -200   (cacheado = precondición)
+ *   P2 Códec video:        H264 +100 · HEVC/H265 -60 (TV -150) · AV1 -80
+ *   P3 Códec audio:        AAC +50 · AC3 +20 · EAC3/DDP +10 · DTS -20 · TrueHD/Atmos -30
+ *   P4 Tamaño:             2-8GB +40 · <2GB +20 · 8-12GB 0 · 12-20GB -40 · >20GB -100
+ *   P5 Resolución:         1080p +20 · 720p +10 · 4K -40 (TV -100)   (4K pesa, no ayuda)
+ *   P6 Idioma:             SPA/Latino +25 · ENG +10   (desempate, NO sobre compat)
+ *   P7 Contenedor:         MP4 +8 · MKV -5   (BONUS MENOR — un MP4 puede traer H265)
+ *   Descarte (-10000):     basura (sample/test) · idioma incompatible (ITA/KOR sin ENG/SPA)
+ *
+ * Diseño basado en evidencia real: lo pesado (4K/HEVC/DTS/+20GB) CRASHEA al seek/pause;
+ * H264+AAC+2-8GB es lo más estable. El contenedor MP4 NO es criterio principal (un .mp4
+ * con H265 4K 21GB —caso Maze Runner— NO es fluido). La compatibilidad gana al idioma:
+ * mejor reproducir en inglés+subs que congelarse intentando el latino pesado.
  */
 export function scoreStream(s: TorrentioStream, isTv = false): number {
+  // ── Descartes automáticos ──
+  if (isJunkStream(s)) return -10000; // sample/trailer/test → nunca
+  if (hasBadLang(s)) return -10000; // idioma incompatible sin ENG/SPA
+
   let pts = 0;
-  // Archivo basura (sample/trailer/"length test") → descarte directo. Evita el
-  // caso "Scary Movie" (se elegía un .mp4 de prueba en vez de la película).
-  if (isJunkStream(s)) return -1000;
-  // Idioma — español tiene mayor peso para garantizar que gane sobre inglés
-  if (hasSpa(s)) pts += 120; // SPA explícito o Dual/Lat
-  else if (hasBadLang(s)) return -1000; // ITA/KOR/RUS sin ENG → descarte
-  else pts += 80; // ENG explícito o sin etiqueta
-  // Video
-  if (hasH264(s)) pts += 20;
-  // x265/HEVC: en escritorio penaliza poco (-5); en TV penaliza FUERTE porque el
-  // navegador de la smart-TV (webOS) "dice" soportar HEVC pero NO renderiza el
-  // video por MSE (4K/10-bit) → audio sin imagen. Mejor preferir H264 reproducible.
-  if (isX265(s)) pts -= isTv ? 60 : 5;
-  // Audio
-  if (hasAAC(s)) pts += 15;
-  // Resolución — en TV el 4K (sobre todo HEVC/10-bit) queda en negro; se penaliza
-  // para preferir 1080p H264, que el navegador de la TV sí muestra.
-  if (is1080(s)) pts += 10;
-  else if (is4k(s)) pts += isTv ? -45 : 5;
-  else if (is720(s)) pts += 3;
-  // Contenedor — PRIORIDAD #1 (global, desktop Y TV): preferir MP4 y penalizar MKV.
-  // Es el factor de mayor peso porque define la SEEKABILIDAD: MP4+H264 se reproduce
-  // DIRECTO con HTTP Range (seek instantáneo, sin transcode RD); el MKV no se reproduce
-  // directo en el navegador → obliga a transcode RD → seek lejano lento. Jerarquía
-  // resultante: MP4(+30) → H264(+20) → AAC(+15) → compat/idioma → resolución(+10).
-  // Preferencia FUERTE pero NO excluyente: si solo hay MKV, igual se elige (va a transcode).
-  if (isMp4(s)) pts += 30;
-  else if (isMkv(s)) pts -= 25;
-  // Tamaño
-  const gb = getGb(s);
-  if (gb <= 5) pts += 10;
-  else if (gb <= 10) pts += 5;
-  else if (gb > 15) pts -= 20;
-  // RD — DISPONIBILIDAD = prioridad #1 REAL (por encima de MP4/codec/resolución):
-  //   [RD+]        → CACHEADO en RD, se reproduce YA → bonus alto.
-  //   [RD download]→ NO cacheado: RD debe descargarlo (lento/incierto, suele fallar) → penaliza.
-  // Sin esto, el scoring elegía un MP4 720p NO cacheado sobre una MKV cacheada que SÍ
-  // reproduce — y "se caía". De nada sirve el mejor formato si no está listo en RD.
+
+  // ── P1 — Disponibilidad RD (precondición: cacheado se reproduce YA) ──
   const nm = (s.name || '').toLowerCase();
-  if (/\[rd\+\]/.test(nm)) pts += 50; // cacheado → reproduce ya (gana incluso siendo MKV)
-  else if (/\[rd download\]/.test(nm)) pts -= 15; // no cacheado → RD debe bajarlo
-  else if (hasRD(s)) pts += 8; // RD genérico (otros casos / tests)
+  if (/\[rd\+\]/.test(nm)) pts += 200;
+  else if (/\[rd download\]/.test(nm)) pts -= 200;
+  else if (hasRD(s)) pts += 0;
+
+  // ── P2 — Códec de video (H264 = Direct Play estable; HEVC/AV1 = pesado/incompat) ──
+  if (hasH264(s)) pts += 100;
+  if (isX265(s)) pts -= isTv ? 150 : 60; // HEVC en webOS = audio sin imagen
+  if (isAV1(s)) pts -= 80;
+
+  // ── P3 — Códec de audio (AAC nativo > AC3 > EAC3 > DTS > TrueHD/Atmos) ──
+  pts += audioCompatScore(s);
+
+  // ── P4 — Tamaño (los enormes crashean al seek/pause; 2-8GB es el punto dulce) ──
+  const gb = getGb(s);
+  if (gb > 20) pts -= 100;
+  else if (gb > 12) pts -= 40;
+  else if (gb >= 2 && gb <= 8) pts += 40;
+  else if (gb < 2) pts += 20;
+  // 8-12GB → 0 (neutro)
+
+  // ── P5 — Resolución (1080p sweet spot; 4K pesa y no mejora la experiencia) ──
+  if (is1080(s)) pts += 20;
+  else if (is720(s)) pts += 10;
+  else if (is4k(s)) pts -= isTv ? 100 : 40;
+
+  // ── P6 — Idioma (desempate; NO por encima de compatibilidad — ver nota de cabecera) ──
+  if (hasSpa(s)) pts += 25; // español/latino
+  else pts += 10; // inglés / sin etiqueta
+
+  // ── P7 — Contenedor (BONUS MENOR; jamás criterio principal) ──
+  if (isMp4(s)) pts += 8;
+  else if (isMkv(s)) pts -= 5;
+
   return pts;
 }
 
@@ -164,7 +190,7 @@ export function rankStreams(
   const withUrl = streams.filter((s) => !!s.url);
   const scored = withUrl
     .map((s) => ({ s, pts: scoreStream(s, isTv) }))
-    .filter((x) => x.pts > -500)
+    .filter((x) => x.pts > -5000)
     .sort((a, b) => b.pts - a.pts);
   const pool = scored.length ? scored : withUrl.map((s) => ({ s, pts: 0 }));
   return { withUrl, scored, pool };
@@ -285,7 +311,7 @@ export function resolveActiveStream(
   }
 
   // Ronda 2 — solo si el top stream tiene idioma incompatible (pts <= -500)
-  const topHasBadLang = scored.length > 0 && scored[0].pts <= -500;
+  const topHasBadLang = scored.length > 0 && scored[0].pts <= -5000;
   if (!match && topHasBadLang && pool.length > 1) {
     // ⚠️ Logs de diagnóstico [RD] preservados 1:1 — el original los emite en
     // cada paso de la cascada (índex.html líneas ~4862-4900); se habían perdido
