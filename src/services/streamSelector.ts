@@ -93,9 +93,10 @@ export function isJunkMatch(d: RDDownload): boolean {
  * scoreStream — sistema de puntaje para elegir el mejor stream disponible.
  * Pesos exactos preservados del original (rdGetStream línea ~4757-4780):
  *   Idioma:     SPA +120 | ENG/sin-tag +80 | idioma malo → descarte (-1000)
- *   Video:      H264 +20 | x265 -5
+ *   Contenedor: MP4 +30 | MKV -25   (PRIORIDAD #1 — seekabilidad: MP4=play directo/Range)
+ *   Video:      H264 +20 | x265 -5 (TV: -60)
  *   Audio:      AAC +15
- *   Resolución: 1080p +10 | 4k +5 | 720p +3
+ *   Resolución: 1080p +10 | 4k +5 (TV: -45) | 720p +3   (desempate, no prioridad)
  *   Tamaño:     ≤5GB +10 | ≤10GB +5 | >15GB -20
  *   RD:         +8
  */
@@ -121,13 +122,14 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
   if (is1080(s)) pts += 10;
   else if (is4k(s)) pts += isTv ? -45 : 5;
   else if (is720(s)) pts += 3;
-  // Contenedor — SOLO en TV: preferir MP4 (play directo, seek por Range = fluido) y
-  // penalizar MKV (no se reproduce directo → transcode → seek lejano lento). Es una
-  // preferencia FUERTE, no excluyente: si solo hay MKV, igual se elige (y va a transcode).
-  if (isTv) {
-    if (isMp4(s)) pts += 25;
-    else if (isMkv(s)) pts -= 25;
-  }
+  // Contenedor — PRIORIDAD #1 (global, desktop Y TV): preferir MP4 y penalizar MKV.
+  // Es el factor de mayor peso porque define la SEEKABILIDAD: MP4+H264 se reproduce
+  // DIRECTO con HTTP Range (seek instantáneo, sin transcode RD); el MKV no se reproduce
+  // directo en el navegador → obliga a transcode RD → seek lejano lento. Jerarquía
+  // resultante: MP4(+30) → H264(+20) → AAC(+15) → compat/idioma → resolución(+10).
+  // Preferencia FUERTE pero NO excluyente: si solo hay MKV, igual se elige (va a transcode).
+  if (isMp4(s)) pts += 30;
+  else if (isMkv(s)) pts -= 25;
   // Tamaño
   const gb = getGb(s);
   if (gb <= 5) pts += 10;

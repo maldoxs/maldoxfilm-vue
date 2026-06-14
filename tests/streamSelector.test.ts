@@ -274,3 +274,29 @@ describe('Archivo basura — caso "Scary Movie" (no reproducir samples/test)', (
     expect(sel.url).toBeNull(); // basura → sin URL → cae a server-side/iframe, nunca reproduce basura
   });
 });
+
+describe('Seekabilidad (Fase 1) — MP4+H264 manda sobre MKV/4K', () => {
+  const mp4H264 = stream({
+    name: 'RD',
+    title: 'Movie 2024 1080p WEBRip 💾 2.5 GB',
+    behaviorHints: { filename: 'Movie.2024.1080p.x264.AAC.mp4' },
+  });
+  const mkv4kHevc = stream({
+    name: 'RD',
+    title: 'Movie 2024 2160p 💾 16 GB',
+    behaviorHints: { filename: 'Movie.2024.2160p.HEVC.x265.mkv' },
+  });
+
+  test('scoreStream: MP4 H264 (1080p) puntúa MÁS que MKV HEVC 4K — fluidez/seek sobre resolución', () => {
+    expect(scoreStream(mp4H264)).toBeGreaterThan(scoreStream(mkv4kHevc));
+  });
+
+  test('selectBestStream elige el MP4 H264 aunque el MKV sea 4K', () => {
+    const { best } = selectBestStream([mkv4kHevc, mp4H264]);
+    expect(best?.behaviorHints?.filename).toContain('.mp4');
+  });
+
+  test('en TV el MP4 H264 también gana (HEVC/4K penalizados aún más)', () => {
+    expect(scoreStream(mp4H264, true)).toBeGreaterThan(scoreStream(mkv4kHevc, true));
+  });
+});
