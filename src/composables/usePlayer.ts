@@ -535,6 +535,14 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     stallLastTime = video.currentTime;
     onStallSeeked = () => {
       lastSeekAt = Date.now();
+      // Un seek NUEVO del usuario = intento fresco → resetear el presupuesto de
+      // recuperaciones (si no, varios seeks seguidos agotaban los 3 intentos y caía al
+      // iframe). Durante una recuperación en curso NO se resetea (evita bucle infinito).
+      if (!stallRecovering) {
+        stallRecoveries = 0;
+        stallStuckSince = 0;
+        seekingSince = 0;
+      }
     };
     video.addEventListener('seeked', onStallSeeked);
     stallTimer = setInterval(() => {
@@ -926,11 +934,17 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // ── Detección HEVC nativa + cascada de audio incompatible (líneas ~7864-7877) ──
     // En TV forzamos hevcOk=false: el navegador de la smart-TV reporta soporte HEVC
     // (`isTypeSupported` → true) pero NO renderiza el video por MSE (4K/10-bit) →
-    // audio sin imagen. Así el x265 va al transcode (H264) en vez del HEVC directo negro.
+    // audio sin imagen. Así el HEVC va al transcode (H264) en vez del HEVC directo negro.
     const hevcOk = !isTvNow && detectHevcSupport(getMediaSource());
     const { hasBadAudio } = checkBadAudioForDirectPlay(streamFn, !!rdId);
 
-    if (hevcOk && !hasBadAudio) {
+    // Play DIRECTO (seek por HTTP Range = casi instantáneo, anda igual en TV). Se intenta
+    // cuando el stream es H264 (reproducible en cualquier navegador) o HEVC con soporte real
+    // (escritorio). ⚠️ FIX: antes el gate era solo `hevcOk`, que ATABA el H264 al soporte HEVC
+    // → en TV (hevcOk=false) mandaba TODO al transcode, y el seek lejano se caía. Ahora el H264
+    // juega directo también en TV; solo el HEVC en TV va al transcode (evita "audio sin imagen").
+    const canTryDirect = (!streamIsX265 || hevcOk) && !hasBadAudio;
+    if (canTryDirect) {
       const played = await tryHevcDirectPlay(video, streamUrl);
       if (played) {
         const hasSpaDirect = isDualLatFilename(streamFn);
@@ -938,8 +952,9 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         isLoadingRd.value = false;
         return;
       }
-      // HEVC directo falló → si no hay rdId, contenido bloqueado/no disponible (líneas ~7905-7911)
-      if (!rdId) {
+      // Directo falló. Si era HEVC sin rdId → contenido bloqueado/no disponible (líneas ~7905-7911).
+      // (Para H264 que falla —p.ej. MKV no reproducible directo— simplemente seguimos al transcode.)
+      if (streamIsX265 && !rdId) {
         loadingMessage.value = '🚫 Película no disponible — cambiando de reproductor...';
         await new Promise((r) => setTimeout(r, BLOCKED_MESSAGE_WAIT_MS));
         if (playerStore.isStale(myGen)) return;
