@@ -65,6 +65,7 @@ const STALL_CHECK_INTERVAL_MS = 2000; // cada cuánto se revisa el avance
 const STALL_RECOVER_MS = 8000; // sin avanzar (en play) este tiempo → recuperar
 const STALL_RECOVER_SEEK_MS = 4500; // tras un seek (adelantar/retroceder), recuperar más rápido
 const SEEK_RECENT_WINDOW_MS = 20000; // ventana en la que un stall cuenta como "post-seek"
+const SEEK_STUCK_MS = 6000; // `video.seeking=true` colgado este tiempo (salto lejano) → recuperar
 const MAX_STALL_RECOVERIES = 3; // recuperaciones seguidas sin éxito → cambiar de fuente
 
 // ── Carga dinámica de hls.js / Shaka Player (líneas ~3884-3937) ─────────────
@@ -400,6 +401,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   let stallVideo: HTMLVideoElement | null = null;
   let onStallSeeked: (() => void) | null = null;
   let lastSeekAt = 0;
+  let seekingSince = 0; // desde cuándo `video.seeking` está en true (detecta seeks colgados)
 
   function clearStallMonitor() {
     if (stallTimer) {
@@ -415,6 +417,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     currentDashUrl = null;
     stallRecoverFn = null;
     lastSeekAt = 0;
+    seekingSince = 0;
   }
 
   // ── Recuperaciones por camino (recargan el stream desde la posición actual) ──
@@ -539,9 +542,26 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         clearStallMonitor();
         return;
       }
-      // No interferir durante recuperación, cambio de audio, pausa, seek o fin
+      // SEEK que tarda DEMASIADO (típico: salto lejano y el transcoder de RD no tiene
+      // ese tramo listo). El navegador deja `video.seeking = true` mientras busca; si el
+      // seek se cuelga, queda en `true` para siempre y antes el monitor NUNCA actuaba
+      // → "se pegaba" al adelantar lejos (+20min). Ahora: si lleva > SEEK_STUCK_MS
+      // buscando, recuperamos recargando desde la posición destino (re-pide el transcode ahí).
+      if (video.seeking) {
+        if (seekingSince === 0) {
+          seekingSince = Date.now();
+        } else if (!stallRecovering && Date.now() - seekingSince >= SEEK_STUCK_MS) {
+          seekingSince = 0;
+          void runStallRecovery(video, myGen);
+        }
+        stallLastTime = video.currentTime;
+        stallStuckSince = 0;
+        return;
+      }
+      seekingSince = 0;
+      // No interferir durante recuperación, cambio de audio, pausa o fin
       // (una pausa normal NO debe disparar recuperación).
-      if (stallRecovering || switchingAudio || video.paused || video.seeking || video.ended) {
+      if (stallRecovering || switchingAudio || video.paused || video.ended) {
         stallLastTime = video.currentTime;
         stallStuckSince = 0;
         return;
