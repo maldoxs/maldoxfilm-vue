@@ -65,9 +65,11 @@ const STALL_CHECK_INTERVAL_MS = 2000; // cada cuánto se revisa el avance
 const STALL_RECOVER_MS = 8000; // sin avanzar (en play) este tiempo → recuperar
 const STALL_RECOVER_SEEK_MS = 4500; // tras un seek (adelantar/retroceder), recuperar más rápido
 const SEEK_RECENT_WINDOW_MS = 20000; // ventana en la que un stall cuenta como "post-seek"
-const SEEK_STUCK_MS = 45000; // `video.seeking` colgado → recuperar. ALTO a propósito: en seek
-// lejano RD genera el segmento on-demand y Shaka lo ESPERA paciente (config retryParameters);
-// recargar antes (como hacía a los 8s) SABOTEABA esa espera. Solo es último recurso si Shaka se rinde.
+const SEEK_STUCK_MS = 6000; // `video.seeking` colgado → recargar el manifest CON el offset del seek
+// (recoverDash con startTime=posición). Evidencia del player de RD: al seekear setea "Seeking Time"
+// = destino y RD transcodea desde ahí. Replicamos: recarga rápida al offset (6s) + Shaka PACIENTE
+// (retryParameters con timeout largo) que ESPERA a que RD genere ese segmento. Esa combinación
+// (recarga-al-offset + espera) es el mecanismo de seek del player oficial de RD.
 const STALL_BACKOFF_MS = 8000; // por cada recuperación previa, esperar este extra (dar tiempo al transcoder)
 const MAX_STALL_RECOVERIES = 4; // recuperaciones sin éxito → cambiar de fuente (con backoff, ~más paciencia)
 
