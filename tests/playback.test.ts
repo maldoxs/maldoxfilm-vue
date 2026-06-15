@@ -80,6 +80,12 @@ describe('checkBadAudioForDirectPlay — cascada de detección de audio incompat
     expect(r.isMkvNoAac).toBe(false);
     expect(r.hasBadAudio).toBe(false);
   });
+
+  test('caso Alien: MP4 "Surround" → audio incompatible (no quedar SIN audio en Direct Play)', () => {
+    const r = checkBadAudioForDirectPlay('A3 Alien (1979) 1080p Surround.mp4', true);
+    expect(r.hasBadAudioExplicit).toBe(true);
+    expect(r.hasBadAudio).toBe(true);
+  });
 });
 
 describe('Probing de pista de audio español en manifest DASH', () => {

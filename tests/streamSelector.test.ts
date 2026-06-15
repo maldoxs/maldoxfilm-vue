@@ -63,6 +63,29 @@ describe('"El Padrino" — debe elegir H264+AAC sobre AC3', () => {
   });
 });
 
+describe('Audio "Surround" en MP4 (caso A3 Alien — se veía SIN audio)', () => {
+  const surroundMp4 = stream({
+    name: '[RD+] Torrentio',
+    title: 'A3 Alien 1979 1080p Surround 💾 2.6 GB',
+    behaviorHints: { filename: 'A3 Alien (1979) 1080p Surround.mp4' },
+  });
+  const aacMp4 = stream({
+    name: '[RD+] Torrentio',
+    title: 'Alien 1979 1080p H264 AAC 💾 2.5 GB',
+    behaviorHints: { filename: 'Alien.1979.1080p.BluRay.H264.AAC.mp4' },
+  });
+
+  test('"Surround" se detecta como audio incompatible (no es Direct Play limpio)', () => {
+    expect(hasBadAudio(surroundMp4)).toBe(true);
+  });
+
+  test('si existe una versión AAC, gana sobre la "Surround" (audio que sí suena)', () => {
+    expect(scoreStream(aacMp4)).toBeGreaterThan(scoreStream(surroundMp4));
+    const { best } = selectBestStream([surroundMp4, aacMp4]);
+    expect(best?.behaviorHints?.filename).toContain('AAC');
+  });
+});
+
 describe('"Alien" — idiomas mixtos / mal etiquetados', () => {
   const spaRelease = stream({
     title: 'Alien 1979 1080p BluRay x264 AAC Spanish Latino 💾 4.2 GB',
@@ -320,5 +343,44 @@ describe('Disponibilidad RD — cacheado [RD+] manda sobre no cacheado [RD downl
   test('selectBestStream elige la versión cacheada (no deja la peli "afuera")', () => {
     const { best } = selectBestStream([uncachedMp4Eng, cachedMkvSpa]);
     expect(best?.name).toContain('[RD+]');
+  });
+});
+
+describe('Idioma condicional a Direct Play — "mejor de los dos mundos" (caso El Padrino YIFY)', () => {
+  // Español Direct Play (MP4/H264) → te da seek + audio español + sub sincronizado.
+  const spaDirect = stream({
+    name: '[RD+] Torrentio',
+    title: 'El Padrino 1972 720p Spanish 💾 0.9 GB',
+    behaviorHints: { filename: 'The.Godfather.Part.I.1972.720p.BrRip.x264.YIFY.Spanish.mp4' },
+  });
+  // Inglés Direct Play (MP4/H264/AAC) de más resolución/tamaño.
+  const engDirect = stream({
+    name: '[RD+] Torrentio',
+    title: 'The Godfather 1972 1080p English 💾 3.3 GB',
+    behaviorHints: { filename: 'The.Godfather.1972.REMASTERED.1080p.BluRay.H264.AAC-RARBG.mp4' },
+  });
+  // Español pero AC3/MKV → transcode (pierde el seek).
+  const spaTranscode = stream({
+    name: '[RD+] Torrentio',
+    title: 'El Padrino 1972 1080p Spanish AC3 💾 12 GB',
+    behaviorHints: { filename: 'El.Padrino.1972.1080p.BluRay.x264.AC3.5.1.Spanish.mkv' },
+  });
+
+  test('español DIRECT PLAY gana a inglés Direct Play de más resolución (3 cosas: seek+audio+sub)', () => {
+    expect(scoreStream(spaDirect)).toBeGreaterThan(scoreStream(engDirect));
+    const { best } = selectBestStream([engDirect, spaDirect]);
+    expect(hasSpa(best!)).toBe(true);
+    expect(best?.behaviorHints?.filename).toContain('YIFY');
+  });
+
+  test('español TRANSCODE (AC3/MKV) NO debe override a un inglés Direct Play (no sacrificar el seek)', () => {
+    expect(scoreStream(engDirect)).toBeGreaterThan(scoreStream(spaTranscode));
+    const { best } = selectBestStream([spaTranscode, engDirect]);
+    expect(best?.behaviorHints?.filename).toContain('RARBG');
+  });
+
+  test('si SOLO hay español en transcode, igual se elige (no deja la peli afuera)', () => {
+    const { best } = selectBestStream([spaTranscode]);
+    expect(hasSpa(best!)).toBe(true);
   });
 });

@@ -43,8 +43,11 @@ export function detectHevcSupport(mediaSource: MediaSourceLike | undefined | nul
 // `\bdd5\.1\b` y `\bmp2\b`. Se preserva la regex EXACTA de esta sección, tal
 // como aparece en el código fuente, sin unificarla con la otra (eso sería
 // "simplificar lógica" — ambas regex conviven en el original).
+// (Agregado deliberado posterior a la migración: `\bsurround\b` — caso "A3 Alien
+// 1080p Surround.mp4": MP4 H264 que reproducía VIDEO pero sin audio, porque el
+// "Surround" es multicanal NO-AAC (AC3/DTS). Marcarlo manda a transcode → con audio.)
 export const DIRECT_PLAY_BAD_AUDIO_RE =
-  /\bac3\b|\bac-3\b|\bdts\b|\btruehd\b|\batmos\b|\bdd5\.1\b|\bdd[\d\+]|\bddp\b|\bflac\b|\bpcm\b|\bmp2\b/i;
+  /\bac3\b|\bac-3\b|\bdts\b|\btruehd\b|\batmos\b|\bdd5\.1\b|\bdd[\d\+]|\bddp\b|\bflac\b|\bpcm\b|\bmp2\b|\bsurround\b/i;
 
 export interface BadAudioCheckResult {
   hasBadAudioExplicit: boolean;

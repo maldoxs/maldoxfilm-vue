@@ -68,8 +68,11 @@ export const is1080 = (s: TorrentioStream): boolean => /\b1080p\b/i.test(streamI
 export const is720 = (s: TorrentioStream): boolean => /\b720p\b/i.test(streamInfo(s));
 
 // ── Audio incompatible con reproducción nativa (necesita transcode RD) ──────
+// "surround" se incluye porque etiqueta multicanal NO-AAC (típicamente AC3/DTS):
+// caso real "A3 Alien (1979) 1080p Surround.mp4" → era MP4 H264 (Direct Play del
+// VIDEO) pero el audio "Surround" no lo decodifica el navegador → se veía SIN audio.
 export const BAD_AUDIO_RE =
-  /\bac3\b|\bac-3\b|\bdts\b|\btruehd\b|\batmos\b|\bdd[\d\+]|\bddp\b|\bflac\b|\bpcm\b/i;
+  /\bac3\b|\bac-3\b|\bdts\b|\btruehd\b|\batmos\b|\bdd[\d\+]|\bddp\b|\bflac\b|\bpcm\b|\bsurround\b/i;
 export const hasBadAudio = (s: TorrentioStream): boolean => BAD_AUDIO_RE.test(streamInfo(s));
 
 // ── AV1 — soporte de navegador/TV pobre y decode pesado → evitar ─────────────
@@ -90,6 +93,7 @@ export function audioCompatScore(s: TorrentioStream): number {
   if (/\beac3\b|\bddp\b|\bdd\+|\bdd[57]\b|\bdd\b/.test(t)) return 10; // EAC3/DDP
   if (/\bac3\b|\bac-3\b/.test(t)) return 20;
   if (/\bflac\b|\bpcm\b/.test(t)) return -20;
+  if (/\bsurround\b/.test(t)) return 0; // multicanal NO-AAC (AC3/DTS) → fuerza transcode
   return 5; // sin etiqueta de audio → asumir aceptable
 }
 
@@ -162,9 +166,15 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
   else if (is720(s)) pts += 10;
   else if (is4k(s)) pts -= isTv ? 100 : 40;
 
-  // ── P6 — Idioma (desempate; NO por encima de compatibilidad — ver nota de cabecera) ──
-  if (hasSpa(s)) pts += 25; // español/latino
-  else pts += 10; // inglés / sin etiqueta
+  // ── P6 — Idioma (condicional a Direct Play) ──
+  // El español pesa FUERTE solo si la versión se reproduce DIRECTO (H264 + audio
+  // compatible) → así una español MP4/H264 gana sobre una inglesa de más resolución
+  // (te da las 3 cosas: seek + audio español + sub sincronizado). Pero si la única
+  // versión español es AC3/MKV (transcode), el idioma pasa a segundo plano: igual
+  // perderías el seek, y NO debe override a una inglesa Direct Play (que sí seekea).
+  const directPlay = hasH264(s) && !hasBadAudio(s);
+  if (hasSpa(s)) pts += directPlay ? 90 : 20; // español/latino
+  else pts += directPlay ? 10 : 5; // inglés / sin etiqueta
 
   // ── P7 — Contenedor (BONUS MENOR; jamás criterio principal) ──
   if (isMp4(s)) pts += 8;
