@@ -65,10 +65,23 @@ const STALL_CHECK_INTERVAL_MS = 2000; // cada cuánto se revisa el avance
 const STALL_RECOVER_MS = 8000; // sin avanzar (en play) este tiempo → recuperar
 const STALL_RECOVER_SEEK_MS = 4500; // tras un seek (adelantar/retroceder), recuperar más rápido
 const SEEK_RECENT_WINDOW_MS = 20000; // ventana en la que un stall cuenta como "post-seek"
+// Seek trabado SIN buffer: cuánto esperar antes de volver a posición reproducible.
+// CERCA del punto actual → RD puede extender el transcode unos segundos → más paciencia.
+// LEJOS (minutos) → RD no tiene ese tramo y no lo va a generar → desistir rápido.
+const NEAR_SEEK_SEC = 120; // distancia (s) hasta la que un seek se considera "cercano"
+const SEEK_FREEZE_NEAR_MS = 12000; // paciencia para seek cercano (dar tiempo a RD)
+const SEEK_FREEZE_FAR_MS = 5000; // seek lejano → volver rápido (no se va a poder)
 // (NOTA: ya NO recargamos el manifest en el seek — RD no expone un mecanismo de seek
 // replicable desde la API pública; recargar mataba el player. El seek lo maneja Shaka nativo.)
 const STALL_BACKOFF_MS = 8000; // por cada recuperación previa, esperar este extra (dar tiempo al transcoder)
 const MAX_STALL_RECOVERIES = 4; // recuperaciones sin éxito → cambiar de fuente (con backoff, ~más paciencia)
+
+// ── PRE-CACHEO Direct Play (#5) ──────────────────────────────────────────────
+// Mientras reproduce el transcode, sondea a RD si ya cacheó el MP4/H264/AAC; al
+// quedar listo, cambia a Direct Play (seek perfecto). Sondeo espaciado para no
+// martillar la API de RD (rate limit 250/min) y dar tiempo a la descarga.
+const UPGRADE_POLL_MS = 12000; // cada cuánto preguntar a RD si ya está cacheado
+const UPGRADE_MAX_ATTEMPTS = 40; // ~8 min de espera máx. (luego se queda en transcode)
 
 // ── Carga dinámica de hls.js / Shaka Player (líneas ~3884-3937) ─────────────
 // Se preserva el patrón "singleton + polling" del original: solo un <script>
@@ -419,6 +432,16 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   let stallVideo: HTMLVideoElement | null = null;
   let onStallSeeked: (() => void) | null = null;
   let lastSeekAt = 0;
+  let lastPlayingPos = 0; // última posición donde el video AVANZABA de verdad (zona reproducible)
+  let seekStuckSince = 0; // desde cuándo un seek está trabado SIN buffer (far-seek a tramo no generado)
+  // Pre-cacheo Direct Play (#5): timer del sondeo en segundo plano.
+  let upgradeTimer: ReturnType<typeof setTimeout> | null = null;
+  function cancelUpgrade() {
+    if (upgradeTimer) {
+      clearTimeout(upgradeTimer);
+      upgradeTimer = null;
+    }
+  }
 
   // ── Instrumentación (#3) — log compacto de los eventos críticos del <video> con
   // tiempo, buffer por delante, readyState/networkState. Sirve para capturar EXACTO
@@ -468,6 +491,8 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     currentDashUrl = null;
     stallRecoverFn = null;
     lastSeekAt = 0;
+    lastPlayingPos = 0;
+    seekStuckSince = 0;
   }
 
   // ── Recuperaciones por camino (recargan el stream desde la posición actual) ──
@@ -609,8 +634,38 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       if (video.seeking) {
         stallLastTime = video.currentTime;
         stallStuckSince = 0;
+        // RED ANTI-CONGELAMIENTO: un far-seek de transcode a un tramo que RD NO generó
+        // deja `seeking=true` con buffer 0 PARA SIEMPRE → el player "se muere". Si el seek
+        // lleva trabado SIN buffer más de SEEK_FREEZE_MS, volvemos a la última posición
+        // reproducible (zona ya transcodeada). No mata el player: seguís viendo. El seek
+        // lejano recién funciona cuando el pre-cacheo (#5) cambia a Direct Play.
+        if (bufferAhead(video) < 0.1) {
+          if (seekStuckSince === 0) {
+            seekStuckSince = Date.now();
+          } else {
+            // Cerca del punto reproducible → RD puede extender el transcode (paciencia).
+            // Lejos (minutos) → no lo va a generar → desistir rápido y volver (no morir).
+            const dist = Math.abs(video.currentTime - lastPlayingPos);
+            const limit = dist <= NEAR_SEEK_SEC ? SEEK_FREEZE_NEAR_MS : SEEK_FREEZE_FAR_MS;
+            if (Date.now() - seekStuckSince >= limit) {
+              seekStuckSince = 0;
+              const safe = Math.max(0, lastPlayingPos);
+              const kind = dist > NEAR_SEEK_SEC ? 'lejano' : 'cercano';
+              console.warn(`[PLAYER] seek ${kind} trabado (transcode sin segmento) → volviendo a t=${safe.toFixed(1)}s`);
+              opts.onToast('⏪ Esa parte aún no está lista — volviendo');
+              try {
+                video.currentTime = safe;
+              } catch {
+                /* noop */
+              }
+            }
+          }
+        } else {
+          seekStuckSince = 0;
+        }
         return;
       }
+      seekStuckSince = 0;
       // No interferir durante recuperación, cambio de audio, pausa o fin
       // (una pausa normal NO debe disparar recuperación).
       if (stallRecovering || switchingAudio || video.paused || video.ended) {
@@ -622,6 +677,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       if (t > stallLastTime + 0.1) {
         // Avanza con normalidad → resetear contadores.
         stallLastTime = t;
+        lastPlayingPos = t; // posición segura para volver si un seek futuro se traba
         stallStuckSince = 0;
         stallRecoveries = 0;
         return;
@@ -898,6 +954,80 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   }
 
   // ── Punto de entrada — equivalente al bloque RD completo (líneas ~7824-8186) ──
+  // ── PRE-CACHEO Direct Play (#5) ──────────────────────────────────────────
+  /**
+   * upgradeToDirectPlay — cambia de transcode a la versión MP4 ya cacheada (Direct
+   * Play) EN LA POSICIÓN ACTUAL, sin cortar. Suelta Shaka (DASH del transcode),
+   * carga el MP4 nativo (Range = seek instantáneo) y reengancha el monitor de stall.
+   */
+  async function upgradeToDirectPlay(
+    video: HTMLVideoElement,
+    directUrl: string,
+    torrentId: string | null,
+    myGen: number
+  ) {
+    if (playerStore.isStale(myGen)) return;
+    const pos = video.currentTime;
+    const wasPaused = video.paused;
+    console.warn(`[RD] Pre-cacheo (#5) LISTO → Direct Play en t=${pos.toFixed(1)}s (seek ya fluido)`);
+    clearStallMonitor(); // detener el monitor del transcode
+    _shakaDestroy(); // soltar Shaka (el DASH quedaba atado al <video>)
+    // El torrent que creamos al pre-cachear se borra al cerrar/cambiar (ADR-006);
+    // para entonces RD ya lo tiene en su caché global → la próxima vez será [RD+].
+    currentServerTorrentId = torrentId;
+    const onMeta = () => {
+      video.removeEventListener('loadedmetadata', onMeta);
+      try {
+        if (pos > 1) video.currentTime = pos;
+      } catch {
+        /* noop */
+      }
+      if (!wasPaused) video.play().catch(() => {});
+    };
+    video.addEventListener('loadedmetadata', onMeta);
+    video.src = directUrl;
+    video.load();
+    startStallMonitor(video, myGen, recoverReloadSrc(directUrl));
+    opts.onToast('⚡ Reproducción fluida activada (adelantar/retroceder instantáneo)');
+  }
+
+  /**
+   * maybeStartDirectPlayUpgrade — si la versión activa es transcode y hay un MP4/H264/
+   * AAC no cacheado (`selected.upgradeInfoHash`), sondea a RD en segundo plano hasta
+   * que lo cachee y entonces cambia a Direct Play. No bloquea la reproducción actual.
+   */
+  function maybeStartDirectPlayUpgrade(video: HTMLVideoElement, selected: SelectedStream, myGen: number) {
+    const hash = selected.upgradeInfoHash;
+    const precache = opts.rdStreamResolver.precacheDirect;
+    if (!hash || !precache) return;
+    cancelUpgrade();
+    let attempts = 0;
+    const tick = async () => {
+      if (playerStore.isStale(myGen)) return; // el usuario cambió de película
+      attempts++;
+      console.warn(`[RD] Pre-cacheo (#5): intento ${attempts}/${UPGRADE_MAX_ATTEMPTS} — preguntando a RD si ya cacheó el MP4...`);
+      let r: Awaited<ReturnType<NonNullable<typeof precache>>> = null;
+      try {
+        r = await precache(hash);
+      } catch {
+        r = null;
+      }
+      if (playerStore.isStale(myGen)) return;
+      if (r && r.directUrl) {
+        await upgradeToDirectPlay(video, r.directUrl, r.torrentId, myGen);
+        return; // listo → no más sondeo
+      }
+      if (attempts >= UPGRADE_MAX_ATTEMPTS) {
+        console.warn('[RD] Pre-cacheo (#5): agotada la espera, se queda en transcode.');
+        return;
+      }
+      console.warn(`[RD] Pre-cacheo (#5): aún no listo (RD descargando) → reintento en ${UPGRADE_POLL_MS / 1000}s`);
+      upgradeTimer = setTimeout(tick, UPGRADE_POLL_MS);
+    };
+    console.warn('[RD] Pre-cacheo (#5): cacheando en segundo plano →', selected.upgradeFilename);
+    upgradeTimer = setTimeout(tick, 4000); // primer intento pronto (visible en la prueba); luego cada UPGRADE_POLL_MS
+  }
+
   async function loadRdSource(params: {
     id: string | number;
     type: 'movie' | 'tv';
@@ -908,6 +1038,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     if (!video) return;
 
     clearStallMonitor(); // cortar cualquier monitor DASH de una reproducción anterior
+    cancelUpgrade(); // cortar un sondeo de pre-cacheo de la reproducción anterior (#5)
     cleanupServerTorrent(); // borrar en RD el torrent del título anterior (ADR-006)
     const myGen = playerStore.generation; // capturado ANTES del fetch — equiv. `const myGen = ++_playerGen`
     isLoadingRd.value = true;
@@ -1075,6 +1206,11 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       loadDirectPlay(video, streamUrl, myGen);
     }
 
+    // PRE-CACHEO Direct Play (#5): solo se llega acá cuando NO se reprodujo directo
+    // (transcode). Si hay candidato MP4/H264/AAC, cachearlo en RD en 2º plano y al
+    // quedar listo cambiar a Direct Play (seek perfecto) sin cortar la reproducción.
+    maybeStartDirectPlayUpgrade(video, selected, myGen);
+
     isLoadingRd.value = false;
   }
 
@@ -1202,6 +1338,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     }
     clearMsgTimers();
     clearStallMonitor();
+    cancelUpgrade(); // cortar el sondeo de pre-cacheo (#5)
     cleanupServerTorrent(); // borrar en RD el torrent activo al cerrar (ADR-006)
     _shakaDestroy();
     const w = window as unknown as { hlsInstance?: { destroy(): void } | null };

@@ -173,8 +173,12 @@ export function scoreSubtitle(s: OpenSubtitle, hints: VideoHints, _vidDurationSe
   if (hints.qualHint && fn.includes(hints.qualHint)) pts += 3;
   if (hints.groupHint && fn.includes(hints.groupHint)) pts += 5;
   if (s.attributes.hd) pts += 1;
-  if (!s.attributes.ai_translated) pts += 2;
-  if (s.attributes.from_trusted) pts += 1;
+  // AI-translated = auto-traducido de OTRO release → casi siempre DESINCRONIZA
+  // (caso La Momia: sub "Fandango" AI sobre video "Dr4gon"). Penalizar fuerte para
+  // preferir subtítulos HUMANOS que matcheen el release (caso El Padrino: "adhd",
+  // AI:false → sincroniza). Si el único disponible es AI, igual se elige (es lo que hay).
+  pts += s.attributes.ai_translated ? -8 : 4;
+  if (s.attributes.from_trusted) pts += 2;
 
   if (hints.vidBluray && /bluray|bdrip|brrip/i.test(fn)) pts += 4;
   if (hints.vidWebDl && /web.?dl|webrip|amzn/i.test(fn)) pts += 4;

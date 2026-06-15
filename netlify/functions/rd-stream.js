@@ -52,7 +52,12 @@ export const handler = async (event) => {
   const token = process.env.RD_TOKEN || '';
   if (!token) return jsonRes(200, { ready: false, error: 'RD_TOKEN no configurado' });
 
-  const raw = (event.queryStringParameters || {}).infoHash || '';
+  const qp = event.queryStringParameters || {};
+  // direct=1 → PRE-CACHEO Direct Play (#5): solo queremos la URL CDN directa del MP4
+  // (Range OK = seek nativo). Saltamos el paso de transcode (innecesario y un request
+  // de más a RD), ya que el cliente reproducirá el MP4 nativo, no DASH.
+  const directOnly = qp.direct === '1';
+  const raw = qp.infoHash || '';
   const hashes = raw
     .toLowerCase()
     .split(',')
@@ -167,7 +172,8 @@ export const handler = async (event) => {
 
       // 6. transcode → DASH principal (multi-audio + Range), liveMP4/HLS fallback.
       //    Extracción idéntica al camino cacheado (realdebrid.ts pickers).
-      const tc = await rd('/streaming/transcode/' + un.id, { headers: authH });
+      //    PRE-CACHEO (direct=1): se omite — solo interesa `directUrl` (MP4 nativo).
+      const tc = directOnly ? {} : await rd('/streaming/transcode/' + un.id, { headers: authH });
 
       return {
         state: 'ready',
