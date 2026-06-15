@@ -46,6 +46,7 @@ import {
   type MediaSourceLike,
 } from '../services/playback';
 import { pickHlsFallbackFromTranscode, pickDashUrlFromTranscode } from '../services/realdebrid';
+import { parseMediaInfos, pickSpanishAudioToken } from '../services/mediaInfos';
 import type { RealDebridClient } from '../services/realdebrid';
 import type { RdStreamResolver } from '../services/rdStream';
 import { usePlayerStore } from '../stores/player';
@@ -1167,11 +1168,32 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         let finalDashUrl = dashUrlBase;
         const isDualLat = isDualLatFilename(streamFn);
 
-        if (dashUrlBase && isDualLat) {
-          const probe = await probeSpanishDashTrack(dashUrlBase, fetch);
-          finalDashUrl = probe.finalUrl;
-          hasNativeSpanish = probe.hasNativeSpanish;
-          detectedSpanishTrack = probe.track;
+        if (dashUrlBase) {
+          // FASE 3 (GENERAL): pedirle a RD las pistas REALES del archivo (mediaInfos) y
+          // usar el TOKEN exacto de audio español (ej. 'lat1') → audio nativo en español
+          // sin adivinar. Aplica a CUALQUIER título cuyo archivo tenga pista español, no
+          // solo a los "Dual-Lat" por nombre. Si el archivo no tiene español (ej. La Momia
+          // Dr4gon = ita/eng), devuelve null → queda en inglés + subtítulo (OpenSubtitles).
+          let token: string | null = null;
+          try {
+            token = pickSpanishAudioToken(parseMediaInfos(await opts.rdClient.fetchMediaInfos(rdId)));
+          } catch {
+            token = null;
+          }
+          if (token) {
+            const url = buildSpanishTrackUrl(dashUrlBase, token);
+            if (url) {
+              finalDashUrl = url;
+              hasNativeSpanish = true;
+              detectedSpanishTrack = token;
+            }
+          } else if (isDualLat) {
+            // Fallback: el nombre sugiere Dual-Lat pero mediaInfos no resolvió → sondeo HEAD.
+            const probe = await probeSpanishDashTrack(dashUrlBase, fetch);
+            finalDashUrl = probe.finalUrl;
+            hasNativeSpanish = probe.hasNativeSpanish;
+            detectedSpanishTrack = probe.track;
+          }
         }
 
         if (dashUrlBase) dashBaseUrl.value = buildDashBaseUrl(dashUrlBase);

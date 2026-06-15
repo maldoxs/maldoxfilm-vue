@@ -43,6 +43,14 @@ export interface RealDebridClient {
   fetchTranscode(rdId: string): Promise<RDTranscodeResponse>;
 
   /**
+   * fetchMediaInfos — FASE 3: pistas REALES del archivo (audio/subs/códec/duración)
+   * desde `GET /streaming/mediaInfos/{rdId}`. Fuente de verdad para elegir el track
+   * de audio español del transcode y subtítulos embebidos. Devuelve el JSON crudo;
+   * `parseMediaInfos` (mediaInfos.ts) lo normaliza.
+   */
+  fetchMediaInfos(rdId: string): Promise<unknown>;
+
+  /**
    * resolveProxyUrl — sigue el redirect de una URL proxy de Torrentio para
    * obtener la URL CDN real de Real-Debrid. Preservado de las líneas
    * ~4821-4828: solo reemplaza si la URL final cambió Y contiene
@@ -123,6 +131,10 @@ export function createRealDebridClient(opts: RealDebridClientOptions): RealDebri
     return fetchImpl(`${base}/streaming/transcode/${rdId}`, { headers }).then((r) => r.json());
   }
 
+  async function fetchMediaInfos(rdId: string): Promise<unknown> {
+    return fetchImpl(`${base}/streaming/mediaInfos/${rdId}`, { headers }).then((r) => r.json());
+  }
+
   async function resolveProxyUrl(originalUrl: string): Promise<string> {
     if (!isTorrentioProxyUrl(originalUrl)) return originalUrl;
     try {
@@ -139,5 +151,5 @@ export function createRealDebridClient(opts: RealDebridClientOptions): RealDebri
     return matchInDownloads(resolvedUrl, originalUrl, filename, downloads);
   }
 
-  return { fetchDownloads, fetchTranscode, resolveProxyUrl, findDownloadMatch };
+  return { fetchDownloads, fetchTranscode, fetchMediaInfos, resolveProxyUrl, findDownloadMatch };
 }
