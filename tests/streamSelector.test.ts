@@ -3,6 +3,9 @@ import {
   scoreStream,
   rankStreams,
   selectBestStream,
+  isDirectPlayStream,
+  isCachedStream,
+  pickDirectPlayUpgrade,
   hasBadAudio,
   hasAAC,
   hasH264,
@@ -343,6 +346,54 @@ describe('Disponibilidad RD — cacheado [RD+] manda sobre no cacheado [RD downl
   test('selectBestStream elige la versión cacheada (no deja la peli "afuera")', () => {
     const { best } = selectBestStream([uncachedMp4Eng, cachedMkvSpa]);
     expect(best?.name).toContain('[RD+]');
+  });
+});
+
+describe('Pre-cacheo (#5) — detección de candidato Direct Play para upgrade', () => {
+  const cachedMkvEngTranscode = stream({
+    name: '[RD+] Torrentio',
+    title: 'La Momia 2026 iTA-ENG 1080p 💾 3.5 GB',
+    behaviorHints: { filename: 'Lee Cronin La Mummia (2026) iTA-ENG.WEBDL.1080p.x264-Dr4gon.mkv' },
+  });
+  const uncachedMp4H264Aac = stream({
+    name: '[RD download] Torrentio',
+    title: 'The Mummy 2026 1080p BluRay 💾 2.49 GB',
+    behaviorHints: { filename: 'The.Mummy.2026.1080p.BluRay.x264.AAC5.1-[YTS.BZ].mp4' },
+  });
+  const uncachedMp4720 = stream({
+    name: '[RD download] Torrentio',
+    title: 'The Mummy 2026 720p BluRay 💾 1.2 GB',
+    behaviorHints: { filename: 'The.Mummy.2026.720p.BluRay.x264.AAC-[YTS.BZ].mp4' },
+  });
+
+  test('isDirectPlayStream: MP4+H264+AAC sí, MKV transcode no', () => {
+    expect(isDirectPlayStream(uncachedMp4H264Aac)).toBe(true);
+    expect(isDirectPlayStream(cachedMkvEngTranscode)).toBe(false);
+  });
+
+  test('isCachedStream distingue [RD+] de [RD download]', () => {
+    expect(isCachedStream(cachedMkvEngTranscode)).toBe(true);
+    expect(isCachedStream(uncachedMp4H264Aac)).toBe(false);
+  });
+
+  test('caso La Momia: elige el MP4/H264/AAC no cacheado como candidato a pre-cachear', () => {
+    const up = pickDirectPlayUpgrade([cachedMkvEngTranscode, uncachedMp4H264Aac, uncachedMp4720]);
+    expect(up).not.toBeNull();
+    expect(up?.behaviorHints?.filename).toContain('.mp4');
+    expect(isDirectPlayStream(up!)).toBe(true);
+  });
+
+  test('si YA hay una Direct Play cacheada, NO propone upgrade (no escribe en RD de gusto)', () => {
+    const cachedMp4 = stream({
+      name: '[RD+] Torrentio',
+      title: 'Movie 1080p 💾 2.1 GB',
+      behaviorHints: { filename: 'Movie.2016.1080p.BluRay.H264.AAC.mp4' },
+    });
+    expect(pickDirectPlayUpgrade([cachedMkvEngTranscode, cachedMp4])).toBeNull();
+  });
+
+  test('sin candidatas Direct Play (todo MKV/transcode) → null', () => {
+    expect(pickDirectPlayUpgrade([cachedMkvEngTranscode])).toBeNull();
   });
 });
 

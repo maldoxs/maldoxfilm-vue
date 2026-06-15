@@ -26,7 +26,10 @@ export function streamInfo(s: TorrentioStream): string {
 }
 
 // ── Detectores de codec / audio / origen ─────────────────────────────────────
-export const hasAAC = (s: TorrentioStream): boolean => /\baac\b/.test(streamInfo(s));
+// Detecta "AAC", "AAC5.1", "AAC2.0" (los YTS usan "AAC5.1" → `\baac\b` fallaba
+// porque tras "AAC" viene un dígito, no un límite de palabra).
+export const AAC_RE = /\baac(?:\d+(?:\.\d+)?)?\b/i;
+export const hasAAC = (s: TorrentioStream): boolean => AAC_RE.test(streamInfo(s));
 export const hasH264 = (s: TorrentioStream): boolean =>
   /\bh\.?264\b|\bx264\b/.test(streamInfo(s));
 export const hasRD = (s: TorrentioStream): boolean =>
@@ -40,6 +43,10 @@ export const isX265 = (s: TorrentioStream): boolean =>
 // eso en TV preferimos MP4 con fuerza (ver `scoreStream`). Detección por extensión/etiqueta.
 export const isMp4 = (s: TorrentioStream): boolean => /\.mp4\b|\bmp4\b/i.test(streamInfo(s));
 export const isMkv = (s: TorrentioStream): boolean => /\.mkv\b|\bmkv\b|\bmatroska\b/i.test(streamInfo(s));
+
+// ── Disponibilidad en RD ─────────────────────────────────────────────────────
+// [RD+] = cacheado (stream inmediato). [RD download] = NO cacheado (RD lo bajaría).
+export const isCachedStream = (s: TorrentioStream): boolean => /\[rd\+\]/i.test(s.name || '');
 
 // ── Detección de idioma ──────────────────────────────────────────────────────
 export const hasSpa = (s: TorrentioStream): boolean =>
@@ -86,7 +93,7 @@ export const isAV1 = (s: TorrentioStream): boolean => /\bav1\b|\bavo1\b/i.test(s
  */
 export function audioCompatScore(s: TorrentioStream): number {
   const t = streamInfo(s);
-  if (/\baac\b/.test(t)) return 50; // nativo → Direct Play
+  if (AAC_RE.test(t)) return 50; // nativo → Direct Play (incluye AAC5.1/AAC2.0)
   if (/\batmos\b/.test(t)) return -30;
   if (/\btruehd\b/.test(t)) return -30;
   if (/\bdts\b/.test(t)) return -20;
@@ -181,6 +188,37 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
   else if (isMkv(s)) pts -= 5;
 
   return pts;
+}
+
+/**
+ * isDirectPlayStream — ¿esta versión reproduce DIRECTO (sin transcode RD)?
+ * MP4 + H264 + AAC = el navegador la decodifica nativa → seek por byte-range
+ * (instantáneo). Es el formato "Deadpool". Exigimos MP4 (no MKV, que aunque tenga
+ * AAC suele forzar transcode) + H264 + AAC explícito + sin audio incompatible.
+ */
+export const isDirectPlayStream = (s: TorrentioStream): boolean =>
+  isMp4(s) && hasH264(s) && hasAAC(s) && !hasBadAudio(s);
+
+/**
+ * pickDirectPlayUpgrade — el corazón del PRE-CACHEO (#5). Dado el pool, elige la
+ * MEJOR versión Direct Play (MP4/H264/AAC) que HOY NO está cacheada. Al forzar a RD
+ * a cachearla (rd-stream), el título pasa de transcode (seek roto) a Direct Play
+ * (seek perfecto, como Deadpool).
+ *
+ * Devuelve null si:
+ *  - no hay ninguna candidata Direct Play, o
+ *  - ya existe una Direct Play CACHEADA (en ese caso el scoring ya la elige → no
+ *    hace falta upgrade ni escribir en RD).
+ * El llamador solo debe usarla cuando la versión ACTIVA es transcode.
+ */
+export function pickDirectPlayUpgrade(streams: TorrentioStream[]): TorrentioStream | null {
+  const directs = streams.filter(isDirectPlayStream);
+  if (directs.length === 0) return null;
+  if (directs.some(isCachedStream)) return null; // ya hay Direct Play lista → sin upgrade
+  const candidates = directs
+    .filter((s) => !isJunkStream(s) && !hasBadLang(s))
+    .sort((a, b) => scoreStream(b) - scoreStream(a)); // mejor idioma/tamaño/resolución primero
+  return candidates[0] ?? null;
 }
 
 /**

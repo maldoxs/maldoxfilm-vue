@@ -420,12 +420,46 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   let onStallSeeked: (() => void) | null = null;
   let lastSeekAt = 0;
 
+  // ── Instrumentación (#3) — log compacto de los eventos críticos del <video> con
+  // tiempo, buffer por delante, readyState/networkState. Sirve para capturar EXACTO
+  // qué pasa en un "se pegó" (seek lejano en transcode vs URL caducada vs decode) en
+  // vez de teorizar. Liviano: solo console.warn, sin estado reactivo. ─────────────
+  let diagHandlers: Array<[string, EventListener]> | null = null;
+  let diagVideo: HTMLVideoElement | null = null;
+  function bufferAhead(v: HTMLVideoElement): number {
+    try {
+      return v.buffered.length ? Math.max(0, v.buffered.end(v.buffered.length - 1) - v.currentTime) : 0;
+    } catch {
+      return 0;
+    }
+  }
+  function attachDiagnostics(video: HTMLVideoElement) {
+    detachDiagnostics();
+    diagVideo = video;
+    const log = (ev: string) =>
+      console.warn(
+        `[PLAYER] ${ev} | t=${video.currentTime.toFixed(1)}s | buffer +${bufferAhead(video).toFixed(1)}s | ready=${video.readyState} net=${video.networkState}${video.seeking ? ' | seeking' : ''}`
+      );
+    const events = ['seeking', 'seeked', 'waiting', 'stalled', 'playing', 'error', 'ended'];
+    diagHandlers = events.map((ev) => {
+      const h: EventListener = () => log(ev);
+      video.addEventListener(ev, h);
+      return [ev, h] as [string, EventListener];
+    });
+  }
+  function detachDiagnostics() {
+    if (diagHandlers && diagVideo) diagHandlers.forEach(([ev, h]) => diagVideo!.removeEventListener(ev, h));
+    diagHandlers = null;
+    diagVideo = null;
+  }
+
   function clearStallMonitor() {
     if (stallTimer) {
       clearInterval(stallTimer);
       stallTimer = null;
     }
     if (stallVideo && onStallSeeked) stallVideo.removeEventListener('seeked', onStallSeeked);
+    detachDiagnostics();
     onStallSeeked = null;
     stallVideo = null;
     stallStuckSince = 0;
@@ -547,6 +581,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   ) {
     clearStallMonitor();
     stallVideo = video;
+    attachDiagnostics(video);
     stallRecoverFn = recover;
     stallLastTime = video.currentTime;
     onStallSeeked = () => {
