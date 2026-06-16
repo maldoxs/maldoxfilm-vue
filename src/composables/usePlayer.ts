@@ -490,7 +490,10 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   /** DASH/Shaka: recarga el MISMO manifest desde la posición → reabre la sesión RD. */
   async function recoverDash(video: HTMLVideoElement) {
     if (!currentDashUrl) throw new Error('sin DASH url');
-    const pos = video.currentTime;
+    // Piso = última posición buena. Si la sesión de transcode se drenó, `video.currentTime`
+    // puede haber quedado en 0 → recargar ahí reiniciaría la peli ("negro, marcador en 0").
+    // `lastPlayingPos` (última posición donde avanzaba) hace que retome donde ibas, no en 0.
+    const pos = Math.max(video.currentTime, lastPlayingPos);
     await _shakaLoad(video, currentDashUrl, pos > 3 ? pos : undefined);
     await video.play().catch(() => {});
   }
@@ -524,7 +527,8 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   function recoverReloadSrc(url: string) {
     return (video: HTMLVideoElement) =>
       new Promise<void>((resolve) => {
-        const pos = video.currentTime;
+        // Piso = última posición buena (evita reiniciar a 0 si currentTime se reseteó).
+        const pos = Math.max(video.currentTime, lastPlayingPos);
         let done = false;
         const onMeta = () => {
           if (done) return;
