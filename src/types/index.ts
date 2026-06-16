@@ -74,16 +74,6 @@ export interface SelectedStream {
    * evitar acumulación (ADR-006). Solo viene en el camino server-side.
    */
   serverTorrentId?: string | null;
-  /**
-   * upgrade* — PRE-CACHEO Direct Play (#5). Cuando la versión que se va a reproducir
-   * es transcode (MKV/AC3 → seek lejano roto) y EXISTE una versión MP4/H264/AAC NO
-   * cacheada en el pool, acá viene su infoHash. `usePlayer` la pre-cachea en RD en
-   * segundo plano (rd-stream?direct=1) mientras reproduce el transcode, y al quedar
-   * lista cambia a esa fuente Direct Play (seek perfecto). Null = no hay upgrade
-   * (ya es Direct Play, o no hay candidato MP4/H264/AAC).
-   */
-  upgradeInfoHash?: string | null;
-  upgradeFilename?: string | null;
 }
 
 // ── Resultado intermedio del scoring (stream + puntaje) ──────────────────────

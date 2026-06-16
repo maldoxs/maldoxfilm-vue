@@ -116,32 +116,12 @@ export async function createAppServices(opts: CreateAppServicesOptions): Promise
     }
   };
 
-  /**
-   * precacheDirect — PRE-CACHEO Direct Play (#5). Pide a `rd-stream?direct=1` que
-   * cachee en RD un MP4/H264/AAC concreto (por infoHash) y devuelva su URL CDN
-   * directa (Range = seek nativo). Devuelve null mientras RD aún descarga (el
-   * cliente reintenta) o si falla. NO hace transcode (direct=1).
-   */
-  const precacheDirect = async (infoHash: string) => {
-    if (!/^[a-f0-9]{40}$/i.test(infoHash)) return null;
-    try {
-      const res = await fetchImpl(`/.netlify/functions/rd-stream?direct=1&infoHash=${infoHash}`);
-      if (!res.ok) return null;
-      const data = (await res.json()) as { ready?: boolean; directUrl?: string | null; torrentId?: string | null };
-      if (!data || !data.ready || !data.directUrl) return null;
-      return { directUrl: data.directUrl, torrentId: data.torrentId ?? null };
-    } catch {
-      return null;
-    }
-  };
-
   const rdStreamResolver = createRdStreamResolver({
     rdToken,
     tmdbClient,
     torrentioClient,
     rdClient,
     serverResolve,
-    precacheDirect,
   });
 
   return { tmdbClient, torrentioClient, rdClient, rdStreamResolver, rdToken };

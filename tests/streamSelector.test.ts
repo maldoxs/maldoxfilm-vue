@@ -3,9 +3,6 @@ import {
   scoreStream,
   rankStreams,
   selectBestStream,
-  isDirectPlayStream,
-  isCachedStream,
-  pickDirectPlayUpgrade,
   hasBadAudio,
   hasAAC,
   hasH264,
@@ -151,19 +148,19 @@ describe('"Punisher" — detecta audio AC3/DTS incompatible y busca alternativa 
   });
 
   test('resolveActiveStream: sin match directo y audio incompatible, busca alternativa en "scored" (ronda 3)', () => {
-    // El release con DTS gana el scoring (H264 + 1080p + poco peso + RD = 128 pts)
-    // aunque su audio sea incompatible — scoreStream no penaliza el audio,
-    // por eso resolveActiveStream necesita su propia ronda de alternativas.
+    // El release con DTS gana el scoring (x264 1080p + tamaño en el punto dulce) aunque
+    // su audio sea incompatible — por eso resolveActiveStream necesita su propia ronda
+    // de alternativas para caer al AAC reproducible.
     const ac3Best = stream({
       url: 'https://example.com/a',
       title: 'The Punisher 2017 1080p BluRay x264 DTS 5.1 💾 4 GB',
       behaviorHints: { filename: 'Punisher.2017.1080p.x264.DTS.mkv' },
     });
-    // El release AAC pesa menos en puntaje (720p + más GB) pero SÍ es
+    // El release AAC pesa menos en puntaje (720p + REMUX gigante penalizado) pero SÍ es
     // reproducible nativamente y tiene match en `downloads` de RD.
     const aacAlt = stream({
       url: 'https://example.com/b',
-      title: 'The Punisher 2017 720p WEB-DL AAC 💾 8 GB',
+      title: 'The Punisher 2017 720p WEB-DL AAC 💾 25 GB',
       behaviorHints: { filename: 'Punisher.2017.AAC.mkv' },
     });
     const downloads: RDDownload[] = [
@@ -349,54 +346,6 @@ describe('Disponibilidad RD — cacheado [RD+] manda sobre no cacheado [RD downl
   });
 });
 
-describe('Pre-cacheo (#5) — detección de candidato Direct Play para upgrade', () => {
-  const cachedMkvEngTranscode = stream({
-    name: '[RD+] Torrentio',
-    title: 'La Momia 2026 iTA-ENG 1080p 💾 3.5 GB',
-    behaviorHints: { filename: 'Lee Cronin La Mummia (2026) iTA-ENG.WEBDL.1080p.x264-Dr4gon.mkv' },
-  });
-  const uncachedMp4H264Aac = stream({
-    name: '[RD download] Torrentio',
-    title: 'The Mummy 2026 1080p BluRay 💾 2.49 GB',
-    behaviorHints: { filename: 'The.Mummy.2026.1080p.BluRay.x264.AAC5.1-[YTS.BZ].mp4' },
-  });
-  const uncachedMp4720 = stream({
-    name: '[RD download] Torrentio',
-    title: 'The Mummy 2026 720p BluRay 💾 1.2 GB',
-    behaviorHints: { filename: 'The.Mummy.2026.720p.BluRay.x264.AAC-[YTS.BZ].mp4' },
-  });
-
-  test('isDirectPlayStream: MP4+H264+AAC sí, MKV transcode no', () => {
-    expect(isDirectPlayStream(uncachedMp4H264Aac)).toBe(true);
-    expect(isDirectPlayStream(cachedMkvEngTranscode)).toBe(false);
-  });
-
-  test('isCachedStream distingue [RD+] de [RD download]', () => {
-    expect(isCachedStream(cachedMkvEngTranscode)).toBe(true);
-    expect(isCachedStream(uncachedMp4H264Aac)).toBe(false);
-  });
-
-  test('caso La Momia: elige el MP4/H264/AAC no cacheado como candidato a pre-cachear', () => {
-    const up = pickDirectPlayUpgrade([cachedMkvEngTranscode, uncachedMp4H264Aac, uncachedMp4720]);
-    expect(up).not.toBeNull();
-    expect(up?.behaviorHints?.filename).toContain('.mp4');
-    expect(isDirectPlayStream(up!)).toBe(true);
-  });
-
-  test('si YA hay una Direct Play cacheada, NO propone upgrade (no escribe en RD de gusto)', () => {
-    const cachedMp4 = stream({
-      name: '[RD+] Torrentio',
-      title: 'Movie 1080p 💾 2.1 GB',
-      behaviorHints: { filename: 'Movie.2016.1080p.BluRay.H264.AAC.mp4' },
-    });
-    expect(pickDirectPlayUpgrade([cachedMkvEngTranscode, cachedMp4])).toBeNull();
-  });
-
-  test('sin candidatas Direct Play (todo MKV/transcode) → null', () => {
-    expect(pickDirectPlayUpgrade([cachedMkvEngTranscode])).toBeNull();
-  });
-});
-
 describe('Idioma condicional a Direct Play — "mejor de los dos mundos" (caso El Padrino YIFY)', () => {
   // Español Direct Play (MP4/H264) → te da seek + audio español + sub sincronizado.
   const spaDirect = stream({
@@ -433,5 +382,25 @@ describe('Idioma condicional a Direct Play — "mejor de los dos mundos" (caso E
   test('si SOLO hay español en transcode, igual se elige (no deja la peli afuera)', () => {
     const { best } = selectBestStream([spaTranscode]);
     expect(hasSpa(best!)).toBe(true);
+  });
+
+  test('caso Jack Ryan: si NINGUNA cacheada es Direct Play, gana el LATINO transcode sobre el inglés transcode', () => {
+    // Ambos MKV cacheados → ambos transcode (far-seek roto igual). El inglés declara
+    // x264; el latino "Dual-Lat" no declara códec. Debe ganar el LATINO (audio nativo,
+    // sin depender de subtítulos), porque el seek se pierde en los dos.
+    const engMkvTranscode = stream({
+      name: '[RD+] Torrentio',
+      title: 'Jack Ryan Ghost War 2026 iTA-ENG 1080p 👤 588 💾 2.84 GB 🇬🇧 / 🇮🇹',
+      behaviorHints: { filename: 'Tom Clancys Jack Ryan Ghost War (2026) iTA-ENG.WEBDL.1080p.x264-Dr4gon.mkv' },
+    });
+    const latMkvTranscode = stream({
+      name: '[RD+] Torrentio',
+      title: 'Jack.Ryan.de.Tom.Clancy.2026.1080p-Dual-Lat 👤 198 💾 2.46 GB 🇲🇽',
+      behaviorHints: { filename: 'Jack.Ryan.de.Tom.Clancy.Guerra.fantasma.2026.1080p-Dual-Lat.mkv' },
+    });
+    expect(scoreStream(latMkvTranscode)).toBeGreaterThan(scoreStream(engMkvTranscode));
+    const { best } = selectBestStream([engMkvTranscode, latMkvTranscode]);
+    expect(hasSpa(best!)).toBe(true);
+    expect(best?.behaviorHints?.filename).toContain('Dual-Lat');
   });
 });

@@ -36,8 +36,6 @@ import {
   buildSelectedStream,
   extractFilename,
   extractInfoHash,
-  pickDirectPlayUpgrade,
-  isDirectPlayStream,
 } from './streamSelector';
 
 /**
@@ -62,15 +60,6 @@ export interface ServerResolveResult {
  */
 export type ServerResolveFn = (infoHashes: string[]) => Promise<ServerResolveResult | null>;
 
-/**
- * PrecacheDirectFn — PRE-CACHEO Direct Play (#5). Cachea en RD un MP4/H264/AAC
- * concreto (por infoHash) y devuelve su URL CDN directa (Range = seek nativo), o
- * null mientras RD aún descarga / si falla. El llamador reintenta hasta que esté.
- */
-export type PrecacheDirectFn = (
-  infoHash: string
-) => Promise<{ directUrl: string; torrentId: string | null } | null>;
-
 export interface RdStreamResolverOptions {
   rdToken: string;
   tmdbClient: TmdbClient;
@@ -78,8 +67,6 @@ export interface RdStreamResolverOptions {
   rdClient: RealDebridClient;
   /** Resolución server-side para contenido no cacheado (ADR-004). Default: no-op. */
   serverResolve?: ServerResolveFn;
-  /** Pre-cacheo Direct Play (#5). Default: no-op (devuelve null). */
-  precacheDirect?: PrecacheDirectFn;
 }
 
 export interface RdStreamResolver {
@@ -97,8 +84,6 @@ export interface RdStreamResolver {
     episode?: number,
     isTv?: boolean
   ): Promise<SelectedStream>;
-  /** Pre-cacheo Direct Play (#5): cachea un MP4 por infoHash y da su URL directa. */
-  precacheDirect?: PrecacheDirectFn;
 }
 
 /**
@@ -130,7 +115,6 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
   // Default no-op: sin función inyectada, el camino server-side queda inactivo
   // (los tests existentes no la pasan → comportamiento idéntico al actual).
   const serverResolve: ServerResolveFn = opts.serverResolve ?? (async () => null);
-  const precacheDirect: PrecacheDirectFn = opts.precacheDirect ?? (async () => null);
 
   async function getStream(
     tmdbId: string | number,
@@ -240,30 +224,6 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
         }
       }
 
-      // ── PRE-CACHEO Direct Play (#5) ──────────────────────────────────────
-      // Si lo que se va a reproducir NO es Direct Play (transcode: MKV/AC3 → seek
-      // lejano roto) y NO tenemos ya una URL directa server-side, buscar la mejor
-      // versión MP4/H264/AAC NO cacheada del pool. `usePlayer` la cachea en RD en
-      // segundo plano y, al quedar lista, cambia a esa fuente (seek perfecto).
-      const alreadyDirect = isDirectPlayStream(best) || !!selected.serverDirectUrl;
-      if (alreadyDirect) {
-        console.warn('[RD] Pre-cacheo (#5): no hace falta — ya es Direct Play');
-      } else {
-        const up = pickDirectPlayUpgrade(streams);
-        if (up) {
-          const h = extractInfoHash(up);
-          if (/^[a-f0-9]{40}$/i.test(h)) {
-            selected.upgradeInfoHash = h;
-            selected.upgradeFilename = up.behaviorHints?.filename ?? null;
-            console.warn('[RD] Pre-cacheo (#5): candidato Direct Play →', selected.upgradeFilename, '| hash:', h);
-          } else {
-            console.warn('[RD] Pre-cacheo (#5): candidato sin infoHash válido →', up.behaviorHints?.filename);
-          }
-        } else {
-          console.warn('[RD] Pre-cacheo (#5): SIN candidato MP4/H264/AAC en este pool → no se puede mejorar el seek');
-        }
-      }
-
       return selected;
     } catch {
       // catch-all — línea ~4918: devuelve la forma completa con valores vacíos
@@ -271,7 +231,7 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
     }
   }
 
-  return { getStream, precacheDirect };
+  return { getStream };
 }
 
 // Re-exportado por conveniencia — algunos llamadores (p.ej. tests / composables

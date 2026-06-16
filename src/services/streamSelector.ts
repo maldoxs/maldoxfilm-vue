@@ -152,8 +152,14 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
   else if (/\[rd download\]/.test(nm)) pts -= 200;
   else if (hasRD(s)) pts += 0;
 
-  // ── P2 — Códec de video (H264 = Direct Play estable; HEVC/AV1 = pesado/incompat) ──
-  if (hasH264(s)) pts += 100;
+  // Direct Play REAL: reproduce nativo (sin transcode) → seek por byte-range. Debe
+  // coincidir con el gate de playback.ts: un MKV SIN AAC explícito SIEMPRE transcodea
+  // (aunque diga x264 y no diga AC3) → no es Direct Play.
+  const directPlay = hasH264(s) && !hasBadAudio(s) && !(isMkv(s) && !hasAAC(s));
+
+  // ── P2 — Códec de video. H264 importa SOBRE TODO para Direct Play (decode nativo +
+  // seek). Si igual va a transcode, RD re-encodea la fuente → el códec pesa poco. ──
+  if (hasH264(s)) pts += directPlay ? 100 : 30;
   if (isX265(s)) pts -= isTv ? 150 : 60; // HEVC en webOS = audio sin imagen
   if (isAV1(s)) pts -= 80;
 
@@ -174,13 +180,11 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
   else if (is4k(s)) pts -= isTv ? 100 : 40;
 
   // ── P6 — Idioma (condicional a Direct Play) ──
-  // El español pesa FUERTE solo si la versión se reproduce DIRECTO (H264 + audio
-  // compatible) → así una español MP4/H264 gana sobre una inglesa de más resolución
-  // (te da las 3 cosas: seek + audio español + sub sincronizado). Pero si la única
-  // versión español es AC3/MKV (transcode), el idioma pasa a segundo plano: igual
-  // perderías el seek, y NO debe override a una inglesa Direct Play (que sí seekea).
-  const directPlay = hasH264(s) && !hasBadAudio(s);
-  if (hasSpa(s)) pts += directPlay ? 90 : 20; // español/latino
+  // Direct Play: español pesa FUERTE (+90) → una español MP4/H264 gana sobre una inglesa
+  // (te da las 3: seek + audio español + sub). Transcode (ambas igual van a transcode →
+  // el seek se pierde de todos modos): preferir AUDIO español (+60) para no depender de
+  // subtítulos. Igual NO override a una inglesa Direct Play real (ésa sí seekea: P2+AAC).
+  if (hasSpa(s)) pts += directPlay ? 90 : 60; // español/latino
   else pts += directPlay ? 10 : 5; // inglés / sin etiqueta
 
   // ── P7 — Contenedor (BONUS MENOR; jamás criterio principal) ──
@@ -188,37 +192,6 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
   else if (isMkv(s)) pts -= 5;
 
   return pts;
-}
-
-/**
- * isDirectPlayStream — ¿esta versión reproduce DIRECTO (sin transcode RD)?
- * MP4 + H264 + AAC = el navegador la decodifica nativa → seek por byte-range
- * (instantáneo). Es el formato "Deadpool". Exigimos MP4 (no MKV, que aunque tenga
- * AAC suele forzar transcode) + H264 + AAC explícito + sin audio incompatible.
- */
-export const isDirectPlayStream = (s: TorrentioStream): boolean =>
-  isMp4(s) && hasH264(s) && hasAAC(s) && !hasBadAudio(s);
-
-/**
- * pickDirectPlayUpgrade — el corazón del PRE-CACHEO (#5). Dado el pool, elige la
- * MEJOR versión Direct Play (MP4/H264/AAC) que HOY NO está cacheada. Al forzar a RD
- * a cachearla (rd-stream), el título pasa de transcode (seek roto) a Direct Play
- * (seek perfecto, como Deadpool).
- *
- * Devuelve null si:
- *  - no hay ninguna candidata Direct Play, o
- *  - ya existe una Direct Play CACHEADA (en ese caso el scoring ya la elige → no
- *    hace falta upgrade ni escribir en RD).
- * El llamador solo debe usarla cuando la versión ACTIVA es transcode.
- */
-export function pickDirectPlayUpgrade(streams: TorrentioStream[]): TorrentioStream | null {
-  const directs = streams.filter(isDirectPlayStream);
-  if (directs.length === 0) return null;
-  if (directs.some(isCachedStream)) return null; // ya hay Direct Play lista → sin upgrade
-  const candidates = directs
-    .filter((s) => !isJunkStream(s) && !hasBadLang(s))
-    .sort((a, b) => scoreStream(b) - scoreStream(a)); // mejor idioma/tamaño/resolución primero
-  return candidates[0] ?? null;
 }
 
 /**
