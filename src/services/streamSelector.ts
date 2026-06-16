@@ -177,6 +177,11 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
   else if (gb >= 2 && gb <= 8) pts += 40;
   else if (gb < 2) pts += 20;
   // 8-12GB → 0 (neutro)
+  // TRANSCODE + archivo pesado: RD no transcodifica a tiempo real un MKV grande → el buffer
+  // se agota a mitad de reproducción ("se cae en plena reproducción"). Penalizar el peso EN
+  // TRANSCODE para preferir una versión más liviana que RD SÍ sostiene (Direct Play no sufre
+  // esto: ahí pesado = OK). Acotado a -60.
+  if (!directPlay && gb > 3) pts -= Math.min(60, Math.round((gb - 3) * 12));
 
   // ── P5 — Resolución (1080p sweet spot; 4K pesa y no mejora la experiencia) ──
   if (is1080(s)) pts += 20;
