@@ -53,6 +53,10 @@ export const hasSpa = (s: TorrentioStream): boolean =>
   /\bspa\b|\bspanish\b|\bcastellano\b|\blatino\b|\blat\b|\bes\b/.test(streamInfo(s));
 export const hasEng = (s: TorrentioStream): boolean =>
   /\beng\b|\benglish\b/.test(streamInfo(s));
+// Español LATINO específicamente (NO castellano de España). Marcadores fuertes:
+// "latino", "lat", "Dual-Lat", banderas 🇲🇽/🇦🇷/🇨🇴, sitios LATAM (Cinecalidad).
+export const hasLatino = (s: TorrentioStream): boolean =>
+  /\blatino\b|\blat\b|dual.?lat|\blatam\b|🇲🇽|🇦🇷|🇨🇴|cinecalidad/i.test(streamInfo(s));
 export const hasBadLang = (s: TorrentioStream): boolean => {
   const t = streamInfo(s);
   const bad =
@@ -184,8 +188,12 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
   // (te da las 3: seek + audio español + sub). Transcode (ambas igual van a transcode →
   // el seek se pierde de todos modos): preferir AUDIO español (+60) para no depender de
   // subtítulos. Igual NO override a una inglesa Direct Play real (ésa sí seekea: P2+AAC).
-  if (hasSpa(s)) pts += directPlay ? 90 : 60; // español/latino
+  if (hasSpa(s)) pts += directPlay ? 90 : 60; // español (cualquier variante)
   else pts += directPlay ? 10 : 5; // inglés / sin etiqueta
+  // Preferencia del usuario: LATINO > inglés+subs > castellano. Un plus al latino para
+  // que, entre dos español cacheados, gane el latino. (El audio real se decide abajo:
+  // solo se usa pista español si es LATINA; si es castellano, queda inglés + subtítulos.)
+  if (hasLatino(s)) pts += 15;
 
   // ── P7 — Contenedor (BONUS MENOR; jamás criterio principal) ──
   if (isMp4(s)) pts += 8;

@@ -92,16 +92,20 @@ const isSpanishTrack = (t: { lang: string; langIso: string; token: string }): bo
   /spanish|español|espanol|castellano|latino|latin/i.test(t.lang) ||
   /^(spa|lat|es)\d*$/i.test(t.token);
 
+/** ¿La pista es español LATINO (no castellano de España)? */
+const isLatinoTrack = (t: { lang: string; token: string }): boolean =>
+  /lat/i.test(t.token) || /latino|latin/i.test(t.lang);
+
 /**
- * pickSpanishAudioToken — token de la pista de audio en español/latino para pedir
- * el transcode en ese idioma (o null si el archivo no tiene audio español). Prefiere
- * Latino sobre Castellano cuando ambos existen.
+ * pickSpanishAudioToken — token de la pista de audio en **LATINO** para pedir el
+ * transcode en ese idioma. Preferencia del usuario: latino → sí; castellano (España)
+ * → NO (mejor inglés + subtítulos). Por eso SOLO devuelve un token claramente latino;
+ * si el audio español es castellano o ambiguo, devuelve null → el reproductor queda en
+ * inglés y los subtítulos español (OpenSubtitles) cubren el idioma.
  */
 export function pickSpanishAudioToken(info: MediaInfos): string | null {
-  const spanish = info.audio.filter(isSpanishTrack);
-  if (spanish.length === 0) return null;
-  const latino = spanish.find((t) => /lat/i.test(t.token) || /latino|latin/i.test(t.lang));
-  return (latino ?? spanish[0]).token;
+  const latino = info.audio.find(isLatinoTrack);
+  return latino ? latino.token : null;
 }
 
 /** ¿El archivo tiene subtítulos en español embebidos? (sincronizados, del propio archivo). */
