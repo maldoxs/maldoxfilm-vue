@@ -36,6 +36,8 @@ import {
   buildSelectedStream,
   extractFilename,
   extractInfoHash,
+  hasLatino,
+  isCachedStream,
 } from './streamSelector';
 
 /**
@@ -195,6 +197,30 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
         imdbId,
         active,
       });
+
+      // ── Preferencia latino: si el match NO tiene audio latino pero hay
+      // Dual-Lat [RD+] en el pool, resolver server-side para que RD lo descargue.
+      // Solo busca LATINO (no castellano). Si no hay latino en el pool, no hace nada.
+      const latinoRdPlus = scored.filter((sc) => hasLatino(sc.s) && isCachedStream(sc.s));
+      if (selected.rdId && !hasLatino(active.activeBest) && latinoRdPlus.length > 0) {
+        const latHashes = Array.from(
+          new Set(latinoRdPlus.map((sc) => extractInfoHash(sc.s)).filter((h) => /^[a-f0-9]{40}$/i.test(h)))
+        ).slice(0, 3);
+        if (latHashes.length) {
+          console.warn('[RD] Match sin latino — resolviendo Dual-Lat [RD+] server-side...');
+          const sr = await serverResolve(latHashes);
+          if (sr && (sr.dash || sr.liveMP4 || sr.hls || sr.directUrl)) {
+            selected.rdId = null;
+            selected.serverDashUrl = sr.dash ?? null;
+            selected.serverLiveMp4Url = sr.liveMP4 ?? null;
+            selected.serverHlsUrl = sr.hls ?? null;
+            selected.serverDirectUrl = sr.directUrl ?? null;
+            selected.serverTorrentId = sr.torrentId ?? null;
+            if (sr.filename) selected.streamFilename = sr.filename;
+            console.warn('[RD] Dual-Lat resuelto →', sr.dash ? 'DASH' : sr.liveMP4 ? 'liveMP4' : sr.hls ? 'HLS' : 'directo', '| filename:', sr.filename);
+          }
+        }
+      }
 
       // ── Resolución SERVER-SIDE para contenido NO cacheado (ADR-004) ──
       // Solo si NO hubo match cacheado (`rdId` null): se pasan los infoHashes del

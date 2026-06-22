@@ -188,17 +188,13 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
   else if (is720(s)) pts += 10;
   else if (is4k(s)) pts -= isTv ? 100 : 40;
 
-  // ── P6 — Idioma (condicional a Direct Play) ──
-  // Direct Play: español pesa FUERTE (+90) → una español MP4/H264 gana sobre una inglesa
-  // (te da las 3: seek + audio español + sub). Transcode (ambas igual van a transcode →
-  // el seek se pierde de todos modos): preferir AUDIO español (+60) para no depender de
-  // subtítulos. Igual NO override a una inglesa Direct Play real (ésa sí seekea: P2+AAC).
-  if (hasSpa(s)) pts += directPlay ? 90 : 60; // español (cualquier variante)
-  else pts += directPlay ? 10 : 5; // inglés / sin etiqueta
-  // Preferencia del usuario: LATINO > inglés+subs > castellano. Un plus al latino para
-  // que, entre dos español cacheados, gane el latino. (El audio real se decide abajo:
-  // solo se usa pista español si es LATINA; si es castellano, queda inglés + subtítulos.)
-  if (hasLatino(s)) pts += 15;
+  // ── P6 — Idioma: Latino es la prioridad absoluta ──
+  // Jerarquía: Latino (+200) > inglés+subs (+10) > castellano (no se usa).
+  // Un Dual-Lat de Cinecalidad 1080p MP4 (~1.6GB) debe ganar sobre cualquier
+  // YIFY inglesa aunque sea Direct Play perfecto — el latino Direct Play es mejor.
+  if (hasLatino(s)) pts += 200;
+  else if (hasSpa(s)) pts += directPlay ? 90 : 60;
+  else pts += directPlay ? 10 : 5;
 
   // ── P7 — Contenedor (BONUS MENOR; jamás criterio principal) ──
   if (isMp4(s)) pts += 8;

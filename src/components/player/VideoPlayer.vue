@@ -177,6 +177,11 @@ const player: UsePlayerReturn = usePlayer({
 });
 _playerRef = player;
 
+// Intención real de mute del usuario, capturada antes de silenciar por seek
+// nativo (evita que el audio del nuevo punto suene antes de que cargue la imagen).
+let seekMuteRestore: boolean | null = null;
+let seekUnmuteTimer: ReturnType<typeof setTimeout> | null = null;
+
 // ── Barra de controles custom (#nfControls) ─────────────────────────────────
 const nfControls = useNetflixControls({
   videoRef,
@@ -195,6 +200,24 @@ const nfControls = useNetflixControls({
   seekOverride: (seconds: number) => {
     if (player.isTpipeline.value) {
       void player.tpipelineSeekTo(seconds);
+    } else {
+      // Direct Play / transcode legacy: seek nativo (HTTP Range). Silenciar hasta
+      // que la imagen esté lista en la nueva posición (`seeked`) para que el audio
+      // no suene antes de que cargue el cuadro.
+      const v = videoRef.value;
+      if (!v) return;
+      if (seekMuteRestore === null) seekMuteRestore = v.muted; // intención real, una sola vez
+      v.muted = true;
+      const restore = () => {
+        v.removeEventListener('seeked', restore);
+        if (seekUnmuteTimer) { clearTimeout(seekUnmuteTimer); seekUnmuteTimer = null; }
+        if (seekMuteRestore !== null) { v.muted = seekMuteRestore; seekMuteRestore = null; }
+      };
+      v.addEventListener('seeked', restore);
+      // Salvavidas: si `seeked` no dispara, restaurar el audio igual.
+      if (seekUnmuteTimer) clearTimeout(seekUnmuteTimer);
+      seekUnmuteTimer = setTimeout(restore, 8000);
+      v.currentTime = seconds;
     }
   },
 });

@@ -1105,6 +1105,8 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       });
 
       console.warn(`[/t/] ✅ Pipeline activo — ${resolved.filename} | audio: ${audio} | CDN: ${resolved.cdn}`);
+      const isLat = /lat|spa|es/i.test(audio);
+      opts.onToast(isLat ? '✅ Seek fluido · Audio Latino' : '✅ Seek fluido');
       return true;
     } catch (e) {
       console.warn('[/t/] carga falló → fallback a transcode legacy:', e);
@@ -1128,6 +1130,14 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
 
     clearStallMonitor(); // cortar cualquier monitor DASH de una reproducción anterior
     cleanupServerTorrent(); // borrar en RD el torrent del título anterior (ADR-006)
+    // Reset del estado /t/ AL INICIO: si la reproducción anterior usó pipeline /t/
+    // (isTpipeline=true) y esta entra por Direct Play (que retorna antes del reset
+    // de más abajo), el seekOverride seguiría creyendo que está en /t/ → el seek
+    // nativo nunca se ejecutaría. Limpiarlo acá garantiza estado fresco por carga.
+    isTpipeline.value = false;
+    tpipelineState = null;
+    tpipelineOffset.value = 0;
+    tpipelineSeeking.value = false;
     const myGen = playerStore.generation; // capturado ANTES del fetch — equiv. `const myGen = ++_playerGen`
     isLoadingRd.value = true;
     loadingMessage.value = '🔍 Buscando en Real-Debrid...';
@@ -1220,11 +1230,8 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       if (played) {
         const hasSpaDirect = isDualLatFilename(streamFn);
         opts.onStreamReady?.({ selected, hasNativeSpanish: hasSpaDirect, spanishTrack: null });
-        // Recuperación de stall/seek también en el camino DIRECTO (antes solo DASH/HLS/
-        // loadDirectPlay la tenían). Sin esto, un directo que se traba al adelantar quedaba
-        // CONGELADO sin red de seguridad (caso general: HEVC directo o MKV cacheada). Recarga
-        // el mismo `src` desde la posición destino.
         startStallMonitor(video, myGen, recoverReloadSrc(streamUrl));
+        opts.onToast(hasSpaDirect ? '✅ Seek fluido · Audio Latino' : '✅ Seek fluido');
         isLoadingRd.value = false;
         return;
       }
