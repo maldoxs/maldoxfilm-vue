@@ -21,7 +21,7 @@
  * eso vive en `PlayerView.vue` (Fase 5), que es quien conoce `playerState`/
  * `SOURCES` y decide cuál `<VideoPlayer>` o `<iframe>` mostrar.
  */
-import { ref, computed, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import SubtitleOverlay from './SubtitleOverlay.vue';
 import PlayerSettingsPanel from './PlayerSettingsPanel.vue';
 import { usePlayer, type UsePlayerReturn } from '../../composables/usePlayer';
@@ -63,6 +63,7 @@ const videoRef = ref<HTMLVideoElement | null>(null);
 const playerPageRef = ref<HTMLElement | null>(null);
 const seekBarRef = ref<HTMLElement | null>(null);
 const fullscreenIconRef = ref<HTMLElement | null>(null);
+const freezeCanvasRef = ref<HTMLCanvasElement | null>(null);
 
 // ── Subtítulos ──────────────────────────────────────────────────────────────
 const subtitles = useSubtitles({ videoRef });
@@ -173,6 +174,20 @@ const nfControls = useNetflixControls({
   seekBarRef,
   onInteraction: () => resetControlsAutoHide(),
   durationFallback: () => props.runtimeSec || 0,
+  timeOverride: () => {
+    if (!player.isTpipeline.value) return null;
+    const v = videoRef.value;
+    return player.tpipelineOffset.value + (v?.currentTime || 0);
+  },
+  durationOverride: () => {
+    if (!player.isTpipeline.value) return null;
+    return player.tpipelineDuration.value || null;
+  },
+  seekOverride: (seconds: number) => {
+    if (player.isTpipeline.value) {
+      void player.tpipelineSeekTo(seconds);
+    }
+  },
 });
 
 const isLoading = ref(true);
@@ -184,7 +199,10 @@ function resetControlsAutoHide() {
   controlsHidden.value = false;
   if (hideTimer) clearTimeout(hideTimer);
   hideTimer = setTimeout(() => {
-    if (nfControls.isPlaying.value) controlsHidden.value = true;
+    if (nfControls.isPlaying.value) {
+      controlsHidden.value = true;
+      settingsPanelOpen.value = false;
+    }
   }, 3500);
 }
 
@@ -267,6 +285,11 @@ function onSetSpeed(value: number) {
 }
 
 const remainingDisplay = computed(() => {
+  if (player.isTpipeline.value) {
+    const dur = player.tpipelineDuration.value || props.runtimeSec || 0;
+    const cur = player.tpipelineOffset.value + (videoRef.value?.currentTime || 0);
+    return '-' + formatNfTime(dur - cur);
+  }
   const d = videoRef.value?.duration;
   const eff = d && isFinite(d) && d > 0 ? d : props.runtimeSec || 0;
   return '-' + formatNfTime(eff - (videoRef.value?.currentTime || 0));
@@ -293,6 +316,19 @@ defineExpose({
   fullscreen,
 });
 
+// Freeze-frame: al empezar un seek del pipeline /t/, capturar el último cuadro
+// del video en el canvas para que la pantalla no se ponga negra durante la recarga.
+watch(() => player.tpipelineSeeking.value, (seeking) => {
+  if (!seeking) return;
+  const video = videoRef.value;
+  const canvas = freezeCanvasRef.value;
+  if (!video || !canvas || video.readyState < 2) return;
+  canvas.width = video.videoWidth || 1280;
+  canvas.height = video.videoHeight || 720;
+  const ctx = canvas.getContext('2d');
+  if (ctx) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+});
+
 onBeforeUnmount(() => {
   if (hideTimer) clearTimeout(hideTimer);
   player.destroy();
@@ -311,6 +347,10 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="player-frame-wrap" @mousemove="resetControlsAutoHide">
+      <!-- Freeze-frame + loader durante seek del pipeline /t/ -->
+      <canvas v-show="player.tpipelineSeeking.value" ref="freezeCanvasRef" class="tpipeline-freeze"></canvas>
+      <div v-if="player.tpipelineSeeking.value" class="tpipeline-loader"></div>
+
       <video ref="videoRef" class="video-el" playsinline @click="onVideoClick"></video>
 
       <SubtitleOverlay :text="subtitles.activeCueText.value" :enabled="subtitles.enabled.value" />
@@ -486,6 +526,35 @@ onBeforeUnmount(() => {
   text-align: center;
   max-width: 260px;
   line-height: 1.4;
+}
+
+/* Pipeline /t/ — freeze-frame + loader durante seek */
+.tpipeline-freeze {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  z-index: 5;
+  background: #000;
+  pointer-events: none;
+}
+.tpipeline-loader {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(255, 255, 255, 0.15);
+  border-top: 3px solid #3d5afe;
+  border-radius: 50%;
+  animation: tpipeline-spin 0.8s linear infinite;
+  z-index: 6;
+  pointer-events: none;
+}
+@keyframes tpipeline-spin {
+  to { transform: translate(-50%, -50%) rotate(360deg); }
 }
 
 .nf-controls {

@@ -47,6 +47,14 @@ import {
 } from '../services/playback';
 import { pickHlsFallbackFromTranscode, pickDashUrlFromTranscode } from '../services/realdebrid';
 import { parseMediaInfos, pickSpanishAudioToken } from '../services/mediaInfos';
+import {
+  resolveTpipeline,
+  pingSeek,
+  buildMpdUrl,
+  waitForSegmentAt,
+  pickBestAudio,
+  type TpipelineResolveResult,
+} from '../services/rd-t-pipeline';
 import type { RealDebridClient } from '../services/realdebrid';
 import type { RdStreamResolver } from '../services/rdStream';
 import { usePlayerStore } from '../stores/player';
@@ -308,6 +316,16 @@ export interface UsePlayerReturn {
   switchAudioTrack(track: string): Promise<void>;
   /** Limpia instancias activas (HLS.js / Shaka) — llamar al cerrar el reproductor. */
   destroy(): void;
+  /** ¿Está usando el pipeline /t/? Si true, el seek debe usar tpipelineSeekTo en vez del nativo. */
+  isTpipeline: Ref<boolean>;
+  /** Duración total (seg) reportada por el pipeline /t/ (para la barra custom). */
+  tpipelineDuration: Ref<number>;
+  /** Offset del MPD actual (seg) — el tiempo real = offset + video.currentTime. */
+  tpipelineOffset: Ref<number>;
+  /** ¿Está haciendo seek en el pipeline /t/? Para mostrar freeze-frame + loader. */
+  tpipelineSeeking: Ref<boolean>;
+  /** Seek del pipeline /t/: recarga el MPD en la posición indicada. */
+  tpipelineSeekTo(seconds: number): Promise<void>;
 }
 
 export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
@@ -318,6 +336,19 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   const dashBaseUrl = ref<string | null>(null);
   const activeTrack = ref('eng1');
   const spanishTrack = ref<string | null>(null);
+
+  // ── Pipeline /t/ state ──────────────────────────────────────────────────────
+  const isTpipeline = ref(false);
+  const tpipelineDuration = ref(0);
+  const tpipelineOffset = ref(0);
+  const tpipelineSeeking = ref(false);
+  let tpipelineState: {
+    resolved: TpipelineResolveResult;
+    audio: string;
+    myGen: number;
+  } | null = null;
+  let _tSeekTimer: ReturnType<typeof setTimeout> | null = null;
+  let _tReloading = false;
 
   // ── Limpieza del torrent que `rd-stream` creó en RD (ADR-006) ─────────────
   // Se borra al cerrar el reproductor o al cambiar de título, para que no se
@@ -948,6 +979,142 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     );
   }
 
+  // ── Pipeline /t/ — seek universal vía CDN privada de RD ──────────────────────
+  // Recarga el MPD en una posición arbitraria. Freeze-frame + mute + loader para
+  // UX fluida (congelar el último cuadro, mostrar spinner, silenciar audio durante
+  // la recarga de Shaka). Debounce de 300ms + mutex `_tReloading` para evitar que
+  // dos seeks simultáneos colisionen (destruyen/recrean Shaka a la vez → error).
+
+  async function tpipelineReloadMpd(video: HTMLVideoElement, t: number) {
+    if (!tpipelineState || _tReloading) return;
+    const { resolved, audio, myGen } = tpipelineState;
+    if (playerStore.isStale(myGen)) return;
+
+    _tReloading = true;
+    tpipelineSeeking.value = true;
+    video.pause();
+    video.muted = true;
+    tpipelineOffset.value = t;
+
+    try {
+      await pingSeek(resolved.mediaId, t);
+      console.warn(`[/t/] Esperando segmento en t=${t}s...`);
+      const ready = await waitForSegmentAt(resolved.cdn, resolved.fullPathId, audio, t);
+      console.warn(`[/t/] Segmento ${ready ? 'listo' : 'timeout'} en t=${t}s`);
+
+      if (playerStore.isStale(myGen)) return;
+
+      const mpdUrl = buildMpdUrl(resolved.fullPathId, resolved.cdn, audio, t);
+      await _shakaLoad(video, mpdUrl);
+      currentDashUrl = mpdUrl;
+
+      video.muted = false;
+      await video.play().catch(() => {});
+      console.warn(`[/t/] Shaka listo en offset=${t}s`);
+    } catch (e) {
+      console.warn('[/t/] reloadMpd falló:', e);
+      video.muted = false;
+    } finally {
+      _tReloading = false;
+      tpipelineSeeking.value = false;
+    }
+  }
+
+  async function tpipelineSeekTo(seconds: number) {
+    const video = opts.videoRef.value;
+    if (!video || !tpipelineState) return;
+    const target = Math.max(0, Math.min(Math.floor(seconds), tpipelineDuration.value || 99999));
+    const current = tpipelineOffset.value + (video.currentTime || 0);
+    if (Math.abs(target - current) < 3) return;
+    if (_tReloading) return;
+
+    if (_tSeekTimer) clearTimeout(_tSeekTimer);
+    _tSeekTimer = setTimeout(async () => {
+      if (_tReloading || !tpipelineState) return;
+      console.warn(`[/t/] Seek → t=${target}s`);
+      await tpipelineReloadMpd(video, target);
+    }, 300);
+  }
+
+  /**
+   * tryTpipeline — intenta reproducir via pipeline /t/. Devuelve true si tuvo
+   * éxito, false si falló (el llamador cae al transcode legacy).
+   */
+  async function tryTpipeline(params: {
+    video: HTMLVideoElement;
+    rdId: string;
+    myGen: number;
+    selected: SelectedStream;
+    streamFn: string | null;
+  }): Promise<boolean> {
+    const { video, rdId, myGen, selected, streamFn } = params;
+
+    let resolved: TpipelineResolveResult;
+    try {
+      loadingMessage.value = '🔍 Preparando streaming avanzado...';
+      resolved = await resolveTpipeline(rdId);
+    } catch (e) {
+      console.warn('[/t/] resolve falló → fallback a transcode legacy:', e);
+      return false;
+    }
+
+    if (playerStore.isStale(myGen)) return true; // stale = no seguir (handled)
+
+    const audio = pickBestAudio(resolved.audioTracks);
+    const isSpanish = /lat|spa|es/i.test(audio);
+
+    tpipelineState = { resolved, audio, myGen };
+    isTpipeline.value = true;
+    tpipelineDuration.value = resolved.duration;
+    tpipelineOffset.value = 1;
+    activeTrack.value = audio;
+    if (isSpanish) {
+      spanishTrack.value = audio;
+    }
+
+    try {
+      loadingMessage.value = '📡 Conectando con el servidor...';
+      await loadShakaIfNeeded();
+
+      const mpdUrl = buildMpdUrl(resolved.fullPathId, resolved.cdn, audio, 1);
+
+      await pingSeek(resolved.mediaId, 1);
+      const segReady = await waitForSegmentAt(resolved.cdn, resolved.fullPathId, audio, 1, 8000);
+      if (!segReady) console.warn('[/t/] Primer segmento timeout — intentando igual');
+
+      if (playerStore.isStale(myGen)) return true;
+
+      await _shakaLoad(video, mpdUrl);
+      currentDashUrl = mpdUrl;
+
+      dashBaseUrl.value = `https://${resolved.cdn}/t/${resolved.fullPathId}/`;
+
+      video.muted = false;
+      await video.play().catch(() => {});
+
+      const hasNativeSpanish = isSpanish;
+      if (hasNativeSpanish) opts.onNativeSpanishDetected?.();
+      opts.onStreamReady?.({ selected, hasNativeSpanish, spanishTrack: isSpanish ? audio : null });
+      opts.onStarted();
+
+      startStallMonitor(video, myGen, async (v) => {
+        if (!tpipelineState) throw new Error('sin /t/ state');
+        const pos = Math.max(v.currentTime, lastPlayingPos);
+        const t = tpipelineOffset.value + pos;
+        await tpipelineReloadMpd(v, t > 3 ? t : 1);
+      });
+
+      console.warn(`[/t/] ✅ Pipeline activo — ${resolved.filename} | audio: ${audio} | CDN: ${resolved.cdn}`);
+      return true;
+    } catch (e) {
+      console.warn('[/t/] carga falló → fallback a transcode legacy:', e);
+      isTpipeline.value = false;
+      tpipelineState = null;
+      _shakaDestroy();
+      return false;
+    }
+  }
+
   // ── Punto de entrada — equivalente al bloque RD completo (líneas ~7824-8186) ──
 
   async function loadRdSource(params: {
@@ -1069,6 +1236,21 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         if (playerStore.isStale(myGen)) return;
       }
       // continúa al transcode
+    }
+
+    // ── Pipeline /t/ — upgrade transparente (far-seek + AAC para cualquier archivo) ──
+    // Se intenta SIEMPRE que haya rdId. Si falla, cae al transcode legacy sin corte.
+    if (rdId) {
+      isTpipeline.value = false;
+      tpipelineState = null;
+      const tpipelineOk = await tryTpipeline({ video, rdId, myGen, selected, streamFn });
+      if (tpipelineOk) {
+        isLoadingRd.value = false;
+        return;
+      }
+      if (playerStore.isStale(myGen)) return;
+      // /t/ falló → seguir al transcode legacy (transparente)
+      console.warn('[/t/] Fallback → transcode DASH legacy');
     }
 
     // ── Transcode vía RD API + probe de audio español (líneas ~7915-7964) ──
@@ -1276,6 +1458,12 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     clearMsgTimers();
     clearStallMonitor();
     cleanupServerTorrent(); // borrar en RD el torrent activo al cerrar (ADR-006)
+    isTpipeline.value = false;
+    tpipelineSeeking.value = false;
+    tpipelineState = null;
+    tpipelineOffset.value = 0;
+    if (_tSeekTimer) { clearTimeout(_tSeekTimer); _tSeekTimer = null; }
+    _tReloading = false;
     _shakaDestroy();
     const w = window as unknown as { hlsInstance?: { destroy(): void } | null };
     if (w.hlsInstance) {
@@ -1293,5 +1481,10 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     loadRdSource,
     switchAudioTrack,
     destroy,
+    isTpipeline,
+    tpipelineDuration,
+    tpipelineOffset,
+    tpipelineSeeking,
+    tpipelineSeekTo,
   };
 }

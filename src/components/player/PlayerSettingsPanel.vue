@@ -212,7 +212,7 @@ function onSetSpeed(value: number) {
     </div>
 
     <!-- Vista: Velocidad (preserva `#nfPanelSpeed`, líneas ~3653-3672) -->
-    <div v-else class="nf-panel-speed">
+    <div v-if="mode === 'speed'" class="nf-panel-speed">
       <div class="nf-panel-speed-title">Velocidad de reproducción</div>
       <div class="nf-speed-track">
         <div class="nf-speed-fill" :style="{ width: speedFillPct + '%' }"></div>

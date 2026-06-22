@@ -31,6 +31,20 @@ export interface UseNetflixControlsOptions {
    * de RD reportan `Infinity` → la barra/tiempo marcaban 0). Se usa el runtime de TMDB.
    */
   durationFallback?: () => number;
+  /**
+   * Override de tiempo actual (seg). Cuando está activo, se usa en vez de
+   * `video.currentTime` para la barra y los labels. Pipeline /t/: offset + currentTime.
+   */
+  timeOverride?: () => number | null;
+  /**
+   * Override de duración total (seg). Pipeline /t/: duración del resolve.
+   */
+  durationOverride?: () => number | null;
+  /**
+   * Override de seek. Cuando está activo, se llama en vez de `video.currentTime = target`.
+   * Pipeline /t/: recarga el MPD en la posición.
+   */
+  seekOverride?: (seconds: number) => void;
 }
 
 /**
@@ -102,20 +116,30 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     return opts.videoRef.value ?? null;
   }
 
-  /** Duración efectiva: la real si es finita, si no el runtime de TMDB (transcode RD = Infinity). */
+  /** Duración efectiva: override > real > TMDB fallback. */
   function effDur(vv: HTMLVideoElement): number {
+    const ov = opts.durationOverride?.();
+    if (ov != null && ov > 0) return ov;
     const d = vv.duration;
     return d && isFinite(d) && d > 0 ? d : opts.durationFallback?.() || 0;
+  }
+
+  /** Tiempo actual efectivo: override > video.currentTime. */
+  function effTime(vv: HTMLVideoElement): number {
+    const ov = opts.timeOverride?.();
+    return ov != null ? ov : vv.currentTime;
   }
 
   // ── Tick — reemplaza `_nfTick` (línea ~4103-4117) ────────────────────────
   function tick() {
     const v = video();
     if (!v) return;
-    const pct = effDur(v) ? (v.currentTime / effDur(v)) * 100 : 0;
+    const t = effTime(v);
+    const dur = effDur(v);
+    const pct = dur ? (t / dur) * 100 : 0;
     if (!seeking) progressPct.value = pct;
-    elapsedLabel.value = formatNfTime(v.currentTime);
-    remainingLabel.value = formatNfTime((effDur(v) || 0) - v.currentTime);
+    elapsedLabel.value = formatNfTime(t);
+    remainingLabel.value = formatNfTime((dur || 0) - t);
   }
 
   const onPlay = () => {
@@ -150,21 +174,33 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
   function skip(seconds: number) {
     const v = video();
     if (!v) return;
-    if (effDur(v)) {
-      const target = Math.max(0, Math.min(effDur(v), v.currentTime + seconds));
+    const dur = effDur(v);
+    const curTime = effTime(v);
+    if (dur) {
+      const target = Math.max(0, Math.min(dur, curTime + seconds));
       seeking = true;
-      progressPct.value = (target / effDur(v)) * 100;
+      progressPct.value = (target / dur) * 100;
       elapsedLabel.value = formatNfTime(target);
-      remainingLabel.value = formatNfTime(effDur(v) - target);
-      v.currentTime = target;
-      const onSeeked = () => {
+      remainingLabel.value = formatNfTime(dur - target);
+      if (opts.seekOverride) {
+        opts.seekOverride(target);
         seeking = false;
-        v.removeEventListener('seeked', onSeeked);
         tick();
-      };
-      v.addEventListener('seeked', onSeeked);
+      } else {
+        v.currentTime = target;
+        const onSeeked = () => {
+          seeking = false;
+          v.removeEventListener('seeked', onSeeked);
+          tick();
+        };
+        v.addEventListener('seeked', onSeeked);
+      }
     } else {
-      v.currentTime = Math.max(0, v.currentTime + seconds);
+      if (opts.seekOverride) {
+        opts.seekOverride(Math.max(0, curTime + seconds));
+      } else {
+        v.currentTime = Math.max(0, v.currentTime + seconds);
+      }
     }
     opts.onInteraction?.();
   }
@@ -205,7 +241,14 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
   function onSeekBarClick(e: MouseEvent) {
     const v = video();
     const pct = pctFromEvent(e);
-    if (v && pct !== null) v.currentTime = pct * effDur(v);
+    if (v && pct !== null) {
+      const target = pct * effDur(v);
+      if (opts.seekOverride) {
+        opts.seekOverride(target);
+      } else {
+        v.currentTime = target;
+      }
+    }
     opts.onInteraction?.();
   }
 
