@@ -1047,7 +1047,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     selected: SelectedStream;
     streamFn: string | null;
   }): Promise<boolean> {
-    const { video, rdId, myGen, selected, streamFn } = params;
+    const { video, rdId, myGen, selected } = params;
 
     let resolved: TpipelineResolveResult;
     try {
