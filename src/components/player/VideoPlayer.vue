@@ -66,7 +66,15 @@ const fullscreenIconRef = ref<HTMLElement | null>(null);
 const freezeCanvasRef = ref<HTMLCanvasElement | null>(null);
 
 // ── Subtítulos ──────────────────────────────────────────────────────────────
-const subtitles = useSubtitles({ videoRef });
+let _playerRef: UsePlayerReturn | null = null;
+const subtitles = useSubtitles({
+  videoRef,
+  timeOverride: () => {
+    if (!_playerRef?.isTpipeline.value) return null;
+    const v = videoRef.value;
+    return _playerRef.tpipelineOffset.value + (v?.currentTime || 0);
+  },
+});
 
 // ── Fullscreen custom ────────────────────────────────────────────────────────
 const fullscreen = useFullscreen({
@@ -167,6 +175,7 @@ const player: UsePlayerReturn = usePlayer({
     }
   },
 });
+_playerRef = player;
 
 // ── Barra de controles custom (#nfControls) ─────────────────────────────────
 const nfControls = useNetflixControls({

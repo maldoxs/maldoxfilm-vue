@@ -49,6 +49,8 @@ export interface UseSubtitlesOptions {
   videoRef: Ref<HTMLVideoElement | null | undefined>;
   /** Inyectable para tests — por defecto `fetch` global. */
   fetchImpl?: typeof fetch;
+  /** Override de tiempo (seg). Pipeline /t/: offset + currentTime. */
+  timeOverride?: () => number | null;
 }
 
 export interface UseSubtitlesReturn {
@@ -106,7 +108,8 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
       activeCueText.value = '';
       return;
     }
-    const tMs = video.currentTime * 1000;
+    const ov = opts.timeOverride?.();
+    const tMs = (ov != null ? ov : video.currentTime) * 1000;
     const cue = findActiveCue(cues.value, tMs);
     // ⚠️ SEGURIDAD: el original convertía '\n' → '<br>' y volcaba el resultado
     // con `innerHTML` (luego replicado aquí como `v-html`). El texto del cue
