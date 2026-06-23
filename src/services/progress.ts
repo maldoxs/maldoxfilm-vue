@@ -19,6 +19,8 @@ export interface ProgressEntry {
   id: string | number;
   type: 'movie' | 'tv';
   pct: number;
+  /** Posición real en segundos para retomar ("Continuar viendo"). */
+  positionSec?: number;
   season?: number;
   episode?: number;
   title?: string;
@@ -101,10 +103,12 @@ export function withoutProgress(all: ProgressMap, id: string | number, type: 'mo
  * no corregir peculiaridades visuales que el usuario podría reconocer.
  */
 export function playButtonLabel(prog: ProgressEntry | null, isTV: boolean): string {
-  const progLabel = prog
-    ? isTV && prog.season
-      ? `Continuar T${prog.season}·E${prog.episode}`
-      : `Continuar ${Math.round(prog.pct)}%`
-    : 'Reproducir';
-  return `▶ ${progLabel}`;
+  if (!prog) return '▶ Reproducir';
+  if (isTV && prog.season) return `▶ Continuar T${prog.season}·E${prog.episode}`;
+  if (prog.positionSec && prog.positionSec > 30) {
+    const m = Math.floor(prog.positionSec / 60);
+    const s = Math.floor(prog.positionSec % 60);
+    return `▶ Continuar ${m}:${String(s).padStart(2, '0')}`;
+  }
+  return `▶ Continuar ${Math.round(prog.pct)}%`;
 }

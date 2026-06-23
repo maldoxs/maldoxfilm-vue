@@ -346,6 +346,8 @@ defineExpose({
   switchAudioTrack: player.switchAudioTrack,
   videoRef,
   fullscreen,
+  isTpipeline: player.isTpipeline,
+  tpipelineOffset: player.tpipelineOffset,
 });
 
 // Freeze-frame: al empezar un seek del pipeline /t/, capturar el último cuadro

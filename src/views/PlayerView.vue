@@ -255,22 +255,34 @@ function stopProgressTracking() {
     progressInterval = null;
   }
 }
+function getRealPositionSec(): number {
+  const vp = videoPlayerRef.value;
+  if (!vp) return 0;
+  const v = vp.videoRef;
+  if (!v) return 0;
+  const ct = v.currentTime || 0;
+  if (vp.isTpipeline?.value) return (vp.tpipelineOffset?.value || 0) + ct;
+  return ct;
+}
+
 function startProgressTracking() {
   stopProgressTracking();
   playerStartTime = Date.now();
   progressInterval = setInterval(() => {
     if (!playerStore.current.id) return;
-    const elapsedMin = (Date.now() - playerStartTime) / 1000 / 60;
-    const pct = progressPctFromElapsed(elapsedMin, playerStore.current.runtimeMin);
+    const positionSec = getRealPositionSec();
+    const runtimeSec = (playerStore.current.runtimeMin || 22) * 60;
+    const pct = runtimeSec > 0 ? Math.min((positionSec / runtimeSec) * 100, 95) : 0;
     if (playerStore.current.type === 'tv') {
       progressStore.save(playerStore.current.id, 'tv', {
         pct,
+        positionSec: Math.floor(positionSec),
         season: playerStore.current.season,
         episode: playerStore.current.episode,
         title: playerStore.current.title,
       });
     } else {
-      progressStore.save(playerStore.current.id, 'movie', { pct, title: playerStore.current.title });
+      progressStore.save(playerStore.current.id, 'movie', { pct, positionSec: Math.floor(positionSec), title: playerStore.current.title });
     }
   }, 15000);
 }
@@ -296,6 +308,28 @@ function onRdStarted() {
   startProgressTracking();
   if (playerStore.current.type === 'tv') {
     setTimeout(() => scheduleAutoNext(), 2000);
+  }
+  // Restaurar posición guardada ("Continuar viendo")
+  if (playerStore.current.id) {
+    const prog = progressStore.get(playerStore.current.id, playerStore.current.type);
+    if (prog?.positionSec && prog.positionSec > 30) {
+      setTimeout(() => {
+        const vp = videoPlayerRef.value;
+        if (!vp) return;
+        if (vp.isTpipeline?.value) {
+          // Pipeline /t/: usar tpipelineSeekTo (no se puede hacer v.currentTime)
+          // No restaurar en /t/ por ahora: el seek inicial ya es al principio,
+          // y seekear automáticamente podría causar confusión con el offset.
+          // TODO: implementar restore en /t/ cuando el cambio de audio esté listo.
+        } else {
+          const v = vp.videoRef;
+          if (v) {
+            v.currentTime = prog.positionSec;
+            console.warn(`[PLAYER] Retomando en ${Math.floor(prog.positionSec / 60)}:${String(Math.floor(prog.positionSec % 60)).padStart(2, '0')}`);
+          }
+        }
+      }, 500);
+    }
   }
 }
 
@@ -768,13 +802,14 @@ function triggerNextEpisode() {
 // ════════════════════════════════════════════════════════════════════════════
 function persistProgressOnClose() {
   if (!playerStore.current.id) return;
-  const elapsedMin = (Date.now() - playerStartTime) / 1000 / 60;
-  const pct = progressPctFromElapsed(elapsedMin, playerStore.current.runtimeMin);
+  const positionSec = getRealPositionSec();
+  const runtimeSec = (playerStore.current.runtimeMin || 22) * 60;
+  const pct = runtimeSec > 0 ? Math.min((positionSec / runtimeSec) * 100, 95) : 0;
   if (!shouldPersistProgressOnClose(pct)) return;
   if (playerStore.current.type === 'tv') {
-    progressStore.save(playerStore.current.id, 'tv', { pct, season: playerStore.current.season, episode: playerStore.current.episode, title: playerStore.current.title });
+    progressStore.save(playerStore.current.id, 'tv', { pct, positionSec: Math.floor(positionSec), season: playerStore.current.season, episode: playerStore.current.episode, title: playerStore.current.title });
   } else {
-    progressStore.save(playerStore.current.id, 'movie', { pct, title: playerStore.current.title });
+    progressStore.save(playerStore.current.id, 'movie', { pct, positionSec: Math.floor(positionSec), title: playerStore.current.title });
   }
 }
 
