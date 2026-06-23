@@ -49,7 +49,6 @@ import {
   buildIframeSourceUrl,
   seasonOptions,
   episodeOptions,
-  progressPctFromElapsed,
   shouldPersistProgressOnClose,
   autoNextDelayMs,
   canScheduleAutoNext,
@@ -187,9 +186,8 @@ let autoNextTriggered = false;
 let autoNextEpisodeData: { season: number; episode: number; title: string; desc: string; thumb: string } | null = null;
 let runtimeFetchPromise: Promise<number> | null = null;
 
-// ── Tracking de progreso (#progressInterval / playerStartTime) ──────────────
+// ── Tracking de progreso (#progressInterval) ──────────────
 let progressInterval: ReturnType<typeof setInterval> | null = null;
-let playerStartTime = 0;
 
 // ── Auto-hide de controles en táctiles — preserva `_flashControlsOnEpChange`/
 // `controlsHideTimeout` (líneas ~6071-6083 + apertura en `openPlayer`) ──────
@@ -261,13 +259,13 @@ function getRealPositionSec(): number {
   const v = vp.videoRef;
   if (!v) return 0;
   const ct = v.currentTime || 0;
-  if (vp.isTpipeline?.value) return (vp.tpipelineOffset?.value || 0) + ct;
+  if (vp.isTpipeline) return (vp.tpipelineOffset || 0) + ct;
   return ct;
 }
 
 function startProgressTracking() {
   stopProgressTracking();
-  playerStartTime = Date.now();
+
   progressInterval = setInterval(() => {
     if (!playerStore.current.id) return;
     const positionSec = getRealPositionSec();
@@ -291,7 +289,7 @@ function startProgressTracking() {
 function hideLoadingAndStart() {
   clearIframeMsgTimers();
   iframeLoading.value = false;
-  playerStartTime = Date.now();
+
   startProgressTracking();
   if (playerStore.current.type === 'tv') {
     setTimeout(() => scheduleAutoNext(), 2000);
@@ -304,7 +302,7 @@ function hideLoadingAndStart() {
 /** onRdStarted — escucha `<VideoPlayer>` @started (equiv. a la rama RD de `hideLoadingAndStart`, líneas ~7853-7862). */
 function onRdStarted() {
   iframeLoading.value = false;
-  playerStartTime = Date.now();
+
   startProgressTracking();
   if (playerStore.current.type === 'tv') {
     setTimeout(() => scheduleAutoNext(), 2000);
@@ -316,14 +314,14 @@ function onRdStarted() {
       setTimeout(() => {
         const vp = videoPlayerRef.value;
         if (!vp) return;
-        if (vp.isTpipeline?.value) {
+        if (vp.isTpipeline) {
           // Pipeline /t/: usar tpipelineSeekTo (no se puede hacer v.currentTime)
           // No restaurar en /t/ por ahora: el seek inicial ya es al principio,
           // y seekear automáticamente podría causar confusión con el offset.
           // TODO: implementar restore en /t/ cuando el cambio de audio esté listo.
         } else {
           const v = vp.videoRef;
-          if (v) {
+          if (v && prog.positionSec) {
             v.currentTime = prog.positionSec;
             console.warn(`[PLAYER] Retomando en ${Math.floor(prog.positionSec / 60)}:${String(Math.floor(prog.positionSec % 60)).padStart(2, '0')}`);
           }
@@ -650,7 +648,7 @@ function loadIframeSource(srcIdx: number, myGen: number) {
         return;
       }
       iframeOnloadFired = true;
-      playerStartTime = Date.now();
+    
       startProgressTracking();
       if (playerStore.current.type === 'tv') scheduleAutoNext();
     }
