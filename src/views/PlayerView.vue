@@ -141,6 +141,7 @@ const sourceButtons = computed<SourceButton[]>(() => {
   const rest = SOURCES.map((s, i) => ({ idx: i, label: s.name, icon: s.icon, active: i === active, isRd: false }));
   return [rd, ...rest];
 });
+// Anime → siempre selector Anime1V (SUB/DUB/HLS). No-anime → RD/UnlimPlay/vidlink.
 const showSourceSelector = computed(() => !isAnime.value);
 
 // ── Selector de servidores Anime1V ────────────────────────────────────────────
@@ -155,13 +156,16 @@ let animeInfoCache: { episodes?: Anime1Episode[] } | null = null;
  * servidores con StreamiX siempre primero.
  */
 const animeServerButtons = computed(() => {
-  const servers = animeServersCache.value ?? [];
-  const subServers = servers.filter((s) => s.type === 'SUB');
-  const dubServers = servers.filter((s) => s.type === 'DUB');
+  const all = animeServersCache.value ?? [];
+  const subServers = all.filter((s) => s.type === 'SUB');
+  const dubServers = all.filter((s) => s.type === 'DUB');
+  const mx = all.filter((s) => s.type === 'MX');
+  const lang = selectedAnime1Lang.value;
+  const filtered = [...mx, ...(lang === 'SUB' ? subServers : dubServers)];
   return {
-    showLangToggle: subServers.length > 0 || dubServers.length > 0,
-    subActive: selectedAnime1Lang.value === 'SUB',
-    servers,
+    showLangToggle: subServers.length > 0 && dubServers.length > 0,
+    subActive: lang === 'SUB',
+    servers: filtered,
   };
 });
 
@@ -499,45 +503,68 @@ function resetAnimeSelector() {
 
 async function fetchAnimeServersForEpisode(season: number, episode: number) {
   const myGen = playerStore.generation;
-  // `current.id` solo es `null` antes de `playerStore.load()` (ver nota en `loadIframeSource`)
-  // — guard para angostar el tipo antes de usarlo en `buildIframeSourceUrl`.
   const currentId = playerStore.current.id;
   if (currentId == null) return;
   resetAnimeSelector();
+  const streamixUrl = buildIframeSourceUrl(SOURCES, 0, 'tv', currentId, season, episode);
+
+  // Fallback baseline: si Anime1V no tiene el episodio, cargar StreamiX (UNA carga).
+  const loadStreamixOnly = () => {
+    if (playerStore.isStale(myGen)) return;
+    animeServersCache.value = [{ label: '🇲🇽 StreamiX', url: streamixUrl, type: 'MX' as const }];
+    activeAnimeServerIdx.value = 0;
+    loadUrlInPlayer(streamixUrl);
+  };
+
   try {
     if (!animeInfoCache) {
       const searchRes = await anime1Search(playerStore.current.animeTitle);
       const best = findBestMatch(playerStore.current.animeTitle, searchRes?.data?.results ?? null);
-      if (!best) return; // Solo queda StreamiX
+      if (!best) return loadStreamixOnly();
       const infoRes = await anime1Info(best.url);
-      if (!infoRes?.data?.episodes?.length) return;
+      if (!infoRes?.data?.episodes?.length) return loadStreamixOnly();
       animeInfoCache = infoRes.data;
     }
     if (playerStore.isStale(myGen)) return;
 
     const targetEp = pickEpisodeByNumber(animeInfoCache.episodes ?? null, episode);
-    if (!targetEp) return; // No encontrado — solo StreamiX
+    if (!targetEp) return loadStreamixOnly();
 
     const epRes = await anime1Episode(targetEp.url);
     if (playerStore.isStale(myGen)) return;
-    if (!epRes?.success) return;
+    if (!epRes?.success) return loadStreamixOnly();
 
-    const streamixUrl = buildIframeSourceUrl(SOURCES, 0, 'tv', currentId, season, episode);
-    animeServersCache.value = buildAnimeServerList(streamixUrl, epRes.data);
+    const serverList = buildAnimeServerList(streamixUrl, epRes.data);
+    animeServersCache.value = serverList;
+    // UNA sola carga: HLS si existe, si no el primer servidor disponible.
+    setTimeout(() => {
+      if (playerStore.isStale(myGen)) return;
+      const filtered = animeServerButtons.value.servers;
+      const hlsIdx = filtered.findIndex((s) => /hls/i.test(s.label));
+      if (hlsIdx >= 0) selectAnimeServer(hlsIdx);
+      else selectAnimeServer(filtered.length > 1 ? 1 : 0);
+    }, 0);
   } catch {
-    /* silenciar — igual que el original (solo loguea un warning) */
+    loadStreamixOnly();
   }
 }
 
 function selectAnimeServer(idx: number) {
-  const servers = animeServersCache.value;
-  if (!servers || !servers[idx]) return;
+  const filtered = animeServerButtons.value.servers;
+  if (!filtered[idx]) return;
   activeAnimeServerIdx.value = idx;
-  loadUrlInPlayer(servers[idx].url);
+  loadUrlInPlayer(filtered[idx].url);
 }
 
 function switchAnime1Lang(lang: 'SUB' | 'DUB') {
   selectedAnime1Lang.value = lang;
+  // Auto-seleccionar HLS del nuevo grupo
+  setTimeout(() => {
+    const filtered = animeServerButtons.value.servers;
+    const hlsIdx = filtered.findIndex((s) => /hls/i.test(s.label));
+    if (hlsIdx >= 0) selectAnimeServer(hlsIdx);
+    else if (filtered.length > 0) selectAnimeServer(0);
+  }, 0);
 }
 
 /** loadUrlInPlayer — preserva `_loadUrlInPlayer` (líneas ~4636-4659): carga una URL en el iframe sin reiniciar todo el reproductor. */
@@ -677,10 +704,15 @@ function loadActiveSource() {
     // El botón flotante "Sig. Ep ›" se muestra vía `showFloatingNextBtn` (computed) — nada más que hacer aquí.
   }
 
-  // Si es anime japonés: refrescar servidores en paralelo (preserva `_fetchAnimeServersForEpisode`, línea ~7592)
+  // ── Anime: NUNCA pasa por RD, y carga UNA sola vez ──
+  // RD para anime es errático (raws japoneses). Además, cargar StreamiX y después
+  // pisarlo con HLS generaba DOS cargas (flash "otro reproductor" + doble back).
+  // `fetchAnimeServersForEpisode` hace UNA sola carga (HLS si existe, si no StreamiX).
   if (isAnime.value) {
-    animeServersCache.value = null; // limpiar caché del episodio anterior — preserva `currentAnime1ServersCache=null`
+    if (isRdSource.value) playerStore.setSourceIndex(0);
+    animeServersCache.value = null;
     fetchAnimeServersForEpisode(playerStore.current.season, playerStore.current.episode);
+    return; // NO caer a loadIframeSource → evita la doble carga
   }
 
   if (isRdSource.value) {
@@ -824,9 +856,20 @@ function closePlayer() {
     controlsHideTimeout = null;
   }
   runtimeFetchPromise = null;
-  playerStore.close();
+  // Navegar DIRECTO al detalle (no `router.back()`): cambiar `iframe.src` agrega
+  // una entrada al historial del navegador, así que `back()` caía primero en el
+  // reproductor con iframe en blanco (requería dos clicks). Navegar al detalle
+  // explícitamente evita esa entrada basura.
+  const cur = playerStore.current;
+  const detailRoute =
+    cur.type === 'movie' ? `/pelicula/${cur.id}` : `/serie/${cur.id}/${cur.season}/${cur.episode}`;
+  // Solo invalidar async pendiente (bumpGeneration) SIN resetear sourceIndex:
+  // resetearlo a RD_SRC_IDX acá hace que el reproductor RD parpadee al volver.
+  // El reset completo (`close()`) lo hace `onBeforeUnmount` al desmontar.
+  playerStore.bumpGeneration();
   document.body.style.overflow = '';
-  router.back();
+  if (cur.id != null) router.push(detailRoute);
+  else router.back();
   // ── TV: ocultar la BARRA DEL NAVEGADOR (webOS) al volver ─────────────────────
   // Tras el ciclo de reproducción, webOS re-muestra su barra (URL/controles) y tapa
   // el nav. El ÚNICO modo fiable de ocultarla es el Fullscreen API; el clic en

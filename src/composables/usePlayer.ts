@@ -1161,20 +1161,14 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
 
     const { url: streamUrl, rdId, isX265: streamIsX265, fallbackUrl, streamFilename: streamFn } = selected;
 
-    // ── Anime sin audio comprensible → fallback inmediato a iframe ──
-    // Si es anime y el stream no tiene marcadores de inglés/español/latino en el
-    // filename, el audio será japonés sin subs → inútil. Los iframes (UnlimPlay/
-    // vidlink/Anime1V) traen subtítulos integrados.
+    // ── Anime: SIEMPRE usar Anime1V (selector consistente SUB/DUB/HLS) ──
+    // Anime1V está hecho para anime: SUB (japonés + subs español) y DUB (latino
+    // 🇲🇽) de forma consistente. RD para anime es errático (mayoría raws japoneses).
     if (opts.isAnime?.()) {
-      const fnLow = (streamFn || '').toLowerCase();
-      const hasUnderstandableAudio = /\beng\b|\benglish\b|\bspa\b|\bspanish\b|\blatino\b|\blat\b|\bdual\b/.test(fnLow);
-      if (!hasUnderstandableAudio) {
-        console.warn('[RD] Anime sin audio ENG/SPA → fallback a reproductor con subs integrados');
-        opts.onToast('🎌 Cambiando a reproductor con subtítulos...');
-        opts.onFallbackToNextSource();
-        isLoadingRd.value = false;
-        return;
-      }
+      console.warn('[RD] Anime → Anime1V (selector consistente con HLS por defecto)');
+      opts.onFallbackToNextSource();
+      isLoadingRd.value = false;
+      return;
     }
 
     // ── Resolución SERVER-SIDE (ADR-004): contenido NO cacheado resuelto por la
