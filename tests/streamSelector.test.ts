@@ -366,11 +366,10 @@ describe('Idioma condicional a Direct Play — "mejor de los dos mundos" (caso E
     behaviorHints: { filename: 'El.Padrino.1972.1080p.BluRay.x264.AC3.5.1.Spanish.mkv' },
   });
 
-  test('español DIRECT PLAY gana a inglés Direct Play de más resolución (3 cosas: seek+audio+sub)', () => {
-    expect(scoreStream(spaDirect)).toBeGreaterThan(scoreStream(engDirect));
+  test('castellano Direct Play NO gana a inglés Direct Play (solo latino tiene bonus)', () => {
+    expect(scoreStream(engDirect)).toBeGreaterThan(scoreStream(spaDirect));
     const { best } = selectBestStream([engDirect, spaDirect]);
-    expect(hasSpa(best!)).toBe(true);
-    expect(best?.behaviorHints?.filename).toContain('YIFY');
+    expect(best?.behaviorHints?.filename).toContain('RARBG');
   });
 
   test('español TRANSCODE (AC3/MKV) NO debe override a un inglés Direct Play (no sacrificar el seek)', () => {

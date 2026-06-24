@@ -188,12 +188,11 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
   else if (is720(s)) pts += 10;
   else if (is4k(s)) pts -= isTv ? 100 : 40;
 
-  // ── P6 — Idioma: Latino es la prioridad absoluta ──
-  // Jerarquía: Latino (+200) > inglés+subs (+10) > castellano (no se usa).
-  // Un Dual-Lat de Cinecalidad 1080p MP4 (~1.6GB) debe ganar sobre cualquier
-  // YIFY inglesa aunque sea Direct Play perfecto — el latino Direct Play es mejor.
+  // ── P6 — Idioma: solo LATINO tiene bonus ──
+  // Jerarquía: Latino (+200) > inglés+subs (+10). Castellano (España) NO tiene
+  // bonus — se trata igual que inglés. Si no hay latino, preferimos inglés+subs
+  // sobre castellano (regla del usuario).
   if (hasLatino(s)) pts += 200;
-  else if (hasSpa(s)) pts += directPlay ? 90 : 60;
   else pts += directPlay ? 10 : 5;
 
   // ── P7 — Contenedor (BONUS MENOR; jamás criterio principal) ──
