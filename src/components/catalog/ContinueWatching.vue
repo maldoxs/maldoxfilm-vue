@@ -50,6 +50,15 @@ const progressItems = computed<ProgressEntry[]>(() =>
     .slice(0, 20)
 );
 
+function formatDuration(min?: number): string {
+  if (!min || min <= 0) return '';
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}min`;
+  if (h > 0) return `${h}h`;
+  return `${m}min`;
+}
+
 interface ContinueCard {
   key: string;
   id: string | number;
@@ -57,6 +66,7 @@ interface ContinueCard {
   title: string;
   poster: string;
   sub: string;
+  duration: string;
   pct: number;
 }
 
@@ -74,6 +84,7 @@ const cards = computed<ContinueCard[]>(() =>
       title,
       poster: buildPosterUrl(d?.poster_path, deviceStore.isTV),
       sub,
+      duration: formatDuration(p.runtimeMin),
       pct,
     };
   })
@@ -135,6 +146,7 @@ function clearHistory() {
           <div class="continue-card-overlay">
             <div class="continue-card-title">{{ c.title }}</div>
             <div class="continue-card-sub">{{ c.sub }}</div>
+            <div v-if="c.duration" class="continue-card-duration">{{ c.duration }}</div>
             <div class="continue-card-bar"><div class="continue-card-fill" :style="{ width: c.pct + '%' }"></div></div>
           </div>
         </div>
@@ -183,7 +195,7 @@ function clearHistory() {
 .continue-carousel {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: 155px;
+  grid-auto-columns: 220px;
   gap: 8px;
   overflow-x: auto;
   /* Evita el scroll vertical atrapado (ver nota en Carousel.vue). */
@@ -198,10 +210,10 @@ function clearHistory() {
 .continue-card {
   cursor: pointer;
   position: relative;
-  border-radius: var(--radius, 5px);
+  border-radius: var(--radius, 8px);
   overflow: hidden;
   aspect-ratio: 2 / 3;
-  width: 155px;
+  width: 220px;
   background: var(--surface, #1c1c1c);
   transition: transform var(--trans, 0.25s ease), box-shadow var(--trans, 0.25s ease);
 }
@@ -237,15 +249,20 @@ function clearHistory() {
   padding: 28px 7px 7px;
 }
 .continue-card-title {
-  font-size: 0.67rem;
+  font-size: 0.78rem;
   font-weight: 600;
   line-height: 1.3;
   margin-bottom: 4px;
   color: #fff;
 }
 .continue-card-sub {
-  font-size: 0.58rem;
+  font-size: 0.65rem;
   color: var(--text-muted, #9a9a9a);
+  margin-bottom: 3px;
+}
+.continue-card-duration {
+  font-size: 0.6rem;
+  color: rgba(255, 255, 255, 0.5);
   margin-bottom: 5px;
 }
 .continue-card-bar {

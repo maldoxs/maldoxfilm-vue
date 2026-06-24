@@ -20,10 +20,9 @@ import {
   mediaTitle,
   mediaYear,
   mediaRating,
-  scoreColor,
-  scoreCirclePct,
   resolveMediaType,
 } from '../../services/catalog';
+import { getRuntime, formatRuntime } from '../../services/runtimeCache';
 
 const props = defineProps<{
   item: MediaItem;
@@ -43,16 +42,12 @@ const emit = defineEmits<{
 const title = computed(() => mediaTitle(props.item));
 const year = computed(() => mediaYear(props.item));
 const rating = computed(() => mediaRating(props.item));
-const ratingNum = computed(() => props.item.vote_average ?? 0);
 const poster = computed(() => buildPosterUrl(props.item.poster_path, !!props.isTvMode));
 const mtype = computed(() => resolveMediaType(props.item, props.fallbackType));
-
-// ── Círculo de puntaje — preserva el SVG `stroke-dasharray`/`stroke-dashoffset`
-// de `createScoreCircle` (línea ~6951-6962): un círculo de radio 16,
-// circunferencia ≈ 100.5, relleno proporcional al rating*10%.
-const CIRCLE_CIRCUMFERENCE = 100.5;
-const dashOffset = computed(() => CIRCLE_CIRCUMFERENCE - (CIRCLE_CIRCUMFERENCE * scoreCirclePct(ratingNum.value)) / 100);
-const ringColor = computed(() => scoreColor(ratingNum.value));
+const duration = computed(() => {
+  const rt = props.item.runtime || getRuntime(props.item.id, mtype.value);
+  return formatRuntime(rt);
+});
 
 const showProgress = computed(() => (props.progressPct ?? 0) > 3);
 
@@ -66,20 +61,6 @@ function onClick() {
     <img v-if="poster" class="card-poster" :src="poster" :alt="title" loading="eager" decoding="async" />
     <div v-else class="card-poster card-poster-fallback">{{ title }}</div>
 
-    <svg class="card-score" viewBox="0 0 36 36" aria-hidden="true">
-      <circle class="card-score-track" cx="18" cy="18" r="16" />
-      <circle
-        class="card-score-fill"
-        cx="18"
-        cy="18"
-        r="16"
-        :stroke="ringColor"
-        :stroke-dasharray="CIRCLE_CIRCUMFERENCE"
-        :stroke-dashoffset="dashOffset"
-      />
-      <text class="card-score-text" x="18" y="22" text-anchor="middle">{{ rating }}</text>
-    </svg>
-
     <div v-if="showProgress" class="card-progress-bar">
       <div class="card-progress-fill" :style="{ width: progressPct + '%' }"></div>
       <span v-if="progressLabel" class="card-progress-label">{{ progressLabel }}</span>
@@ -91,6 +72,7 @@ function onClick() {
         <span class="card-rating">★ {{ rating }}</span>
         <span v-if="year" class="card-year">{{ year }}</span>
       </div>
+      <div v-if="duration" class="card-duration">{{ duration }}</div>
     </div>
   </div>
 </template>
@@ -209,5 +191,10 @@ function onClick() {
 }
 .card-rating {
   color: #ffc94d;
+}
+.card-duration {
+  margin-top: 2px;
+  font-size: 0.62rem;
+  color: rgba(255, 255, 255, 0.5);
 }
 </style>

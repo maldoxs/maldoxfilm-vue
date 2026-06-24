@@ -348,6 +348,7 @@ defineExpose({
   fullscreen,
   isTpipeline: player.isTpipeline,
   tpipelineOffset: player.tpipelineOffset,
+  tpipelineSeekTo: player.tpipelineSeekTo,
 });
 
 // Freeze-frame: al empezar un seek del pipeline /t/, capturar el último cuadro

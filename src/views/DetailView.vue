@@ -41,6 +41,7 @@ import {
   type VideoResult,
 } from '../services/catalog';
 import { playButtonLabel } from '../services/progress';
+import { setRuntime } from '../services/runtimeCache';
 import type { MediaItem } from '../types';
 
 const props = defineProps<{
@@ -133,7 +134,7 @@ const prog = computed(() => progressStore.get(props.id, props.type));
 const inList = computed(() => myListStore.inList(props.id));
 
 /** playLabel — preserva `progLabel`/el texto del botón Reproducir EXACTO (línea ~8917/8930), incluido el doble ▶ cuando no hay progreso. */
-const playLabel = computed(() => playButtonLabel(prog.value, isTV.value));
+const playLabel = computed(() => playButtonLabel(prog.value, isTV.value, data.value?.runtime));
 
 const listBtnLabel = computed(() => (inList.value ? '✓ En Mi Lista' : '+ Mi Lista'));
 
@@ -214,6 +215,7 @@ async function loadDetail() {
     );
     if (myGen !== detailGeneration) return; // navegó a otro detalle antes de que esto resolviera
     data.value = res;
+    if (res.runtime) setRuntime(props.id, props.type, res.runtime);
     document.title = `${res.title || res.name || ''} — MaldoxFilm`;
 
     // Series con temporadas — cargar la temporada activa (preserva `dpLoadSeason(1,...)`, línea ~8990,

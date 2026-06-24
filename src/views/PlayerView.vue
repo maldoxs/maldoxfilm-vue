@@ -271,16 +271,18 @@ function startProgressTracking() {
     const positionSec = getRealPositionSec();
     const runtimeSec = (playerStore.current.runtimeMin || 22) * 60;
     const pct = runtimeSec > 0 ? Math.min((positionSec / runtimeSec) * 100, 95) : 0;
+    const rtMin = playerStore.current.runtimeMin || undefined;
     if (playerStore.current.type === 'tv') {
       progressStore.save(playerStore.current.id, 'tv', {
         pct,
         positionSec: Math.floor(positionSec),
+        runtimeMin: rtMin,
         season: playerStore.current.season,
         episode: playerStore.current.episode,
         title: playerStore.current.title,
       });
     } else {
-      progressStore.save(playerStore.current.id, 'movie', { pct, positionSec: Math.floor(positionSec), title: playerStore.current.title });
+      progressStore.save(playerStore.current.id, 'movie', { pct, positionSec: Math.floor(positionSec), runtimeMin: rtMin, title: playerStore.current.title });
     }
   }, 15000);
 }
@@ -315,10 +317,8 @@ function onRdStarted() {
         const vp = videoPlayerRef.value;
         if (!vp) return;
         if (vp.isTpipeline) {
-          // Pipeline /t/: usar tpipelineSeekTo (no se puede hacer v.currentTime)
-          // No restaurar en /t/ por ahora: el seek inicial ya es al principio,
-          // y seekear automáticamente podría causar confusión con el offset.
-          // TODO: implementar restore en /t/ cuando el cambio de audio esté listo.
+          void vp.tpipelineSeekTo(prog.positionSec!);
+          console.warn(`[PLAYER] Retomando en /t/ → ${Math.floor(prog.positionSec! / 60)}:${String(Math.floor(prog.positionSec! % 60)).padStart(2, '0')}`);
         } else {
           const v = vp.videoRef;
           if (v && prog.positionSec) {

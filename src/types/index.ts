@@ -160,4 +160,6 @@ export interface MediaItem {
   release_date?: string | null;
   first_air_date?: string | null;
   media_type?: 'movie' | 'tv' | 'person';
+  runtime?: number | null;
+  number_of_seasons?: number | null;
 }

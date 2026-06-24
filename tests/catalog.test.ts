@@ -219,7 +219,7 @@ describe('isJapaneseAnimeDetail (preservado EXACTO de línea ~8972)', () => {
 
 describe('detailRuntimeLabel / detailTypeBadge (preservados de líneas ~8907/8919)', () => {
   test('runtime en minutos si existe, si no temporadas, si no ""', () => {
-    expect(detailRuntimeLabel(120, null)).toBe('120 min');
+    expect(detailRuntimeLabel(120, null)).toBe('2h');
     expect(detailRuntimeLabel(null, 3)).toBe('3 temp.');
     expect(detailRuntimeLabel(null, null)).toBe('');
     expect(detailRuntimeLabel(0, 3)).toBe('3 temp.');
@@ -270,7 +270,7 @@ describe('buildDetailStats (preservado EXACTO de línea ~8938-8944)', () => {
       rating: '7.0',
       year: '2020',
       isTV: false,
-      runtime: '120 min',
+      runtime: '2h',
       numberOfSeasons: 3,
       numberOfEpisodes: 24,
     });

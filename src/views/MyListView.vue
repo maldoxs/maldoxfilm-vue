@@ -151,7 +151,7 @@ function onDeleteKeydown(e: KeyboardEvent, id: string) {
 .all-results-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
 }
 /* TV: posters y texto más grandes en Mi Lista (a pedido) */
 :global(html.tv-mode) .all-results-grid {

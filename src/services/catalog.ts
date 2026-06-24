@@ -365,7 +365,13 @@ export function isJapaneseAnimeDetail(genreNames: string[], originCountry: strin
  * detailRuntimeLabel — preserva `d.runtime?\`${d.runtime} min\`:(d.number_of_seasons?\`${...} temp.\`:'')` (línea ~8907).
  */
 export function detailRuntimeLabel(runtime?: number | null, numberOfSeasons?: number | null): string {
-  if (runtime) return `${runtime} min`;
+  if (runtime) {
+    const h = Math.floor(runtime / 60);
+    const m = runtime % 60;
+    if (h > 0 && m > 0) return `${h}h ${m}min`;
+    if (h > 0) return `${h}h`;
+    return `${m}min`;
+  }
   if (numberOfSeasons) return `${numberOfSeasons} temp.`;
   return '';
 }

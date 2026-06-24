@@ -21,6 +21,8 @@ export interface ProgressEntry {
   pct: number;
   /** Posición real en segundos para retomar ("Continuar viendo"). */
   positionSec?: number;
+  /** Duración en minutos (de TMDB) — para mostrar "1h 38min" en tarjetas. */
+  runtimeMin?: number;
   season?: number;
   episode?: number;
   title?: string;
@@ -102,13 +104,13 @@ export function withoutProgress(all: ProgressMap, id: string | number, type: 'mo
  * del original). Se preserva tal cual: "no remover funcionalidad" incluye
  * no corregir peculiaridades visuales que el usuario podría reconocer.
  */
-export function playButtonLabel(prog: ProgressEntry | null, isTV: boolean): string {
+export function playButtonLabel(prog: ProgressEntry | null, isTV: boolean, runtimeMin?: number | null): string {
   if (!prog) return '▶ Reproducir';
   if (isTV && prog.season) return `▶ Continuar T${prog.season}·E${prog.episode}`;
   if (prog.positionSec && prog.positionSec > 30) {
-    const m = Math.floor(prog.positionSec / 60);
-    const s = Math.floor(prog.positionSec % 60);
-    return `▶ Continuar ${m}:${String(s).padStart(2, '0')}`;
+    const posMin = Math.floor(prog.positionSec / 60);
+    if (runtimeMin && runtimeMin > 0) return `▶ Continuar · ${posMin} de ${runtimeMin} min`;
+    return `▶ Continuar · min ${posMin}`;
   }
   return `▶ Continuar ${Math.round(prog.pct)}%`;
 }
