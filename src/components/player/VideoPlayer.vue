@@ -102,6 +102,7 @@ const player: UsePlayerReturn = usePlayer({
   // En TV: preferir H264 1080p y tratar HEVC como no soportado (el navegador de la
   // smart-TV no renderiza HEVC por MSE → audio sin imagen, caso Deadpool 4K x265).
   isTv: () => deviceStore.isTV,
+  isAnime: () => playerStore.current.isAnime ?? false,
   // ADR-006 — borrar en RD el torrent creado por rd-stream al cerrar/cambiar.
   // sendBeacon sobrevive al cierre/descarga de la página (mejor que fetch aquí).
   serverCleanup: (torrentId: string) => {

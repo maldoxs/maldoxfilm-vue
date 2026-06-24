@@ -261,6 +261,8 @@ export interface UsePlayerOptions {
    * video HEVC por MSE → audio sin imagen). Default false (escritorio/móvil).
    */
   isTv?: () => boolean;
+  /** ¿Es anime? Si RD devuelve audio sin ENG/SPA → fallback inmediato a iframe (que trae subs integrados). */
+  isAnime?: () => boolean;
   /** Callback: ocultar overlay de carga + arrancar tracking de progreso (equiv. `hideLoadingAndStart`). */
   onStarted: () => void;
   /** Callback: mostrar un toast (equiv. `showToast`). */
@@ -1159,6 +1161,22 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
 
     const { url: streamUrl, rdId, isX265: streamIsX265, fallbackUrl, streamFilename: streamFn } = selected;
 
+    // ── Anime sin audio comprensible → fallback inmediato a iframe ──
+    // Si es anime y el stream no tiene marcadores de inglés/español/latino en el
+    // filename, el audio será japonés sin subs → inútil. Los iframes (UnlimPlay/
+    // vidlink/Anime1V) traen subtítulos integrados.
+    if (opts.isAnime?.()) {
+      const fnLow = (streamFn || '').toLowerCase();
+      const hasUnderstandableAudio = /\beng\b|\benglish\b|\bspa\b|\bspanish\b|\blatino\b|\blat\b|\bdual\b/.test(fnLow);
+      if (!hasUnderstandableAudio) {
+        console.warn('[RD] Anime sin audio ENG/SPA → fallback a reproductor con subs integrados');
+        opts.onToast('🎌 Cambiando a reproductor con subtítulos...');
+        opts.onFallbackToNextSource();
+        isLoadingRd.value = false;
+        return;
+      }
+    }
+
     // ── Resolución SERVER-SIDE (ADR-004): contenido NO cacheado resuelto por la
     //    Netlify Function `rd-stream` → reproducir su DASH/HLS/liveMP4 directo, sin
     //    pasar por el proxy de Torrentio (Range OK, token fuera del cliente). Solo
@@ -1205,6 +1223,9 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // `resolveActiveStream` (función pura, sin acceso a `showToast`) hasta acá.
     if (selected.unavailableInRd) {
       opts.onToast('⚠️ No disponible en RD — cambiando de reproductor');
+      opts.onFallbackToNextSource();
+      isLoadingRd.value = false;
+      return;
     }
 
     // ── Toast x265 (línea ~7860) ──
