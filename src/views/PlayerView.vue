@@ -198,10 +198,11 @@ let progressInterval: ReturnType<typeof setInterval> | null = null;
 const controlsHidden = ref(false);
 let controlsHideTimeout: ReturnType<typeof setTimeout> | null = null;
 /**
- * armControlsHide — programa el ocultado del topbar/selector tras 3.5s de
- * inactividad. A diferencia del original (que solo auto-ocultaba en táctiles),
- * aquí TAMBIÉN aplica en desktop: con RD el `<video>` es nativo y el `mousemove`
- * sí burbujea al `.player-page`, así que el topbar reaparece al mover el mouse.
+ * armControlsHide — oculta el topbar/controles tras 3.5s de inactividad. Lógica
+ * UNIFORME para películas, series y anime: mover el puntero → muestra; 3.5s quieto
+ * → oculta. Sobre el `<video>` nativo (RD) el `mousemove` burbujea al `.player-page`;
+ * sobre el iframe (anime) lo captura un overlay transparente (`.iframe-activity-catcher`)
+ * que lo revela; en fullscreen lo capta el listener de `document` (ver onMounted).
  */
 function armControlsHide() {
   if (controlsHideTimeout) clearTimeout(controlsHideTimeout);
@@ -953,8 +954,14 @@ async function init() {
   loadActiveSource();
 }
 
+// Listener de actividad a nivel `document`: en fullscreen nativo (sobre todo del
+// `<video>` de RD) el `mousemove` no siempre burbujea al `.player-page`, pero sí
+// llega al documento. Así "mover el puntero → mostrar controles" funciona también
+// en pantalla completa. Sobre el iframe cross-origin no dispara (lo cubre el overlay).
+const onDocActivity = () => onPlayerActivity();
 onMounted(() => {
   void init();
+  document.addEventListener('mousemove', onDocActivity);
 });
 
 onBeforeUnmount(() => {
@@ -962,6 +969,7 @@ onBeforeUnmount(() => {
   stopProgressTracking();
   cancelAutoNext();
   clearIframeMsgTimers();
+  document.removeEventListener('mousemove', onDocActivity);
   if (iframeAutoFallbackTimer) clearTimeout(iframeAutoFallbackTimer);
   if (controlsHideTimeout) clearTimeout(controlsHideTimeout);
   // Vaciar el iframe (UnlimPlay/vidlink) → corta su audio al volver (igual que el
@@ -1061,6 +1069,16 @@ onBeforeUnmount(() => {
         allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
         referrerpolicy="no-referrer"
       ></iframe>
+
+      <!-- Captador de actividad sobre el iframe (cross-origin no manda mousemove al padre).
+           Solo activo cuando los controles están OCULTOS: captura el 1er movimiento para
+           revelarlos y luego se desactiva (pointer-events:none) para no bloquear el iframe. -->
+      <div
+        v-show="!isRdSource && controlsHidden"
+        class="iframe-activity-catcher"
+        @mousemove="onPlayerActivity"
+        @click="onPlayerActivity"
+      ></div>
     </div>
 
     <!-- Botón flotante "Sig. Ep ›" — preserva #playerNextEpBtn (línea ~3851) -->
@@ -1298,6 +1316,16 @@ html.tv-mode .source-btn:focus {
   border: none;
   position: absolute;
   inset: 0;
+}
+/* Captador de actividad sobre el iframe — transparente, solo visible (v-show) cuando
+   los controles están ocultos. Al moverse el mouse revela los controles y desaparece,
+   dejando el iframe interactivo. */
+.iframe-activity-catcher {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  background: transparent;
+  cursor: default;
 }
 .player-loading {
   position: absolute;
