@@ -1049,7 +1049,11 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- #btnCast — NO portado: deshabilitado en el original (`display:none !important` / "Enviar a TV eliminado", línea 2282). Ver nota en <script>. -->
-      <button ref="fullscreenIconRef" class="player-fullscreen-btn" title="Pantalla completa" @click="fullscreen.toggle">
+      <!-- ⛶ del topbar: en móvil/tablet/desktop SOLO se muestra para fuentes iframe (que NO
+           tienen la barra de controles propia con su ⛶). En el camino RD se oculta para dejar
+           un único botón de fullscreen abajo (patrón estándar). En TV siempre visible (se navega
+           con control remoto y la barra inferior se auto-oculta). -->
+      <button v-if="deviceStore.isTV || !isRdSource" ref="fullscreenIconRef" class="player-fullscreen-btn" title="Pantalla completa" @click="fullscreen.toggle">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path :d="fullscreen.isFullscreen.value ? FULLSCREEN_PATH_D.enter : FULLSCREEN_PATH_D.exit" />
         </svg>
