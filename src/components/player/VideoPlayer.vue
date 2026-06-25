@@ -41,10 +41,19 @@ const props = defineProps<{
   title: string;
   /** Duración de la peli (seg, de TMDB) — fallback cuando `video.duration` es Infinity (transcode RD). */
   runtimeSec?: number;
+  /**
+   * Estado del fullscreen DE PÁGINA (el de `PlayerView`, que cubre la flecha "Volver"
+   * + topbar). El botón ⛶ de la barra de controles NO usa el fullscreen local de este
+   * componente (acotado a su wrapper → escondía la flecha); delega en el de página vía
+   * `toggle-fullscreen`. Esta prop solo alimenta el ícono para mantenerlo en sync.
+   */
+  pageFullscreen?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'fallback-to-next-source'): void;
+  /** El usuario tocó el ⛶ de la barra → que `PlayerView` togglee su fullscreen de página. */
+  (e: 'toggle-fullscreen'): void;
   /**
    * started — el video RD arrancó de verdad (equiv. `hideLoadingAndStart`,
    * línea ~7808). `PlayerView` lo escucha para arrancar `startProgressTracking`/
@@ -481,9 +490,9 @@ onBeforeUnmount(() => {
                 <polyline points="12 6 12 12 16 14" />
               </svg>
             </button>
-            <button ref="fullscreenIconRef" class="nf-btn" @click="fullscreen.toggle">
+            <button ref="fullscreenIconRef" class="nf-btn" @click="emit('toggle-fullscreen')">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path :d="fullscreen.isFullscreen.value ? FULLSCREEN_PATH_D.enter : FULLSCREEN_PATH_D.exit" />
+                <path :d="props.pageFullscreen ? FULLSCREEN_PATH_D.enter : FULLSCREEN_PATH_D.exit" />
               </svg>
             </button>
           </div>

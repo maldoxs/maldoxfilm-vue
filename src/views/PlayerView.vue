@@ -1066,7 +1066,7 @@ onBeforeUnmount(() => {
 
       <!-- Real-Debrid — siempre montado, mostrado vía v-show -->
       <div v-show="isRdSource" class="rd-wrap">
-        <VideoPlayer ref="videoPlayerRef" :rd-stream-resolver="rdStreamResolver" :rd-client="rdClient" :title="title" :runtime-sec="(playerStore.current.runtimeMin || 0) * 60" @started="onRdStarted" @fallback-to-next-source="fallbackToFirstSource" />
+        <VideoPlayer ref="videoPlayerRef" :rd-stream-resolver="rdStreamResolver" :rd-client="rdClient" :title="title" :runtime-sec="(playerStore.current.runtimeMin || 0) * 60" :page-fullscreen="fullscreen.isFullscreen.value" @started="onRdStarted" @fallback-to-next-source="fallbackToFirstSource" @toggle-fullscreen="fullscreen.toggle" />
       </div>
 
       <!-- Iframe (UnlimPlay/vidlink/Anime1V) — siempre montado, mostrado vía v-show -->
