@@ -322,8 +322,16 @@ function toggleList() {
  * si es null estamos en la primera página y `router.back()` saldría de la app.
  */
 function goBack() {
-  const hasPrev = typeof window !== 'undefined' && window.history.state && window.history.state.back != null;
-  if (hasPrev) router.back();
+  const prev = typeof window !== 'undefined' && window.history.state ? window.history.state.back : null;
+  // Si la entrada anterior es el REPRODUCTOR (`/ver/...`), NO volver ahí: reabriría
+  // la película. Pasa cuando el usuario abrió el player y volvió — `closePlayer` hace
+  // `router.push` del detalle, dejando el player justo debajo en el stack. En ese caso
+  // vamos directo al Inicio (la pantalla anterior real ya no está accesible con back).
+  if (typeof prev === 'string' && prev.startsWith('/ver/')) {
+    router.push('/');
+    return;
+  }
+  if (prev != null) router.back();
   else router.push('/');
 }
 

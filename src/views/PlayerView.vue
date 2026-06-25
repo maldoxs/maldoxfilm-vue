@@ -857,10 +857,6 @@ function closePlayer() {
     controlsHideTimeout = null;
   }
   runtimeFetchPromise = null;
-  // Navegar DIRECTO al detalle (no `router.back()`): cambiar `iframe.src` agrega
-  // una entrada al historial del navegador, así que `back()` caía primero en el
-  // reproductor con iframe en blanco (requería dos clicks). Navegar al detalle
-  // explícitamente evita esa entrada basura.
   const cur = playerStore.current;
   const detailRoute =
     cur.type === 'movie' ? `/pelicula/${cur.id}` : `/serie/${cur.id}/${cur.season}/${cur.episode}`;
@@ -869,7 +865,20 @@ function closePlayer() {
   // El reset completo (`close()`) lo hace `onBeforeUnmount` al desmontar.
   playerStore.bumpGeneration();
   document.body.style.overflow = '';
-  if (cur.id != null) router.push(detailRoute);
+  // CÓMO VOLVER — depende de si el historial quedó limpio o contaminado:
+  // • Camino RD/video (sin iframe): el stack es [catálogo → detalle → player], así que
+  //   la entrada anterior ES el detalle. Usamos `router.back()`: NO agrega entrada basura
+  //   y el detalle conserva su propio `back` hacia el catálogo/filtro (p.ej.
+  //   /peliculas?genero=27) → "Volver" del detalle respeta el filtro de origen.
+  // • Camino iframe (anime/UnlimPlay): cambiar `iframe.src` agrega entradas al historial,
+  //   así que la anterior YA NO es el detalle. Ahí `router.back()` caía en el reproductor
+  //   con iframe en blanco (doble-back) → navegamos explícito al detalle.
+  const prevEntry =
+    typeof window !== 'undefined' && window.history.state ? window.history.state.back : null;
+  const cameFromDetail =
+    typeof prevEntry === 'string' && (prevEntry.startsWith('/pelicula/') || prevEntry.startsWith('/serie/'));
+  if (cameFromDetail) router.back();
+  else if (cur.id != null) router.push(detailRoute);
   else router.back();
   // ── TV: ocultar la BARRA DEL NAVEGADOR (webOS) al volver ─────────────────────
   // Tras el ciclo de reproducción, webOS re-muestra su barra (URL/controles) y tapa
