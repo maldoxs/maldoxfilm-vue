@@ -1144,14 +1144,13 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     isLoadingRd.value = true;
     loadingMessage.value = '🔍 Buscando en Real-Debrid...';
 
+    const isTvNow = opts.isTv?.() ?? false;
     let selected: SelectedStream;
     try {
-      // SELECCIÓN DE STREAM IDÉNTICA EN TODAS LAS PANTALLAS (pedido del usuario): se pasa
-      // `false` para que TV elija EXACTAMENTE el mismo stream que desktop. Antes el scoring TV
-      // prefería otro stream (H264/MP4, penalizando x265/4K) → caía al transcode legacy en vez
-      // de Direct Play / pipeline /t/ → sin "Seek fluido" y con seek lento en TV.
-      // Mismo stream ⇒ mismo camino ⇒ mismo seek fluido en móvil/tablet/desktop/TV.
-      selected = await opts.rdStreamResolver.getStream(params.id, params.type, params.season, params.episode, false);
+      // En TV el scoring prefiere H264 1080p MP4 (penaliza HEVC/4K): el navegador webOS NO
+      // decodifica HEVC por MSE y el pipeline /t/ no es confiable ahí → el camino robusto para
+      // seek fluido en TV es H264 MP4 por Direct Play (seek nativo del <video>, sin Shaka/`/t/`).
+      selected = await opts.rdStreamResolver.getStream(params.id, params.type, params.season, params.episode, isTvNow);
     } catch {
       if (playerStore.isStale(myGen)) return;
       clearMsgTimers();
@@ -1230,11 +1229,10 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     if (streamIsX265) opts.onToast('🔄 Optimizando video para tu navegador...');
 
     // ── Detección HEVC nativa + cascada de audio incompatible (líneas ~7864-7877) ──
-    // MISMO comportamiento en TODAS las pantallas (pedido del usuario): se decide igual que
-    // desktop, sin gate de TV. Antes en TV se forzaba `hevcOk=false`, lo que desviaba el HEVC
-    // al transcode legacy (seek lento "esa parte no está lista") en vez de Direct Play / `/t/`
-    // → seek roto en TV. Ahora TV toma EXACTAMENTE el mismo camino que desktop → seek fluido.
-    const hevcOk = detectHevcSupport(getMediaSource());
+    // En TV forzamos hevcOk=false: webOS reporta soporte HEVC (`isTypeSupported`→true) pero NO
+    // lo renderiza por MSE (4K/10-bit) → audio sin imagen. Así el HEVC va al transcode H264 en
+    // vez del HEVC directo negro. (El seek fluido en TV viene del Direct Play de H264 MP4.)
+    const hevcOk = !isTvNow && detectHevcSupport(getMediaSource());
     const { hasBadAudio } = checkBadAudioForDirectPlay(streamFn, !!rdId);
 
     // ── PLAY DIRECTO (HTTP Range = seek instantáneo, sin transcode) ──────────────────
