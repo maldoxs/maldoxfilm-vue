@@ -70,11 +70,19 @@ export async function waitForSegmentAt(
   const url = `https://${cdn}/t/${fullPathId}/${audio}/none/aac/video-1.m4s`;
   const start = Date.now();
   while (Date.now() - start < maxWait) {
+    // AbortController + setTimeout en vez de `AbortSignal.timeout(2000)`: esta última
+    // NO existe en navegadores viejos (p.ej. webOS de smart-TV) → lanzaba
+    // "AbortSignal.timeout is not a function", haciendo fallar TODO el resolve de /t/
+    // y cayendo al transcode (seek lento) SOLO en TV. AbortController sí es universal.
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 2000);
     try {
-      const r = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(2000) });
+      const r = await fetch(url, { method: 'HEAD', signal: ctrl.signal });
       if (r.ok) return true;
     } catch {
       // retry
+    } finally {
+      clearTimeout(tid);
     }
     await new Promise((r) => setTimeout(r, 400));
   }
