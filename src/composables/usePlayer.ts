@@ -1057,6 +1057,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       resolved = await resolveTpipeline(rdId);
     } catch (e) {
       console.warn('[/t/] resolve falló → fallback a transcode legacy:', e);
+      opts.onToast(`🔧 /t/ RESOLVE falló: ${String(e).slice(0, 90)}`); // DIAG temporal
       return false;
     }
 
@@ -1112,6 +1113,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       return true;
     } catch (e) {
       console.warn('[/t/] carga falló → fallback a transcode legacy:', e);
+      opts.onToast(`🔧 /t/ CARGA falló: ${String(e).slice(0, 90)}`); // DIAG temporal
       isTpipeline.value = false;
       tpipelineState = null;
       _shakaDestroy();
@@ -1236,6 +1238,10 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // → seek roto en TV. Ahora TV toma EXACTAMENTE el mismo camino que desktop → seek fluido.
     const hevcOk = detectHevcSupport(getMediaSource());
     const { hasBadAudio } = checkBadAudioForDirectPlay(streamFn, !!rdId);
+
+    // 🔧 DIAGNÓSTICO TEMPORAL (visible en TV): muestra qué decide el reproductor. Permite
+    // ver en la TV (sin consola) por qué cae al transcode. QUITAR cuando esté resuelto.
+    opts.onToast(`🔧 x265=${streamIsX265} badAudio=${hasBadAudio} hevcOk=${hevcOk} rdId=${rdId ? 'sí' : 'NO'}`);
 
     // ── PLAY DIRECTO (HTTP Range = seek instantáneo, sin transcode) ──────────────────
     // Se intenta para H264 (cualquier device) o HEVC con soporte real (desktop/iOS, NO TV).
