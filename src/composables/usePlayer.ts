@@ -1187,6 +1187,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     const serverUrl =
       selected.serverDashUrl || selected.serverHlsUrl || selected.serverLiveMp4Url || selected.serverDirectUrl;
     if (serverUrl) {
+      opts.onDiag?.(`SERVER-SIDE (sin rdId) → ${selected.serverDashUrl ? 'DASH' : selected.serverHlsUrl ? 'HLS' : selected.serverLiveMp4Url ? 'liveMP4' : 'directo'} | seek lento`);
       // Recordar el torrent creado por rd-stream para borrarlo al cerrar/cambiar (ADR-006).
       currentServerTorrentId = selected.serverTorrentId ?? null;
       opts.onToast('🔄 Optimizando video para tu navegador...');
@@ -1212,6 +1213,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     }
 
     if (!streamUrl) {
+      opts.onDiag?.('SIN streamUrl → cambia de reproductor (iframe)');
       opts.onToast('⚡ Sin resultados en RD — cambiando de reproductor');
       opts.onFallbackToNextSource();
       return;
@@ -1224,6 +1226,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // (NO cambia de fuente aquí). `selected.unavailableInRd` propaga esa señal desde
     // `resolveActiveStream` (función pura, sin acceso a `showToast`) hasta acá.
     if (selected.unavailableInRd) {
+      opts.onDiag?.('unavailableInRd → cambia de reproductor (iframe)');
       opts.onToast('⚠️ No disponible en RD — cambiando de reproductor');
       opts.onFallbackToNextSource();
       isLoadingRd.value = false;
