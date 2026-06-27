@@ -462,6 +462,9 @@ onBeforeUnmount(() => {
             <span class="nf-title-bar">{{ title }}</span>
           </div>
           <div class="nf-right">
+            <!-- Disparadores de episodios (⏭ / ⧉) — los inyecta PlayerView vía slot SOLO en
+                 series/anime. Van al mismo nivel que CC/velocidad/fullscreen (camino RD). -->
+            <slot name="episode-triggers"></slot>
             <!-- #nfCCBtn — preserva línea ~3803-3808 (oculto hasta que `_spInit` llama `_spShowForRD(true)`) -->
             <button
               v-if="audioPanelReady"

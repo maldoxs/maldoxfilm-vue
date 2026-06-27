@@ -35,6 +35,10 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import VideoPlayer from '../components/player/VideoPlayer.vue';
+import EpisodePanel from '../components/player/EpisodePanel.vue';
+import EpisodeTriggers from '../components/player/EpisodeTriggers.vue';
+import NextEpisodeCard from '../components/player/NextEpisodeCard.vue';
+import { fetchSeasonEpisodes, type EpisodeMeta } from '../services/episodes';
 import { useAppServices } from '../composables/useAppServices';
 import { usePlayerStore } from '../stores/player';
 import { useProgressStore } from '../stores/progress';
@@ -48,12 +52,10 @@ import {
   RD_SRC_IDX,
   buildIframeSourceUrl,
   seasonOptions,
-  episodeOptions,
   shouldPersistProgressOnClose,
   autoNextDelayMs,
   canScheduleAutoNext,
   nextEpisodeTarget,
-  prevEpisodeTarget,
   sourceToastLabel,
 } from '../services/playerSources';
 import {
@@ -171,10 +173,118 @@ const animeServerButtons = computed(() => {
 
 // ── Episodios (#playerBottom / .ep-controls-row) ─────────────────────────────
 const seasonOpts = computed(() => seasonOptions(playerStore.current.totalSeasons, playerStore.current.season));
-const episodeOpts = computed(() => episodeOptions(playerStore.current.totalEpisodes, playerStore.current.episode));
 const showEpisodeControls = computed(() => playerStore.current.type === 'tv' && playerStore.current.totalSeasons > 0);
-/** playerNextEpBtn visible — preserva `nextBtn.classList.toggle('visible-btn', playerState.type==='tv')` (línea ~7780). */
-const showFloatingNextBtn = computed(() => playerStore.current.type === 'tv');
+
+// ── Panel de episodios estilo Netflix (EpisodePanel) ─────────────────────────
+const episodePanelOpen = ref(false);
+const episodePanelLoading = ref(false);
+/** Temporada que se está VIENDO en el panel (puede diferir de la que se reproduce — el usuario navega). */
+const viewedSeason = ref(1);
+const viewedEpisodes = ref<EpisodeMeta[]>([]);
+
+async function loadViewedEpisodes(season: number) {
+  const id = playerStore.current.id;
+  if (id == null) return;
+  episodePanelLoading.value = true;
+  viewedSeason.value = season;
+  try {
+    viewedEpisodes.value = await fetchSeasonEpisodes(tmdbClient, id, season, LANG);
+  } finally {
+    episodePanelLoading.value = false;
+  }
+}
+
+function openEpisodePanel() {
+  episodePanelOpen.value = true;
+  void loadViewedEpisodes(playerStore.current.season);
+}
+
+function onPanelSelectSeason(season: number) {
+  void loadViewedEpisodes(season);
+}
+
+function onPanelPlay({ season, episode }: { season: number; episode: number }) {
+  episodePanelOpen.value = false;
+  cancelAutoNext();
+  // Si cambia de temporada, actualizar el conteo de episodios desde lo que ya cargó el panel.
+  if (season !== playerStore.current.season && viewedEpisodes.value.length) {
+    playerStore.setTotals(playerStore.current.totalSeasons, viewedEpisodes.value.length);
+  }
+  playerStore.setEpisode(season, episode);
+  fetchEpisodeRuntime(season, episode);
+  loadActiveSource();
+  flashControlsOnEpChange();
+}
+
+// ── Hover (estilo audio/subtítulos/velocidad): mouseenter abre, leave cierra con
+//    delay; el "puente" evita que se cierre al pasar el mouse del ícono a la card/panel.
+const HOVER_CLOSE_MS = 220;
+let nextCloseTimer: ReturnType<typeof setTimeout> | null = null;
+let listCloseTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Card "Siguiente episodio" ----------------------------------------------------
+const nextCardOpen = ref(false);
+const nextCardLoading = ref(false);
+const nextEpisodeMeta = ref<EpisodeMeta | null>(null);
+
+async function loadNextEpisodeMeta() {
+  const cur = playerStore.current;
+  const target = nextEpisodeTarget({ season: cur.season, episode: cur.episode, totalSeasons: cur.totalSeasons, totalEpisodes: cur.totalEpisodes });
+  if (!target || cur.id == null) {
+    nextEpisodeMeta.value = null;
+    return;
+  }
+  nextCardLoading.value = true;
+  try {
+    const eps = await fetchSeasonEpisodes(tmdbClient, cur.id, target.season, LANG);
+    nextEpisodeMeta.value = eps.find((e) => e.number === target.episode) ?? null;
+  } finally {
+    nextCardLoading.value = false;
+  }
+}
+
+function onNextEnter() {
+  if (nextCloseTimer) { clearTimeout(nextCloseTimer); nextCloseTimer = null; }
+  if (!nextCardOpen.value) void loadNextEpisodeMeta();
+  nextCardOpen.value = true;
+}
+function onNextLeave() {
+  nextCloseTimer = setTimeout(() => { nextCardOpen.value = false; }, HOVER_CLOSE_MS);
+}
+function onNextTap() {
+  if (nextCardOpen.value) { nextCardOpen.value = false; return; }
+  void loadNextEpisodeMeta();
+  nextCardOpen.value = true;
+}
+function onNextCardKeep() {
+  if (nextCloseTimer) { clearTimeout(nextCloseTimer); nextCloseTimer = null; }
+}
+function onNextCardEnd() {
+  nextCloseTimer = setTimeout(() => { nextCardOpen.value = false; }, HOVER_CLOSE_MS);
+}
+function playNextFromCard() {
+  nextCardOpen.value = false;
+  triggerNextEpisode();
+}
+
+// Panel "Lista de episodios" ---------------------------------------------------
+function onListEnter() {
+  if (listCloseTimer) { clearTimeout(listCloseTimer); listCloseTimer = null; }
+  if (!episodePanelOpen.value) openEpisodePanel();
+}
+function onListLeave() {
+  listCloseTimer = setTimeout(() => { episodePanelOpen.value = false; }, HOVER_CLOSE_MS);
+}
+function onListTap() {
+  if (episodePanelOpen.value) { episodePanelOpen.value = false; return; }
+  openEpisodePanel();
+}
+function onPanelHoverKeep() {
+  if (listCloseTimer) { clearTimeout(listCloseTimer); listCloseTimer = null; }
+}
+function onPanelHoverEnd() {
+  listCloseTimer = setTimeout(() => { episodePanelOpen.value = false; }, HOVER_CLOSE_MS);
+}
 
 // ── Banner auto-next (#autonextBanner) ───────────────────────────────────────
 const autoNextVisible = ref(false);
@@ -600,7 +710,14 @@ function stopRdPlayback() {
   }
 }
 
-function stopIframePlayback() {
+/**
+ * @param blankIframe Si true (default), navega el iframe a `about:blank` para cortar su
+ *   audio. ⚠️ Eso AGREGA una entrada al historial del navegador. En `closePlayer` se llama
+ *   con `false`: blanquear ahí, ANTES de navegar, dejaba una entrada basura + pantalla
+ *   blanca → "Volver" pedía dos clicks. Al cerrar, el audio se corta igual en
+ *   `onBeforeUnmount` (que blanquea DESPUÉS de navegar) y al desmontarse el iframe.
+ */
+function stopIframePlayback(blankIframe = true) {
   if (iframeAutoFallbackTimer) {
     clearTimeout(iframeAutoFallbackTimer);
     iframeAutoFallbackTimer = null;
@@ -608,7 +725,7 @@ function stopIframePlayback() {
   if (frameRef.value) {
     frameRef.value.onload = null;
     frameRef.value.onerror = null;
-    frameRef.value.src = 'about:blank';
+    if (blankIframe) frameRef.value.src = 'about:blank';
   }
 }
 
@@ -701,10 +818,6 @@ function loadActiveSource() {
   iframeLoadingText.value = '🔌 Conectando con el servidor...';
   scheduleIframeLoadingMessages();
 
-  if (showFloatingNextBtn.value) {
-    // El botón flotante "Sig. Ep ›" se muestra vía `showFloatingNextBtn` (computed) — nada más que hacer aquí.
-  }
-
   // ── Anime: NUNCA pasa por RD, y carga UNA sola vez ──
   // RD para anime es errático (raws japoneses). Además, cargar StreamiX y después
   // pisarlo con HLS generaba DOS cargas (flash "otro reproductor" + doble back).
@@ -765,64 +878,12 @@ function fallbackToFirstSource() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// NAVEGACIÓN DE EPISODIOS — preserva `changeSeason`/`changeEpisode`/
-// `nextEpisode`/`prevEpisode` (líneas ~7660-7711, ~8568-8593)
+// NAVEGACIÓN DE EPISODIOS — la selección de temporada/episodio vive ahora en el
+// panel estilo Netflix (`EpisodePanel` → `onPanelPlay`/`onPanelSelectSeason`) y la
+// card "Siguiente" (`triggerNextEpisode`). Los antiguos dropdowns + botones
+// Anterior/Siguiente se removieron junto con `changeSeason`/`changeEpisode`/
+// `nextEpisode`/`prevEpisode`.
 // ════════════════════════════════════════════════════════════════════════════
-async function changeSeason(seasonStr: string) {
-  const s = parseInt(seasonStr, 10);
-  cancelAutoNext();
-  playerStore.setEpisode(s, 1);
-  try {
-    const sd = await tmdbClient.get<{ episodes?: unknown[] }>(`/tv/${playerStore.current.id}/season/${s}?language=${LANG}`).catch(() => ({ episodes: [] }));
-    const epCount = sd.episodes?.length || 20;
-    playerStore.setTotals(playerStore.current.totalSeasons, epCount);
-  } catch {
-    playerStore.setTotals(playerStore.current.totalSeasons, 20);
-  }
-  fetchEpisodeRuntime(s, 1);
-  loadActiveSource();
-  flashControlsOnEpChange();
-  if (isAnime.value) {
-    animeInfoCache = animeInfoCache; // se conserva entre cambios de episodio (mismo anime) — ver `_animeInfoCache`
-  }
-}
-
-function changeEpisode(episodeStr: string) {
-  const e = parseInt(episodeStr, 10);
-  cancelAutoNext();
-  playerStore.setEpisode(playerStore.current.season, e);
-  fetchEpisodeRuntime(playerStore.current.season, e);
-  loadActiveSource();
-  flashControlsOnEpChange();
-}
-
-function nextEpisode() {
-  cancelAutoNext();
-  const cur = playerStore.current;
-  const target = nextEpisodeTarget({ season: cur.season, episode: cur.episode, totalSeasons: cur.totalSeasons, totalEpisodes: cur.totalEpisodes });
-  if (!target) return;
-  if (!target.isNewSeason) {
-    playerStore.setEpisode(target.season, target.episode);
-    fetchEpisodeRuntime(target.season, target.episode);
-    loadActiveSource();
-    flashControlsOnEpChange();
-  } else {
-    void goToNextEpisode();
-  }
-}
-
-function prevEpisode() {
-  cancelAutoNext();
-  const cur = playerStore.current;
-  // prevEpisodeTarget NUNCA cruza temporada — curiosidad preservada (preserva líneas ~8580-8588)
-  const target = prevEpisodeTarget({ season: cur.season, episode: cur.episode, totalSeasons: cur.totalSeasons, totalEpisodes: cur.totalEpisodes });
-  if (!target) return;
-  playerStore.setEpisode(target.season, target.episode);
-  fetchEpisodeRuntime(target.season, target.episode);
-  loadActiveSource();
-  flashControlsOnEpChange();
-}
-
 function triggerNextEpisode() {
   cancelAutoNext();
   void goToNextEpisode();
@@ -850,7 +911,7 @@ function closePlayer() {
   stopProgressTracking();
   cancelAutoNext();
   stopRdPlayback();
-  stopIframePlayback();
+  stopIframePlayback(false); // NO blanquear acá: agregaría entrada al historial → doble-back. Lo hace onBeforeUnmount tras navegar.
   clearIframeMsgTimers();
   if (controlsHideTimeout) {
     clearTimeout(controlsHideTimeout);
@@ -866,18 +927,19 @@ function closePlayer() {
   playerStore.bumpGeneration();
   document.body.style.overflow = '';
   // CÓMO VOLVER — depende de si el historial quedó limpio o contaminado:
-  // • Camino RD/video (sin iframe): el stack es [catálogo → detalle → player], así que
-  //   la entrada anterior ES el detalle. Usamos `router.back()`: NO agrega entrada basura
-  //   y el detalle conserva su propio `back` hacia el catálogo/filtro (p.ej.
-  //   /peliculas?genero=27) → "Volver" del detalle respeta el filtro de origen.
-  // • Camino iframe (anime/UnlimPlay): cambiar `iframe.src` agrega entradas al historial,
-  //   así que la anterior YA NO es el detalle. Ahí `router.back()` caía en el reproductor
-  //   con iframe en blanco (doble-back) → navegamos explícito al detalle.
+  // • Camino RD/video (sin iframe): el stack es [catálogo → detalle → player] LIMPIO, así
+  //   que `router.back()` cae en el detalle, que conserva su propio `back` hacia el
+  //   catálogo/filtro (p.ej. /peliculas?genero=27) → "Volver" del detalle respeta el filtro.
+  // • Camino iframe (anime/UnlimPlay): al cargar, `iframe.src` crea una entrada DUPLICADA
+  //   de la ruta del player (misma `/ver/tv/...`) que ADEMÁS hereda `history.state.back`
+  //   apuntando al detalle. Por eso NO sirve mirar `state.back` (parece el detalle pero hay
+  //   una entrada del player en el medio): `router.back()` caía en esa entrada duplicada y
+  //   "Volver" pedía dos clicks. Solución: en iframe vamos DIRECTO al detalle con `push`.
   const prevEntry =
     typeof window !== 'undefined' && window.history.state ? window.history.state.back : null;
   const cameFromDetail =
     typeof prevEntry === 'string' && (prevEntry.startsWith('/pelicula/') || prevEntry.startsWith('/serie/'));
-  if (cameFromDetail) router.back();
+  if (isRdSource.value && cameFromDetail) router.back();
   else if (cur.id != null) router.push(detailRoute);
   else router.back();
   // ── TV: ocultar la BARRA DEL NAVEGADOR (webOS) al volver ─────────────────────
@@ -981,6 +1043,8 @@ onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onDocActivity);
   if (iframeAutoFallbackTimer) clearTimeout(iframeAutoFallbackTimer);
   if (controlsHideTimeout) clearTimeout(controlsHideTimeout);
+  if (nextCloseTimer) clearTimeout(nextCloseTimer);
+  if (listCloseTimer) clearTimeout(listCloseTimer);
   // Vaciar el iframe (UnlimPlay/vidlink) → corta su audio al volver (igual que el
   // <video> de RD, que se pausa en usePlayer.destroy()).
   if (frameRef.value) {
@@ -1070,7 +1134,14 @@ onBeforeUnmount(() => {
 
       <!-- Real-Debrid — siempre montado, mostrado vía v-show -->
       <div v-show="isRdSource" class="rd-wrap">
-        <VideoPlayer ref="videoPlayerRef" :rd-stream-resolver="rdStreamResolver" :rd-client="rdClient" :title="title" :runtime-sec="(playerStore.current.runtimeMin || 0) * 60" :page-fullscreen="fullscreen.isFullscreen.value" @started="onRdStarted" @fallback-to-next-source="fallbackToFirstSource" @toggle-fullscreen="fullscreen.toggle" />
+        <VideoPlayer ref="videoPlayerRef" :rd-stream-resolver="rdStreamResolver" :rd-client="rdClient" :title="title" :runtime-sec="(playerStore.current.runtimeMin || 0) * 60" :page-fullscreen="fullscreen.isFullscreen.value" @started="onRdStarted" @fallback-to-next-source="fallbackToFirstSource" @toggle-fullscreen="fullscreen.toggle">
+          <template v-if="showEpisodeControls" #episode-triggers>
+            <EpisodeTriggers
+              @next-enter="onNextEnter" @next-leave="onNextLeave" @next-tap="onNextTap"
+              @list-enter="onListEnter" @list-leave="onListLeave" @list-tap="onListTap"
+            />
+          </template>
+        </VideoPlayer>
       </div>
 
       <!-- Iframe (UnlimPlay/vidlink/Anime1V) — siempre montado, mostrado vía v-show -->
@@ -1093,9 +1164,6 @@ onBeforeUnmount(() => {
         @click="onPlayerActivity"
       ></div>
     </div>
-
-    <!-- Botón flotante "Sig. Ep ›" — preserva #playerNextEpBtn (línea ~3851) -->
-    <button v-if="showFloatingNextBtn" class="player-next-ep-btn visible-btn" @click="triggerNextEpisode">Sig. Ep ›</button>
 
     <!-- Banner auto-next — preserva #autonextBanner (líneas ~3855-3873) -->
     <div class="autonext-banner" :class="{ show: autoNextVisible }">
@@ -1125,32 +1193,49 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Controles de episodio — preserva #playerBottom/.ep-controls-row (líneas ~7637-7657) -->
-    <div v-if="showEpisodeControls" class="player-bottom">
-      <div class="ep-controls-row">
-        <span class="ep-label">Temp.</span>
-        <select class="ep-select" :value="playerStore.current.season" @change="changeSeason(($event.target as HTMLSelectElement).value)">
-          <option v-for="opt in seasonOpts" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-        </select>
-        <span class="ep-label" style="margin-left: 6px">Ep.</span>
-        <select class="ep-select" :value="playerStore.current.episode" @change="changeEpisode(($event.target as HTMLSelectElement).value)">
-          <option v-for="opt in episodeOpts" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-        </select>
-        <div class="ep-sep"></div>
-        <button class="ep-nav-btn" @click="prevEpisode">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3">
-            <polyline points="15 18 9 12 15 6" /><line x1="9" y1="6" x2="9" y2="18" />
-          </svg>
-          Anterior
-        </button>
-        <button class="ep-nav-btn next-btn" @click="nextEpisode">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3">
-            <polyline points="9 18 15 12 9 6" /><line x1="15" y1="6" x2="15" y2="18" />
-          </svg>
-          Siguiente episodio
-        </button>
-      </div>
+    <!-- Mini-barra de episodios para IFRAME/anime (el camino RD los pone en su propia
+         barra de controles vía slot). Solo series/anime, y se oculta con los controles. -->
+    <div v-if="showEpisodeControls && !isRdSource" class="ep-iframe-bar" :class="{ hidden: controlsHidden }">
+      <EpisodeTriggers
+        @next-enter="onNextEnter" @next-leave="onNextLeave" @next-tap="onNextTap"
+        @list-enter="onListEnter" @list-leave="onListLeave" @list-tap="onListTap"
+      />
+      <!-- ⛶ del player (CLICK, no hover): fullscreen NUESTRO (de página), que conserva los
+           controles de episodios — a diferencia del ⛶ interno del iframe (fullscreen nativo). -->
+      <button class="ep-fs-btn" title="Pantalla completa" aria-label="Pantalla completa" @click="fullscreen.toggle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path :d="fullscreen.isFullscreen.value ? FULLSCREEN_PATH_D.enter : FULLSCREEN_PATH_D.exit" />
+        </svg>
+      </button>
     </div>
+
+    <!-- Card "Siguiente episodio" (hover sobre ⏭). En iframe/anime va centrada sobre el
+         botón (que está al medio); en RD va a la esquina (el ⏭ está en la barra). -->
+    <NextEpisodeCard
+      :open="nextCardOpen"
+      :loading="nextCardLoading"
+      :episode="nextEpisodeMeta"
+      :centered="!isRdSource"
+      @play="playNextFromCard"
+      @hover-keep="onNextCardKeep"
+      @hover-end="onNextCardEnd"
+    />
+
+    <!-- Panel de episodios estilo Netflix (hover sobre ⧉, entra desde la derecha) -->
+    <EpisodePanel
+      :open="episodePanelOpen"
+      :loading="episodePanelLoading"
+      :episodes="viewedEpisodes"
+      :viewed-season="viewedSeason"
+      :seasons="seasonOpts"
+      :playing-season="playerStore.current.season"
+      :playing-episode="playerStore.current.episode"
+      @close="episodePanelOpen = false"
+      @select-season="onPanelSelectSeason"
+      @play="onPanelPlay"
+      @hover-keep="onPanelHoverKeep"
+      @hover-end="onPanelHoverEnd"
+    />
   </div>
 </template>
 
@@ -1339,6 +1424,48 @@ html.tv-mode .source-btn:focus {
   z-index: 9;
   background: transparent;
   cursor: default;
+}
+/* Mini-barra de episodios para iframe/anime (RD usa su propia barra de controles).
+   Centrada-abajo (no en la esquina) para no chocar con los controles propios del
+   iframe (captura/PiP); se oculta junto con el resto de los controles. */
+.ep-iframe-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: var(--radius-lg, 8px);
+  backdrop-filter: blur(4px);
+  transition: opacity var(--trans, 0.25s ease), transform var(--trans, 0.25s ease);
+}
+.ep-iframe-bar.hidden {
+  opacity: 0;
+  transform: translateX(-50%) translateY(10px);
+  pointer-events: none;
+}
+.ep-fs-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  color: #fff;
+  opacity: 0.85;
+  display: flex;
+  align-items: center;
+  transition: opacity var(--trans, 0.25s ease);
+}
+.ep-fs-btn:hover,
+.ep-fs-btn:focus-visible {
+  opacity: 1;
+}
+.ep-fs-btn svg {
+  width: 22px;
+  height: 22px;
 }
 .player-loading {
   position: absolute;
