@@ -61,6 +61,20 @@ const activeKey = computed<RouteKey>(() => {
   return ROUTE_NAME_TO_KEY[name] ?? lastSection.value;
 });
 
+// FIX webOS (TV): tras reproducir+volver, la página queda en FULLSCREEN (hack que oculta la
+// barra del navegador — ver sessions/2026-06-13). Al navegar entre secciones del catálogo en
+// ese estado, webOS deja el layout con un ancho de viewport STALE → el catálogo (sobre todo Mi
+// Lista) se ve "cortado/zoom" hasta refrescar. NO se puede salir del fullscreen (reaparece la
+// barra). Solución: forzar un recálculo de layout (evento `resize`) tras cada navegación, así el
+// catálogo se re-mide con el viewport real del fullscreen. SOLO en TV → no afecta móvil/desktop.
+watch(
+  () => route.name,
+  () => {
+    if (!deviceStore.isTV) return;
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 120);
+  }
+);
+
 // ── Navegación — reemplaza showHome()/loadSection()/showChannelsPage()/... ──
 const KEY_TO_PATH: Record<RouteKey, string> = {
   home: '/',
