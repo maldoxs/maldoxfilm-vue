@@ -1,0 +1,13 @@
+# Cache headers para Netlify.
+# index.html SIN cache: el navegador de la smart-TV (webOS) cachea agresivo e ignora
+# el default → seguía sirviendo bundles viejos tras cada deploy. Forzando no-store, la
+# TV siempre baja el index.html nuevo, que referencia los bundles JS/CSS con hash nuevo.
+/
+  Cache-Control: no-store, max-age=0
+/index.html
+  Cache-Control: no-store, max-age=0
+
+# Los assets con hash en el nombre (Vite) SÍ pueden cachearse para siempre: cambian de
+# nombre en cada build, así que nunca sirven contenido viejo.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
