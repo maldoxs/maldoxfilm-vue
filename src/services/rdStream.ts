@@ -36,8 +36,6 @@ import {
   buildSelectedStream,
   extractFilename,
   extractInfoHash,
-  hasLatino,
-  isCachedStream,
 } from './streamSelector';
 
 /**
@@ -198,29 +196,16 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
         active,
       });
 
-      // ── Preferencia latino: si el match NO tiene audio latino pero hay
-      // Dual-Lat [RD+] en el pool, resolver server-side para que RD lo descargue.
-      // Solo busca LATINO (no castellano). Si no hay latino en el pool, no hace nada.
-      const latinoRdPlus = scored.filter((sc) => hasLatino(sc.s) && isCachedStream(sc.s));
-      if (selected.rdId && !hasLatino(active.activeBest) && latinoRdPlus.length > 0) {
-        const latHashes = Array.from(
-          new Set(latinoRdPlus.map((sc) => extractInfoHash(sc.s)).filter((h) => /^[a-f0-9]{40}$/i.test(h)))
-        ).slice(0, 3);
-        if (latHashes.length) {
-          console.warn('[RD] Match sin latino — resolviendo Dual-Lat [RD+] server-side...');
-          const sr = await serverResolve(latHashes);
-          if (sr && (sr.dash || sr.liveMP4 || sr.hls || sr.directUrl)) {
-            selected.rdId = null;
-            selected.serverDashUrl = sr.dash ?? null;
-            selected.serverLiveMp4Url = sr.liveMP4 ?? null;
-            selected.serverHlsUrl = sr.hls ?? null;
-            selected.serverDirectUrl = sr.directUrl ?? null;
-            selected.serverTorrentId = sr.torrentId ?? null;
-            if (sr.filename) selected.streamFilename = sr.filename;
-            console.warn('[RD] Dual-Lat resuelto →', sr.dash ? 'DASH' : sr.liveMP4 ? 'liveMP4' : sr.hls ? 'HLS' : 'directo', '| filename:', sr.filename);
-          }
-        }
-      }
+      // ── Preferencia latino DESHABILITADA (uniformidad + seek fluido) ──────────────
+      // Antes: si el match cacheado NO tenía latino pero había un Latino en el pool, se
+      // resolvía ese latino SERVER-SIDE (addMagnet/transcode) → seek LENTO. Como el pool de
+      // Torrentio VARÍA entre requests, esto se disparaba en una pantalla y en otra no (TV vs
+      // desktop), dando reproducciones distintas para el MISMO título: TV terminaba en
+      // server-side (lento) y desktop en el match cacheado por `/t/` (fluido). Para que sea
+      // IGUAL en todos los dispositivos, se mantiene SIEMPRE el match cacheado (`rdId` → `/t/`,
+      // far-seek fluido). Trade-off: si el latino no está cacheado para `/t/`, va en inglés con
+      // subtítulos (fluido) en vez de latino server-side (lento). Reactivar solo si se logra
+      // servir el latino por `/t/` (rdId cacheado), no por server-side.
 
       // ── Resolución SERVER-SIDE para contenido NO cacheado (ADR-004) ──
       // Solo si NO hubo match cacheado (`rdId` null): se pasan los infoHashes del
