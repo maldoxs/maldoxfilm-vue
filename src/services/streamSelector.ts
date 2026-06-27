@@ -150,9 +150,15 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
 
   let pts = 0;
 
-  // ── P1 — Disponibilidad RD (precondición: cacheado se reproduce YA) ──
+  // ── P1 — Disponibilidad RD (CRÍTICO: solo el CACHEADO [RD+] da pipeline /t/ = seek
+  // fluido en TODAS las pantallas; el no-cacheado va server-side = seek LENTO). Por eso el
+  // cacheado debe GANAR siempre sobre cualquier no-cacheado, incluso sobre un latino no
+  // cacheado (+200). Bonus +400 > latino +200 → un inglés cacheado le gana a un latino NO
+  // cacheado, pero un LATINO cacheado (+400+200=+600) sigue ganando. Esto elimina la
+  // INCONSISTENCIA (mismo título daba /t/ en desktop y server-side en TV por un empate que
+  // resolvía Torrentio distinto en cada request). Sin lógica de dispositivo: igual para todos.
   const nm = (s.name || '').toLowerCase();
-  if (/\[rd\+\]/.test(nm)) pts += 200;
+  if (/\[rd\+\]/.test(nm)) pts += 400;
   else if (/\[rd download\]/.test(nm)) pts -= 200;
   else if (hasRD(s)) pts += 0;
 
