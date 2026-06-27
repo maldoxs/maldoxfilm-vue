@@ -1147,7 +1147,12 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     const isTvNow = opts.isTv?.() ?? false;
     let selected: SelectedStream;
     try {
-      selected = await opts.rdStreamResolver.getStream(params.id, params.type, params.season, params.episode, isTvNow);
+      // SELECCIÓN DE STREAM IDÉNTICA EN TODAS LAS PANTALLAS (pedido del usuario): se pasa
+      // `false` (no `isTvNow`) para que TV elija EXACTAMENTE el mismo stream que desktop. Antes,
+      // el scoring TV prefería otro stream (H264/MP4, penalizando x265/4K) → caía al transcode
+      // legacy en vez de Direct Play / pipeline /t/ → sin "Seek fluido" y con seek lento en TV.
+      // Mismo stream ⇒ mismo camino ⇒ mismo seek fluido en móvil/tablet/desktop/TV.
+      selected = await opts.rdStreamResolver.getStream(params.id, params.type, params.season, params.episode, false);
     } catch {
       if (playerStore.isStale(myGen)) return;
       clearMsgTimers();
