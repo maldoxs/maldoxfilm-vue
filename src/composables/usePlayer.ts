@@ -1187,7 +1187,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     const serverUrl =
       selected.serverDashUrl || selected.serverHlsUrl || selected.serverLiveMp4Url || selected.serverDirectUrl;
     if (serverUrl) {
-      opts.onDiag?.(`SERVER-SIDE (sin rdId) → ${selected.serverDashUrl ? 'DASH' : selected.serverHlsUrl ? 'HLS' : selected.serverLiveMp4Url ? 'liveMP4' : 'directo'} | seek lento`);
+      opts.onDiag?.(`SRV-SIDE sin rdId | ${(selected.streamFilename || streamFn || '?').slice(0, 50)}`);
       // Recordar el torrent creado por rd-stream para borrarlo al cerrar/cambiar (ADR-006).
       currentServerTorrentId = selected.serverTorrentId ?? null;
       opts.onToast('🔄 Optimizando video para tu navegador...');

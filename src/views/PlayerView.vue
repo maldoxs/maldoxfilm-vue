@@ -984,7 +984,7 @@ async function init() {
 
   // MARCADOR DE VERSIÓN (temporal): aparece apenas abre el reproductor. Si lo ves en la TV,
   // tenés la versión NUEVA; si NO aparece, la TV está sirviendo una versión vieja cacheada.
-  tdiag.value = '🟢 BUILD #2 — cargando...';
+  tdiag.value = '🟢 BUILD #3 — cargando...';
 
   document.body.style.overflow = 'hidden';
   controlsHidden.value = false;
