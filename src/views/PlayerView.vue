@@ -982,6 +982,10 @@ async function init() {
   const id = props.id;
   const type = props.type;
 
+  // MARCADOR DE VERSIÓN (temporal): aparece apenas abre el reproductor. Si lo ves en la TV,
+  // tenés la versión NUEVA; si NO aparece, la TV está sirviendo una versión vieja cacheada.
+  tdiag.value = '🟢 BUILD #1 — versión nueva cargada';
+
   document.body.style.overflow = 'hidden';
   controlsHidden.value = false;
   armControlsHide(); // auto-oculta el topbar tras 3.5s (desktop y táctil)
@@ -1257,20 +1261,22 @@ onBeforeUnmount(() => {
 /* DIAGNÓSTICO TEMPORAL (TV) — badge fijo arriba al centro, sobre todo, legible para foto. */
 .tdiag-badge {
   position: absolute;
-  top: 70px;
+  top: 80px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 99999;
-  max-width: 92vw;
-  padding: 8px 14px;
-  background: rgba(0, 0, 0, 0.85);
-  color: #5bff8f;
-  border: 1px solid #5bff8f;
-  border-radius: 6px;
-  font-size: 15px;
+  max-width: 94vw;
+  padding: 14px 26px;
+  background: #00b341;
+  color: #fff;
+  border: 3px solid #fff;
+  border-radius: 10px;
+  font-size: 26px;
+  font-weight: 700;
   font-family: monospace;
   text-align: center;
   pointer-events: none;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
 }
 /* ── Página completa — preserva `.player-page`/`.controls-hidden` (líneas ~907-911, ~1010-1024) ── */
 .player-page {
