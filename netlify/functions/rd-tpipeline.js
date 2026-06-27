@@ -21,10 +21,12 @@ async function authFetch(url, token, timeoutMs = 15000) {
   });
 }
 
-const resolveCache = new Map();
-
 async function handleResolve(rdId, token) {
-  if (resolveCache.has(rdId)) return resolveCache.get(rdId);
+  // SIN CACHÉ: la sesión de medios de RD (mediaId / CDN / segmentos del pipeline /t/) es
+  // EFÍMERA. Cachear el resolve hacía que al RE-ENTRAR a una película se devolvieran datos
+  // muertos → /t/ cargaba segmentos expirados → fallaba y caía al transcode (seek roto en la
+  // 2da reproducción). Resolver fresco cada vez garantiza una sesión válida (~1-2s, ya cubierto
+  // por la pantalla de carga "Buscando..."). NO volver a poner un caché acá sin TTL corto.
 
   // 1. Fetch streaming page → mediaId
   const streamRes = await fetch(
@@ -99,7 +101,6 @@ async function handleResolve(rdId, token) {
     filename: info.filename,
   };
 
-  resolveCache.set(rdId, result);
   return result;
 }
 
