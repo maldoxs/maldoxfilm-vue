@@ -384,6 +384,14 @@ function startProgressTracking() {
   progressInterval = setInterval(() => {
     if (!playerStore.current.id) return;
     const positionSec = getRealPositionSec();
+    // NO sobrescribir el avance guardado en estados TRANSITORIOS:
+    // • video en PAUSA → durante una reanudación colgada (el /t/ pausa esperando el segmento,
+    //   p.ej. Cadena Perpetua en TV) guardar acá regresaba/borraba el minuto real.
+    // • posición < 30s → nunca es un "continuar viendo" útil (onRdStarted solo retoma si >30) y
+    //   evita pisar un avance bueno con la posición del arranque desde el principio.
+    // Seguro para todos los dispositivos: la reproducción normal (no pausada, posición real) guarda igual.
+    const vEl = videoPlayerRef.value?.videoRef;
+    if ((vEl && vEl.paused) || positionSec < 30) return;
     const runtimeSec = (playerStore.current.runtimeMin || 22) * 60;
     const pct = runtimeSec > 0 ? Math.min((positionSec / runtimeSec) * 100, 95) : 0;
     const rtMin = playerStore.current.runtimeMin || undefined;
