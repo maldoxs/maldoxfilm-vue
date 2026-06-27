@@ -267,8 +267,6 @@ export interface UsePlayerOptions {
   onStarted: () => void;
   /** Callback: mostrar un toast (equiv. `showToast`). */
   onToast: (msg: string) => void;
-  /** Callback DIAGNÓSTICO: texto persistente en pantalla (no toast) para depurar el camino /t/ en TV. */
-  onDiag?: (msg: string) => void;
   /** Callback: el stream tiene audio nativo en español detectado en DASH (subs OFF por defecto). */
   onNativeSpanishDetected?: () => void;
   /** Callback: stream listo — para inicializar buscador de subtítulos / selector de audio. */
@@ -1059,7 +1057,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       resolved = await resolveTpipeline(rdId);
     } catch (e) {
       console.warn('[/t/] resolve falló → fallback a transcode legacy:', e);
-      opts.onDiag?.(`/t/ RESOLVE FALLÓ → transcode: ${String(e).slice(0, 100)}`);
       return false;
     }
 
@@ -1112,11 +1109,9 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       console.warn(`[/t/] ✅ Pipeline activo — ${resolved.filename} | audio: ${audio} | CDN: ${resolved.cdn}`);
       const isLat = /lat|spa|es/i.test(audio);
       opts.onToast(isLat ? '✅ Seek fluido · Audio Latino' : '✅ Seek fluido');
-      opts.onDiag?.(`/t/ OK ✅ audio=${audio} cdn=${resolved.cdn}`);
       return true;
     } catch (e) {
       console.warn('[/t/] carga falló → fallback a transcode legacy:', e);
-      opts.onDiag?.(`/t/ CARGA FALLÓ → transcode: ${String(e).slice(0, 100)}`);
       isTpipeline.value = false;
       tpipelineState = null;
       _shakaDestroy();
@@ -1187,7 +1182,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     const serverUrl =
       selected.serverDashUrl || selected.serverHlsUrl || selected.serverLiveMp4Url || selected.serverDirectUrl;
     if (serverUrl) {
-      opts.onDiag?.(`SRV-SIDE sin rdId | ${(selected.streamFilename || streamFn || '?').slice(0, 50)}`);
       // Recordar el torrent creado por rd-stream para borrarlo al cerrar/cambiar (ADR-006).
       currentServerTorrentId = selected.serverTorrentId ?? null;
       opts.onToast('🔄 Optimizando video para tu navegador...');
@@ -1213,7 +1207,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     }
 
     if (!streamUrl) {
-      opts.onDiag?.('SIN streamUrl → cambia de reproductor (iframe)');
       opts.onToast('⚡ Sin resultados en RD — cambiando de reproductor');
       opts.onFallbackToNextSource();
       return;
@@ -1226,7 +1219,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // (NO cambia de fuente aquí). `selected.unavailableInRd` propaga esa señal desde
     // `resolveActiveStream` (función pura, sin acceso a `showToast`) hasta acá.
     if (selected.unavailableInRd) {
-      opts.onDiag?.('unavailableInRd → cambia de reproductor (iframe)');
       opts.onToast('⚠️ No disponible en RD — cambiando de reproductor');
       opts.onFallbackToNextSource();
       isLoadingRd.value = false;
@@ -1242,7 +1234,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // a poner `!isTvNow` acá: desviaba el HEVC al transcode y rompía el seek en TV (probado).
     const hevcOk = detectHevcSupport(getMediaSource());
     const { hasBadAudio } = checkBadAudioForDirectPlay(streamFn, !!rdId);
-    opts.onDiag?.(`elige: rdId=${rdId ? 'sí' : 'NO'} x265=${streamIsX265} badAudio=${hasBadAudio} hevcOk=${hevcOk} | ${(streamFn || '').slice(0, 40)}`);
 
     // ── PLAY DIRECTO (HTTP Range = seek instantáneo, sin transcode) ──────────────────
     // Se intenta para H264 (cualquier device) o HEVC con soporte real (desktop/iOS, NO TV).

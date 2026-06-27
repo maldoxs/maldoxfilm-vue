@@ -176,8 +176,6 @@ const seasonOpts = computed(() => seasonOptions(playerStore.current.totalSeasons
 const showEpisodeControls = computed(() => playerStore.current.type === 'tv' && playerStore.current.totalSeasons > 0);
 
 // ── Panel de episodios estilo Netflix (EpisodePanel) ─────────────────────────
-// DIAGNÓSTICO TEMPORAL (TV): texto persistente en esquina para depurar el camino /t/.
-const tdiag = ref('');
 const episodePanelOpen = ref(false);
 const episodePanelLoading = ref(false);
 /** Temporada que se está VIENDO en el panel (puede diferir de la que se reproduce — el usuario navega). */
@@ -982,10 +980,6 @@ async function init() {
   const id = props.id;
   const type = props.type;
 
-  // MARCADOR DE VERSIÓN (temporal): aparece apenas abre el reproductor. Si lo ves en la TV,
-  // tenés la versión NUEVA; si NO aparece, la TV está sirviendo una versión vieja cacheada.
-  tdiag.value = '🟢 BUILD #5 (FIX cacheado) — cargando...';
-
   document.body.style.overflow = 'hidden';
   controlsHidden.value = false;
   armControlsHide(); // auto-oculta el topbar tras 3.5s (desktop y táctil)
@@ -1080,10 +1074,6 @@ onBeforeUnmount(() => {
     :class="{ 'controls-hidden': controlsHidden }"
     @mousemove="onPlayerActivity"
   >
-    <!-- DIAGNÓSTICO TEMPORAL (TV): texto persistente del camino /t/. No tapa el "Seek fluido"
-         (que es un toast centrado). Sacarle foto en la TV. QUITAR cuando esté resuelto. -->
-    <div v-if="tdiag" class="tdiag-badge">{{ tdiag }}</div>
-
     <button class="player-back" :class="{ 'icon-close-mode': deviceStore.isMobile }" title="Volver" @click="closePlayer">
       <svg v-if="!deviceStore.isMobile" class="icon-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="15 18 9 12 15 6" />
@@ -1152,7 +1142,7 @@ onBeforeUnmount(() => {
 
       <!-- Real-Debrid — siempre montado, mostrado vía v-show -->
       <div v-show="isRdSource" class="rd-wrap">
-        <VideoPlayer ref="videoPlayerRef" :rd-stream-resolver="rdStreamResolver" :rd-client="rdClient" :title="title" :runtime-sec="(playerStore.current.runtimeMin || 0) * 60" :page-fullscreen="fullscreen.isFullscreen.value" @started="onRdStarted" @fallback-to-next-source="fallbackToFirstSource" @toggle-fullscreen="fullscreen.toggle" @diag="tdiag = $event">
+        <VideoPlayer ref="videoPlayerRef" :rd-stream-resolver="rdStreamResolver" :rd-client="rdClient" :title="title" :runtime-sec="(playerStore.current.runtimeMin || 0) * 60" :page-fullscreen="fullscreen.isFullscreen.value" @started="onRdStarted" @fallback-to-next-source="fallbackToFirstSource" @toggle-fullscreen="fullscreen.toggle">
           <template v-if="showEpisodeControls" #episode-triggers>
             <EpisodeTriggers
               @next-enter="onNextEnter" @next-leave="onNextLeave" @next-tap="onNextTap"
@@ -1258,26 +1248,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* DIAGNÓSTICO TEMPORAL (TV) — badge fijo arriba al centro, sobre todo, legible para foto. */
-.tdiag-badge {
-  position: absolute;
-  top: 80px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 99999;
-  max-width: 94vw;
-  padding: 14px 26px;
-  background: #00b341;
-  color: #fff;
-  border: 3px solid #fff;
-  border-radius: 10px;
-  font-size: 26px;
-  font-weight: 700;
-  font-family: monospace;
-  text-align: center;
-  pointer-events: none;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
-}
 /* ── Página completa — preserva `.player-page`/`.controls-hidden` (líneas ~907-911, ~1010-1024) ── */
 .player-page {
   position: fixed;
