@@ -1080,29 +1080,13 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
 
       const mpdUrl = buildMpdUrl(resolved.fullPathId, resolved.cdn, audio, 1);
 
-      // ── Carga del MPD con REINTENTO SOLO EN TV ──────────────────────────────────
-      // En la smart-TV (webOS) el /t/ es intermitente: RD genera los segmentos sobre la
-      // marcha y a veces Shaka intenta cargar ANTES de que el 1er segmento esté listo →
-      // `_shakaLoad` lanza → se caía al transcode (seek lento "esa parte no está lista" +
-      // persistencia rota). SOLO EN TV reintentamos (re-ping + esperar el segmento más
-      // tiempo + recargar) antes de rendirnos. En desktop/móvil/tablet `tvExtraRetries`=0,
-      // así que el bucle corre EXACTAMENTE 1 vez con las MISMAS llamadas que antes y, si
-      // falla, va al mismo `catch` → transcode. Comportamiento idéntico fuera de TV.
-      const tvExtraRetries = (opts.isTv?.() ?? false) ? 2 : 0;
-      for (let attempt = 0; ; attempt++) {
-        await pingSeek(resolved.mediaId, 1);
-        const segReady = await waitForSegmentAt(resolved.cdn, resolved.fullPathId, audio, 1, attempt === 0 ? 8000 : 15000);
-        if (!segReady) console.warn(`[/t/] Primer segmento timeout (intento ${attempt + 1}) — intentando igual`);
-        if (playerStore.isStale(myGen)) return true;
-        try {
-          await _shakaLoad(video, mpdUrl);
-          break; // cargó OK → seguir
-        } catch (loadErr) {
-          if (attempt >= tvExtraRetries) throw loadErr; // desktop (0 reintentos) o TV agotada → catch externo → transcode
-          console.warn(`[/t/] _shakaLoad falló (intento ${attempt + 1}) → reintentando (TV):`, loadErr);
-          await new Promise((r) => setTimeout(r, 1500));
-        }
-      }
+      await pingSeek(resolved.mediaId, 1);
+      const segReady = await waitForSegmentAt(resolved.cdn, resolved.fullPathId, audio, 1, 8000);
+      if (!segReady) console.warn('[/t/] Primer segmento timeout — intentando igual');
+
+      if (playerStore.isStale(myGen)) return true;
+
+      await _shakaLoad(video, mpdUrl);
       currentDashUrl = mpdUrl;
 
       dashBaseUrl.value = `https://${resolved.cdn}/t/${resolved.fullPathId}/`;
