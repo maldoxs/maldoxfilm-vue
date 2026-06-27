@@ -62,6 +62,8 @@ const emit = defineEmits<{
    * PlayerView.vue"); este componente solo avisa CUÁNDO arrancó.
    */
   (e: 'started'): void;
+  /** Diagnóstico /t/ (texto persistente para depurar en TV). */
+  (e: 'diag', msg: string): void;
 }>();
 
 const playerStore = usePlayerStore();
@@ -127,6 +129,7 @@ const player: UsePlayerReturn = usePlayer({
     emit('started');
   },
   onToast: (msg) => showToast(msg),
+  onDiag: (msg) => emit('diag', msg),
   onNativeSpanishDetected: () => {
     subtitles.enabled.value = false;
     subtitles.status.value = '🔊 Audio en Español';
