@@ -411,7 +411,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Reparto -->
-      <div v-if="cast.length" class="dp-section">
+      <div v-if="cast.length" class="dp-section dp-section--cast">
         <div class="dp-sec-hd">Reparto</div>
         <div class="dp-cast-row">
           <div v-for="member in cast" :key="member.id" class="dp-cast-item">
@@ -469,7 +469,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Tráilers -->
-      <div v-if="trailers.length" class="dp-section">
+      <div v-if="trailers.length" class="dp-section dp-section--trailers">
         <div class="dp-sec-hd">Tráilers</div>
         <div class="dp-trailers-row">
           <div v-for="v in trailers" :key="v.key" class="dp-tr-card" @click="openTrailer(v.key)">
@@ -1197,8 +1197,12 @@ onBeforeUnmount(() => {
     justify-content: center;
     border: none;
   }
-  /* Ocultar stats, overview del hero y botón Volver */
+  /* Ocultar stats, overview del hero, botón Volver, reparto y tráilers */
   .dp-stats {
+    display: none;
+  }
+  .dp-section--cast,
+  .dp-section--trailers {
     display: none;
   }
   .dp-overview {

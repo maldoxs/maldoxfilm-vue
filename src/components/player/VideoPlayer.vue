@@ -374,8 +374,75 @@ watch(() => player.tpipelineSeeking.value, (seeking) => {
   if (ctx) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 });
 
+// ── Subtítulos en fullscreen nativo (SOLO móvil) ─────────────────────────────
+// El fullscreen nativo de iOS (`webkitEnterFullscreen`) muestra únicamente el
+// <video> y sus TextTracks NATIVOS — el overlay DOM <SubtitleOverlay> NO es
+// visible ahí. Para que los subtítulos aparezcan en fullscreen, espejamos los
+// cues parseados en un TextTrack nativo y lo activamos solo MIENTRAS dura el
+// fullscreen nativo. Inline (no-fullscreen) el track queda 'hidden' para no
+// duplicar con el overlay DOM. Gateado a `isMobile` → desktop/TV intactos.
+let nativeTrack: TextTrack | null = null;
+let inNativeFullscreen = false;
+
+function applyNativeTrackMode() {
+  if (!nativeTrack) return;
+  nativeTrack.mode = inNativeFullscreen && subtitles.enabled.value ? 'showing' : 'hidden';
+}
+
+function syncNativeTrack() {
+  if (!deviceStore.isMobile) return;
+  const video = videoRef.value;
+  if (!video) return;
+  if (!nativeTrack) {
+    nativeTrack = video.addTextTrack('subtitles', 'Español', 'es');
+    nativeTrack.mode = 'hidden';
+  }
+  // Limpiar cues previos (peli/offset anterior) y volcar los actuales (ms → seg).
+  const existing = nativeTrack.cues ? Array.from(nativeTrack.cues) : [];
+  for (const c of existing) nativeTrack.removeCue(c);
+  for (const cue of subtitles.cues.value) {
+    try {
+      nativeTrack.addCue(new VTTCue(cue.s / 1000, cue.e / 1000, cue.text));
+    } catch {
+      /* ignorar cue malformado */
+    }
+  }
+  applyNativeTrackMode();
+}
+
+function onBeginNativeFs() {
+  inNativeFullscreen = true;
+  syncNativeTrack();
+}
+function onEndNativeFs() {
+  inNativeFullscreen = false;
+  applyNativeTrackMode();
+}
+
+// Reataches al cambiar de instancia de <video> (nueva fuente) y re-espejado al
+// cambiar cues (peli nueva u offset ajustado) o el toggle de subtítulos.
+watch(videoRef, (video, prev) => {
+  if (!deviceStore.isMobile) return;
+  if (prev) {
+    prev.removeEventListener('webkitbeginfullscreen', onBeginNativeFs);
+    prev.removeEventListener('webkitendfullscreen', onEndNativeFs);
+  }
+  nativeTrack = null;
+  if (video) {
+    video.addEventListener('webkitbeginfullscreen', onBeginNativeFs);
+    video.addEventListener('webkitendfullscreen', onEndNativeFs);
+  }
+});
+watch(() => subtitles.cues.value, () => syncNativeTrack());
+watch(() => subtitles.enabled.value, () => applyNativeTrackMode());
+
 onBeforeUnmount(() => {
   if (hideTimer) clearTimeout(hideTimer);
+  const video = videoRef.value;
+  if (video) {
+    video.removeEventListener('webkitbeginfullscreen', onBeginNativeFs);
+    video.removeEventListener('webkitendfullscreen', onEndNativeFs);
+  }
   player.destroy();
   nfControls.detach();
   subtitles.clear();

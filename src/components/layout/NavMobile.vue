@@ -82,19 +82,20 @@ html.mobile-mode .bottom-nav {
 }
 .bottom-nav-inner {
   display: flex;
-  justify-content: space-around;
-  padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+  justify-content: space-between;
+  padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px));
 }
 .bottom-nav-item {
+  flex: 1;
   background: none;
   border: none;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   color: var(--text-muted, #9a9a9a);
-  font-size: 0.62rem;
-  padding: 6px 10px;
+  font-size: 0.66rem;
+  padding: 4px 0;
   cursor: pointer;
   transition: color var(--trans, 0.25s ease);
 }

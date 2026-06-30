@@ -82,6 +82,12 @@ export interface UseSubtitlesReturn {
   adjustOffset(deltaMs: number): void;
   /** Limpia cues/listeners — llamar al cerrar el reproductor. */
   clear(): void;
+  /**
+   * Cues parseados (con offset aplicado). Reactivo. Lo consume `VideoPlayer`
+   * SOLO en móvil para construir un TextTrack nativo que iOS muestra en el
+   * fullscreen nativo del <video> (el overlay DOM no es visible ahí).
+   */
+  cues: Ref<SubtitleCue[]>;
 }
 
 export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
@@ -381,5 +387,5 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
 
   const hasSubtitleData = computed(() => srtRaw.value !== null);
 
-  return { activeCueText, status, enabled, offsetMs, hasSubtitleData, fetchAndInject, adjustOffset, clear };
+  return { activeCueText, status, enabled, offsetMs, hasSubtitleData, fetchAndInject, adjustOffset, clear, cues };
 }
