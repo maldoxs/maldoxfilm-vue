@@ -333,4 +333,45 @@ function onSelect({ id, type }: { id: MediaItem['id']; type: 'movie' | 'tv' }) {
 .tab:hover:not(.active) {
   color: var(--text, #f0f0f0);
 }
+
+@media (max-width: 640px) {
+  .tabs-bar {
+    position: absolute;
+    top: 52px;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    padding: 0 12px;
+    border-bottom: none;
+    margin: 0;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    background: transparent;
+    justify-content: center;
+  }
+  .tabs-bar::-webkit-scrollbar {
+    display: none;
+  }
+  .tab {
+    flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,0.5);
+    border-bottom: 1px solid rgba(255,255,255,0.5);
+    border-radius: 20px;
+    padding: 5px 16px;
+    font-size: 0.78rem;
+    color: #fff;
+    margin-bottom: 0;
+    background: rgba(0,0,0,0.3);
+    backdrop-filter: blur(4px);
+  }
+  .tab.active {
+    background: #fff;
+    color: #000;
+    border-color: #fff;
+  }
+  .home-view {
+    position: relative;
+  }
+}
 </style>

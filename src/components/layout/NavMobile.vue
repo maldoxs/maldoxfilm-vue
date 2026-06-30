@@ -15,8 +15,8 @@
  *     `document` que se agrega/quita junto con `moreOpen` (mismo efecto que
  *     el "listener de un solo uso", sin fugas de memoria)
  */
-import { ref, onBeforeUnmount, watch } from 'vue';
-import { NAV_ITEMS_MOBILE, MORE_MENU_ITEMS, type RouteKey } from '../../services/navigation';
+import { onBeforeUnmount } from 'vue';
+import { MORE_MENU_ITEMS, type RouteKey } from '../../services/navigation';
 
 const props = defineProps<{
   active: RouteKey;
@@ -28,28 +28,10 @@ const emit = defineEmits<{
   (e: 'open-search'): void;
 }>();
 
-const moreOpen = ref(false);
-const navRootRef = ref<HTMLElement | null>(null);
+// MORE_MENU_ITEMS conservado para no romper el import (puede usarse en futuro)
+void MORE_MENU_ITEMS;
 
-/** toggleBottomMore — preservado de la línea ~6290-6318 (toggle + auto-close al hacer click afuera). */
-function toggleMore() {
-  moreOpen.value = !moreOpen.value;
-}
-
-function closeMore() {
-  moreOpen.value = false;
-}
-
-function onOutsideClick(e: MouseEvent) {
-  if (navRootRef.value && !navRootRef.value.contains(e.target as Node)) closeMore();
-}
-
-watch(moreOpen, (open) => {
-  if (open) document.addEventListener('click', onOutsideClick, true);
-  else document.removeEventListener('click', onOutsideClick, true);
-});
-
-onBeforeUnmount(() => document.removeEventListener('click', onOutsideClick, true));
+onBeforeUnmount(() => {});
 
 function onItemClick(key: RouteKey) {
   if (key === 'search') {
@@ -58,49 +40,27 @@ function onItemClick(key: RouteKey) {
   }
   emit('navigate', key);
 }
-
-function onMoreItemClick(key: RouteKey) {
-  closeMore();
-  emit('navigate', key);
-}
-
-const isMoreActive = (): boolean => MORE_MENU_ITEMS.some((m) => m.key === props.active);
 </script>
 
 <template>
-  <nav ref="navRootRef" class="bottom-nav">
+  <nav class="bottom-nav">
     <div class="bottom-nav-inner">
-      <button
-        v-for="item in NAV_ITEMS_MOBILE"
-        :key="item.key"
-        class="bottom-nav-item"
-        :class="{ active: active === item.key }"
-        @click="onItemClick(item.key)"
-      >
-        <span class="bottom-nav-icon">{{ item.icon }}</span>
-        <span>{{ item.label }}</span>
+      <!-- Inicio -->
+      <button class="bottom-nav-item" :class="{ active: active === 'home' }" @click="onItemClick('home')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+        <span>Inicio</span>
       </button>
-
-      <button class="bottom-nav-item bottom-nav-more" :class="{ active: isMoreActive(), open: moreOpen }" @click="toggleMore">
-        <span class="bottom-nav-icon">☰</span>
-        <span>Más</span>
+      <!-- Buscar -->
+      <button class="bottom-nav-item" :class="{ active: active === 'search' }" @click="onItemClick('search')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
+        <span>Buscar</span>
+      </button>
+      <!-- Mi Lista -->
+      <button class="bottom-nav-item" :class="{ active: active === 'mylist' }" @click="onItemClick('mylist')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
+        <span>Mi Netflix</span>
       </button>
     </div>
-
-    <transition name="bottom-more">
-      <div v-if="moreOpen" class="bottom-more-menu">
-        <button
-          v-for="item in MORE_MENU_ITEMS"
-          :key="item.key"
-          class="bottom-more-item"
-          :class="{ active: active === item.key }"
-          @click="onMoreItemClick(item.key)"
-        >
-          <span class="bottom-nav-icon">{{ item.icon }}</span>
-          <span>{{ item.label }}</span>
-        </button>
-      </div>
-    </transition>
   </nav>
 </template>
 
@@ -144,6 +104,10 @@ html.mobile-mode .bottom-nav {
 .bottom-nav-icon {
   font-size: 1.15rem;
   line-height: 1;
+}
+.nav-icon {
+  width: 24px;
+  height: 24px;
 }
 .bottom-more-menu {
   position: absolute;

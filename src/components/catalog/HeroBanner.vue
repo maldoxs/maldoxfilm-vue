@@ -77,7 +77,7 @@ function goToDetail() {
       <div class="hero-overview">{{ heroOverview }}</div>
       <div class="hero-actions">
         <button class="btn-play" @click="goToDetail">▶ Reproducir</button>
-        <button class="btn-info" @click="goToDetail">ℹ Más Info</button>
+        <button class="btn-info" @click="goToDetail">+ Mi Lista</button>
       </div>
     </div>
   </div>
@@ -230,17 +230,60 @@ function goToDetail() {
 }
 @media (max-width: 640px) {
   .hero {
-    padding: 0 16px;
-    min-height: 55vw;
-    height: auto;
-    padding-bottom: 40px;
+    height: 75vw;
+    min-height: 420px;
+    padding: 0;
+    align-items: flex-end;
+  }
+  .hero-bg::after {
+    background: linear-gradient(0deg, rgba(14,14,14,1) 0%, rgba(14,14,14,0.6) 50%, rgba(14,14,14,0.1) 100%);
+  }
+  .hero-content {
+    max-width: 100%;
+    width: 100%;
+    padding: 0 16px 20px;
+    text-align: center;
+  }
+  .hero-badge {
+    display: none;
   }
   .hero-title {
-    font-size: 1.6rem;
+    font-size: 1.7rem;
+    text-transform: none;
+    margin-bottom: 6px;
+  }
+  .hero-meta {
+    justify-content: center;
+    margin-bottom: 14px;
+    font-size: 0.78rem;
   }
   .hero-overview {
-    -webkit-line-clamp: 2;
-    font-size: 0.82rem;
+    display: none;
+  }
+  .hero-actions {
+    justify-content: center;
+    gap: 10px;
+  }
+  .btn-play {
+    flex: 1;
+    max-width: 160px;
+    justify-content: center;
+    background: #fff;
+    color: #000;
+    padding: 10px 16px;
+    font-size: 0.85rem;
+    border-radius: 4px;
+  }
+  .btn-info {
+    flex: 1;
+    max-width: 160px;
+    justify-content: center;
+    background: rgba(109,109,110,0.7);
+    color: #fff;
+    border: none;
+    padding: 10px 16px;
+    font-size: 0.85rem;
+    border-radius: 4px;
   }
 }
 </style>

@@ -1148,22 +1148,75 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 640px) {
+  /* Hero compacto — imagen arriba, contenido debajo */
+  .dp-hero {
+    height: 52vw;
+    min-height: 220px;
+    align-items: flex-end;
+  }
   .dp-hero-body {
-    padding: 0 20px;
+    padding: 0 16px 16px;
     max-width: 100%;
   }
-  .dp-hero {
-    height: 72vh;
-    min-height: 380px;
+  .dp-type-badge {
+    display: none;
   }
   .dp-title {
-    font-size: 1.9rem;
+    font-size: 1.5rem;
+    text-transform: none;
   }
-  .dp-body {
-    padding: 0 16px 60px;
+  .dp-meta {
+    font-size: 0.75rem;
+    flex-wrap: wrap;
+    gap: 5px;
   }
+  /* Botones estilo Netflix — Reproducir blanco full-width, Mi Lista gris */
+  .dp-actions {
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .dp-play-btn {
+    width: 100%;
+    background: #fff;
+    color: #000;
+    font-size: 0.9rem;
+    padding: 11px;
+    border-radius: 4px;
+    text-align: center;
+    justify-content: center;
+  }
+  .dp-sec-btn {
+    width: 100%;
+    background: rgba(109,109,110,0.7);
+    color: #fff;
+    font-size: 0.9rem;
+    padding: 11px;
+    border-radius: 4px;
+    text-align: center;
+    justify-content: center;
+    border: none;
+  }
+  /* Ocultar stats, overview del hero y botón Volver */
   .dp-stats {
     display: none;
+  }
+  .dp-overview {
+    display: none;
+  }
+  .dp-sec-btn:last-child {
+    display: none;
+  }
+  /* Body compacto */
+  .dp-body {
+    padding: 0 16px 80px;
+  }
+  /* Synopsis en el body (visible solo mobile) */
+  .dp-section .dp-overview-mobile {
+    font-size: 0.84rem;
+    line-height: 1.6;
+    color: rgba(240,240,240,0.8);
+    margin-bottom: 16px;
   }
   .dp-ep-grid {
     grid-template-columns: 1fr;
@@ -1171,20 +1224,6 @@ onBeforeUnmount(() => {
   .dp-ep-thumb {
     width: 92px;
     height: 52px;
-  }
-  .dp-actions {
-    gap: 8px;
-  }
-  .dp-play-btn,
-  .dp-sec-btn {
-    padding: 10px 18px;
-    font-size: 0.82rem;
-  }
-  .dp-overview {
-    display: none;
-  }
-  .dp-sec-btn:last-child {
-    display: none;
   }
 }
 
