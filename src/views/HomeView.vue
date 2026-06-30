@@ -146,19 +146,26 @@ function onSelect({ id, type }: { id: MediaItem['id']; type: 'movie' | 'tv' }) {
 
 <template>
   <div class="home-view">
+    <!-- ── Móvil: header "M Inicio" + pills de navegación, ARRIBA del hero
+         (estilo Netflix). El header y las pills van en su propia franja, no
+         flotan sobre la imagen. Cada pill abre su sección. ── -->
+    <template v-if="deviceStore.isMobile">
+      <div class="home-topbar-mobile">
+        <span class="home-logo-m">M</span>
+        <span class="home-topbar-title">Inicio</span>
+      </div>
+      <div class="tabs-bar-nav">
+        <button class="tab" @click="router.push('/series')">Series</button>
+        <button class="tab" @click="router.push('/peliculas')">Películas</button>
+        <button class="tab" @click="router.push('/anime')">Anime</button>
+        <button class="tab" @click="router.push('/mi-lista')">Mi lista</button>
+      </div>
+    </template>
+
     <HeroBanner />
 
-    <!-- Móvil: pills de NAVEGACIÓN a cada sección (estilo Netflix). Cada una abre
-         su pantalla con dropdown de categorías. NO filtran inline. -->
-    <div v-if="deviceStore.isMobile" class="tabs-bar tabs-bar-nav">
-      <button class="tab" @click="router.push('/series')">Series</button>
-      <button class="tab" @click="router.push('/peliculas')">Películas</button>
-      <button class="tab" @click="router.push('/anime')">Anime</button>
-      <button class="tab" @click="router.push('/mi-lista')">Mi lista</button>
-    </div>
-
     <!-- Desktop/TV: tabs que filtran inline — preserva `.tabs-bar` (línea ~2701). -->
-    <template v-else>
+    <template v-if="!deviceStore.isMobile">
       <div class="tabs-bar">
         <button class="tab" :class="{ active: tab === 'movies' }" @click="switchTab('movies')">Películas</button>
         <button class="tab" :class="{ active: tab === 'series' }" @click="switchTab('series')">Series</button>
@@ -346,47 +353,47 @@ function onSelect({ id, type }: { id: MediaItem['id']; type: 'movie' | 'tv' }) {
 }
 
 @media (max-width: 640px) {
-  .tabs-bar {
-    position: absolute;
-    top: 52px;
-    left: 0;
-    right: 0;
-    z-index: 10;
-    padding: 0 12px;
-    border-bottom: none;
-    margin: 0;
+  /* Header "M Inicio" — logo rojo + título, como Netflix. */
+  .home-topbar-mobile {
+    display: flex;
+    align-items: center;
     gap: 8px;
+    padding: 12px 16px 6px;
+  }
+  .home-logo-m {
+    font-family: 'Oswald', sans-serif;
+    font-weight: 800;
+    font-size: 1.7rem;
+    line-height: 1;
+    color: #e50914;
+  }
+  .home-topbar-title {
+    font-family: 'Oswald', sans-serif;
+    font-weight: 700;
+    font-size: 1.35rem;
+    color: #fff;
+  }
+  /* Pills de navegación — franja PROPIA debajo del header (NO sobre el hero). */
+  .tabs-bar-nav {
+    display: flex;
+    gap: 8px;
+    padding: 4px 16px 12px;
     overflow-x: auto;
     scrollbar-width: none;
-    background: transparent;
-    justify-content: center;
-  }
-  /* Barra de navegación (4 pills): scroll desde la izquierda para que no se corten. */
-  .tabs-bar-nav {
     justify-content: flex-start;
   }
-  .tabs-bar::-webkit-scrollbar {
+  .tabs-bar-nav::-webkit-scrollbar {
     display: none;
   }
-  .tab {
+  .tabs-bar-nav .tab {
     flex-shrink: 0;
-    border: 1px solid rgba(255,255,255,0.5);
-    border-bottom: 1px solid rgba(255,255,255,0.5);
+    border: 1px solid rgba(255, 255, 255, 0.5);
     border-radius: 20px;
-    padding: 5px 16px;
-    font-size: 0.78rem;
+    padding: 6px 18px;
+    font-size: 0.82rem;
     color: #fff;
     margin-bottom: 0;
-    background: rgba(0,0,0,0.3);
-    backdrop-filter: blur(4px);
-  }
-  .tab.active {
-    background: #fff;
-    color: #000;
-    border-color: #fff;
-  }
-  .home-view {
-    position: relative;
+    background: rgba(0, 0, 0, 0.3);
   }
 }
 </style>
