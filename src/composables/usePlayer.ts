@@ -390,7 +390,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   // ── Intento de reproducción directa HEVC (líneas ~7878-7913) ────────────
   // Devuelve `true` si reprodujo de verdad (duration > 35s), `false` si falló
   // o no aplica — el llamador decide si continuar al transcode.
-  async function tryHevcDirectPlay(video: HTMLVideoElement, streamUrl: string): Promise<boolean> {
+  async function tryHevcDirectPlay(video: HTMLVideoElement, streamUrl: string, startPositionSec?: number): Promise<boolean> {
     let played = false;
     await new Promise<void>((resolve) => {
       const tmo = setTimeout(() => {
@@ -405,6 +405,16 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
           clearTimeout(tmo);
           if (video.duration && isFinite(video.duration) && video.duration > MIN_VALID_DURATION_SEC) {
             played = true;
+            // "Continuar viendo": posicionar ANTES de play() (y del fullscreen) para no
+            // reproducir el minuto 0. En iOS, hacer el seek DESPUÉS de entrar en fullscreen
+            // desincroniza audio/video (el audio sigue sonando desde el inicio de fondo).
+            if (startPositionSec && startPositionSec > 30 && startPositionSec < video.duration) {
+              try {
+                video.currentTime = startPositionSec;
+              } catch {
+                /* algunos navegadores requieren 'canplay' — el seek tardío de onRdStarted cubre ese caso */
+              }
+            }
             video.muted = false;
             video.volume = 1;
             video.play().catch(() => {});
@@ -1256,7 +1266,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // El contenedor MP4 ya se prioriza en el SCORING (no hace falta bloquear acá).
     const canTryDirect = (!streamIsX265 || hevcOk) && !hasBadAudio;
     if (canTryDirect) {
-      const played = await tryHevcDirectPlay(video, streamUrl);
+      const played = await tryHevcDirectPlay(video, streamUrl, params.startPositionSec);
       if (played) {
         const hasSpaDirect = isDualLatFilename(streamFn);
         opts.onStreamReady?.({ selected, hasNativeSpanish: hasSpaDirect, spanishTrack: null });
