@@ -18,6 +18,7 @@ import { useRouter } from 'vue-router';
 import { useMyListStore } from '../stores/myList';
 import { useToast } from '../composables/useToast';
 import { TMDB_IMG_BASE } from '../services/catalog';
+import BackButtonMobile from '../components/layout/BackButtonMobile.vue';
 
 const myListStore = useMyListStore();
 const router = useRouter();
@@ -74,6 +75,7 @@ function onDeleteKeydown(e: KeyboardEvent, id: string) {
 
 <template>
   <div class="mi-lista-page">
+    <BackButtonMobile />
     <div class="ml-header">
       <div class="ml-bar"></div>
       <div>
@@ -111,6 +113,7 @@ function onDeleteKeydown(e: KeyboardEvent, id: string) {
 .mi-lista-page {
   padding-top: 12px;
   padding-bottom: 48px;
+  position: relative;
 }
 .ml-header {
   display: flex;

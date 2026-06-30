@@ -363,9 +363,9 @@ function onSelect({ id, type }: { id: MediaItem['id']; type: 'movie' | 'tv' }) {
   .home-logo-m {
     font-family: 'Oswald', sans-serif;
     font-weight: 800;
-    font-size: 1.7rem;
+    font-size: 1.9rem;
     line-height: 1;
-    color: #e50914;
+    color: var(--accent, #3d5afe);
   }
   .home-topbar-title {
     font-family: 'Oswald', sans-serif;
@@ -388,9 +388,9 @@ function onSelect({ id, type }: { id: MediaItem['id']; type: 'movie' | 'tv' }) {
   .tabs-bar-nav .tab {
     flex-shrink: 0;
     border: 1px solid rgba(255, 255, 255, 0.5);
-    border-radius: 20px;
-    padding: 6px 18px;
-    font-size: 0.82rem;
+    border-radius: 22px;
+    padding: 9px 24px;
+    font-size: 0.95rem;
     color: #fff;
     margin-bottom: 0;
     background: rgba(0, 0, 0, 0.3);

@@ -25,8 +25,9 @@ import { useRouter } from 'vue-router';
 import MovieCard from '../components/catalog/MovieCard.vue';
 import SearchBar from '../components/catalog/SearchBar.vue';
 import { useAppServices } from '../composables/useAppServices';
+import { useTmdbList } from '../composables/useTmdbList';
 import { useDeviceStore } from '../stores/device';
-import { isSearchableMedia, resolveMediaType } from '../services/catalog';
+import { isSearchableMedia, resolveMediaType, TMDB_IMG_BASE } from '../services/catalog';
 import type { MediaItem } from '../types';
 
 const props = defineProps<{
@@ -43,6 +44,19 @@ const LANG = 'es-ES';
 const results = ref<MediaItem[]>([]);
 const loading = ref(false);
 const searched = ref(false);
+
+// Recomendados — tendencias de la semana. Se muestran cuando aún no se busca nada
+// (estilo Netflix móvil: "Series y películas recomendadas") en vez de pantalla vacía.
+const recommended = useTmdbList(tmdbClient);
+
+const IMG_THUMB = `${TMDB_IMG_BASE}w300`;
+function thumbUrl(item: MediaItem): string {
+  const path = item.backdrop_path || item.poster_path;
+  return path ? `${IMG_THUMB}${path}` : '';
+}
+function itemTitle(item: MediaItem): string {
+  return item.title || item.name || 'Sin título';
+}
 
 let generation = 0;
 
@@ -79,7 +93,10 @@ watch(
   { immediate: false }
 );
 
-onMounted(() => runSearch(props.query));
+onMounted(() => {
+  runSearch(props.query);
+  recommended.load(`/trending/all/week?language=${LANG}`);
+});
 
 function onSelect({ id, type }: { id: MediaItem['id']; type: 'movie' | 'tv' }) {
   router.push(type === 'tv' ? `/serie/${id}/1/1` : `/pelicula/${id}`);
@@ -117,8 +134,20 @@ function focusSearchInput() {
       />
     </div>
 
+    <!-- Barra de búsqueda MÓVIL (input arriba, estilo Netflix). En desktop el input
+         vive en el nav; en móvil no había dónde tipear → la pantalla quedaba negra. -->
+    <div v-if="deviceStore.isMobile" class="mobile-search-bar">
+      <SearchBar
+        :model-value="props.query"
+        placeholder="Buscar series, películas, juegos…"
+        :autofocus="true"
+        @search="onTypeSearch"
+        @clear="onClearSearch"
+      />
+    </div>
+
     <div v-if="props.query" class="results-title">"{{ props.query }}"</div>
-    <div class="results-count">
+    <div v-if="props.query || !deviceStore.isMobile" class="results-count">
       <span v-if="loading">Buscando...</span>
       <span v-else-if="searched">{{ results.length }} resultados</span>
     </div>
@@ -143,6 +172,27 @@ function focusSearchInput() {
       </div>
       <p v-else class="no-results">No se encontraron resultados.</p>
     </template>
+
+    <!-- Sin búsqueda activa (móvil): lista de recomendados estilo Netflix. -->
+    <div v-else-if="deviceStore.isMobile" class="reco-section">
+      <h3 class="reco-title">Series y películas recomendadas</h3>
+      <ul class="reco-list">
+        <li
+          v-for="item in recommended.items.value"
+          :key="item.id"
+          class="reco-row"
+          @click="onSelect({ id: item.id, type: resolveMediaType(item, 'movie') })"
+        >
+          <div class="reco-thumb">
+            <img v-if="thumbUrl(item)" :src="thumbUrl(item)" :alt="itemTitle(item)" loading="lazy" />
+          </div>
+          <span class="reco-name">{{ itemTitle(item) }}</span>
+          <span class="reco-play" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="10" /><polygon points="10 8 16 12 10 16" fill="currentColor" stroke="none" /></svg>
+          </span>
+        </li>
+      </ul>
+    </div>
   </div>
 </template>
 
@@ -246,7 +296,78 @@ function focusSearchInput() {
 
 @media (max-width: 640px) {
   .search-results-page {
-    padding: 16px 14px 40px;
+    padding: 12px 14px 40px;
   }
+}
+
+/* ── Barra de búsqueda móvil + lista de recomendados (estilo Netflix) ── */
+.mobile-search-bar {
+  margin-bottom: 18px;
+}
+.mobile-search-bar :deep(.search-bar) {
+  width: 100%;
+}
+.mobile-search-bar :deep(.search-input) {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  border-radius: 8px;
+  height: 46px;
+  font-size: 0.95rem;
+  padding: 0 14px 0 44px;
+  color: #fff;
+}
+.mobile-search-bar :deep(.search-icon) {
+  color: rgba(255, 255, 255, 0.7);
+  left: 14px;
+}
+.reco-title {
+  font-size: 1.25rem;
+  font-weight: 800;
+  margin: 4px 0 14px;
+  color: #fff;
+}
+.reco-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.reco-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 0;
+  cursor: pointer;
+}
+.reco-thumb {
+  width: 132px;
+  height: 74px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+}
+.reco-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.reco-name {
+  flex: 1;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  line-height: 1.25;
+}
+.reco-play {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  color: #fff;
+}
+.reco-play svg {
+  width: 34px;
+  height: 34px;
 }
 </style>

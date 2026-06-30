@@ -16,6 +16,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import Carousel from '../components/catalog/Carousel.vue';
 import GenreFilter from '../components/catalog/GenreFilter.vue';
+import BackButtonMobile from '../components/layout/BackButtonMobile.vue';
 import { useAppServices } from '../composables/useAppServices';
 import { useTmdbList } from '../composables/useTmdbList';
 import { useDeviceStore } from '../stores/device';
@@ -138,10 +139,11 @@ function onSelect({ id }: { id: MediaItem['id'] }) {
 
 <template>
   <div class="series-view">
+    <BackButtonMobile />
     <div class="page-head">
       <div class="page-head-bar"></div>
       <div>
-        <div class="page-head-title">📺 Series</div>
+        <div class="page-head-title"><span class="ph-emoji">📺 </span>Series</div>
         <div class="page-head-sub">Lo mejor de la televisión a tu alcance</div>
       </div>
     </div>
@@ -236,6 +238,7 @@ function onSelect({ id }: { id: MediaItem['id'] }) {
 @media (max-width: 640px) {
   .series-view {
     padding-top: 16px;
+    position: relative;
   }
   .page-head {
     justify-content: center;
@@ -245,8 +248,11 @@ function onSelect({ id }: { id: MediaItem['id'] }) {
     display: none;
   }
   .page-head-title {
-    font-size: 1.25rem;
+    font-size: 1.35rem;
     text-align: center;
+  }
+  .ph-emoji {
+    display: none;
   }
   .page-head-sub {
     display: none;

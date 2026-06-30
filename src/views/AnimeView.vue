@@ -13,6 +13,7 @@ import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import Carousel from '../components/catalog/Carousel.vue';
 import GenreFilter from '../components/catalog/GenreFilter.vue';
+import BackButtonMobile from '../components/layout/BackButtonMobile.vue';
 import { useAppServices } from '../composables/useAppServices';
 import { useTmdbList } from '../composables/useTmdbList';
 import { useDeviceStore } from '../stores/device';
@@ -108,6 +109,7 @@ function onSelect({ id }: { id: MediaItem['id'] }) {
 
 <template>
   <div class="anime-view">
+    <BackButtonMobile />
     <!-- Cabecera centrada — solo móvil (estilo Netflix). -->
     <div v-if="deviceStore.isMobile" class="anime-head-mobile">Anime</div>
     <GenreFilter :options="animeGenreOptions" :active-id="activeGenreId" @select="selectGenre" />
@@ -164,6 +166,7 @@ function onSelect({ id }: { id: MediaItem['id'] }) {
 .anime-view {
   padding-top: 12px;
   padding-bottom: 48px;
+  position: relative;
 }
 .anime-head-mobile {
   font-family: 'Oswald', sans-serif;
