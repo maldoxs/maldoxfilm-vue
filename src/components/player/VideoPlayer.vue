@@ -62,6 +62,13 @@ const emit = defineEmits<{
    * PlayerView.vue"); este componente solo avisa CUÁNDO arrancó.
    */
   (e: 'started'): void;
+  /**
+   * native-fullscreen-exit — en mobile el usuario salió del fullscreen nativo
+   * de iOS (la ✕ del reproductor a pantalla completa). `PlayerView` lo escucha
+   * para CERRAR el reproductor y volver directo al detalle, sin dejarlo en la
+   * pantalla negra intermedia.
+   */
+  (e: 'native-fullscreen-exit'): void;
 }>();
 
 const playerStore = usePlayerStore();
@@ -417,6 +424,9 @@ function onBeginNativeFs() {
 function onEndNativeFs() {
   inNativeFullscreen = false;
   applyNativeTrackMode();
+  // En mobile, salir del fullscreen nativo = terminar de ver → cerrar el player
+  // y volver al detalle directamente (PlayerView lo maneja).
+  emit('native-fullscreen-exit');
 }
 
 // Reataches al cambiar de instancia de <video> (nueva fuente) y re-espejado al

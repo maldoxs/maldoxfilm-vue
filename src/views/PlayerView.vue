@@ -464,6 +464,17 @@ function onRdStarted() {
   }
 }
 
+/**
+ * onNativeFullscreenExit — en mobile, al salir del fullscreen nativo de iOS
+ * (✕ del reproductor a pantalla completa) cerramos el player y volvemos directo
+ * al detalle, sin dejar al usuario en la pantalla negra intermedia que obligaba
+ * a tocar la X varias veces.
+ */
+function onNativeFullscreenExit() {
+  if (!deviceStore.isMobile) return;
+  closePlayer();
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // AUTO-NEXT — preserva `scheduleAutoNext`/`preloadNextEpData`/
 // `startAutoNextCountdown`/`cancelAutoNext`/`goToNextEpisode` (líneas ~8279-8402)
@@ -1152,7 +1163,7 @@ onBeforeUnmount(() => {
 
       <!-- Real-Debrid — siempre montado, mostrado vía v-show -->
       <div v-show="isRdSource" class="rd-wrap">
-        <VideoPlayer ref="videoPlayerRef" :rd-stream-resolver="rdStreamResolver" :rd-client="rdClient" :title="title" :runtime-sec="(playerStore.current.runtimeMin || 0) * 60" :page-fullscreen="fullscreen.isFullscreen.value" @started="onRdStarted" @fallback-to-next-source="fallbackToFirstSource" @toggle-fullscreen="fullscreen.toggle">
+        <VideoPlayer ref="videoPlayerRef" :rd-stream-resolver="rdStreamResolver" :rd-client="rdClient" :title="title" :runtime-sec="(playerStore.current.runtimeMin || 0) * 60" :page-fullscreen="fullscreen.isFullscreen.value" @started="onRdStarted" @fallback-to-next-source="fallbackToFirstSource" @toggle-fullscreen="fullscreen.toggle" @native-fullscreen-exit="onNativeFullscreenExit">
           <template v-if="showEpisodeControls" #episode-triggers>
             <EpisodeTriggers
               @next-enter="onNextEnter" @next-leave="onNextLeave" @next-tap="onNextTap"
