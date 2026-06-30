@@ -870,11 +870,17 @@ function loadActiveSource() {
     // `init()` siempre corre `playerStore.load()` antes de `loadActiveSource()`.
     const currentId = playerStore.current.id;
     if (currentId != null) {
+      // "Continuar viendo": leemos la posición guardada ANTES de cargar para que el
+      // pipeline /t/ arranque el MPD directo en esa posición (no desde el minuto 0).
+      const savedProg = progressStore.get(currentId, playerStore.current.type);
+      const startPositionSec =
+        savedProg?.positionSec && savedProg.positionSec > 30 ? savedProg.positionSec : undefined;
       void videoPlayerRef.value?.loadRdSource({
         id: currentId,
         type: playerStore.current.type,
         season: playerStore.current.season,
         episode: playerStore.current.episode,
+        startPositionSec,
       });
     }
   } else {

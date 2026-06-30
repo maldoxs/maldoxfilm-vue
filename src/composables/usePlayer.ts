@@ -313,7 +313,7 @@ export interface UsePlayerReturn {
   /** Pista en español detectada (o null). */
   spanishTrack: Ref<string | null>;
   /** Carga la fuente RD completa — equivalente al bloque `if(_activeSrcIdx === RD_SRC_IDX)`. */
-  loadRdSource(params: { id: string | number; type: 'movie' | 'tv'; season?: number; episode?: number }): Promise<void>;
+  loadRdSource(params: { id: string | number; type: 'movie' | 'tv'; season?: number; episode?: number; startPositionSec?: number }): Promise<void>;
   /** Cambia la pista de audio activa en un manifest DASH ya cargado (panel de ajustes). */
   switchAudioTrack(track: string): Promise<void>;
   /** Limpia instancias activas (HLS.js / Shaka) — llamar al cerrar el reproductor. */
@@ -1048,8 +1048,13 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     myGen: number;
     selected: SelectedStream;
     streamFn: string | null;
+    startPositionSec?: number;
   }): Promise<boolean> {
     const { video, rdId, myGen, selected } = params;
+    // Si hay "continuar viendo", arrancamos el MPD directo en esa posición; si no,
+    // desde t=1 (inicio). Así evitamos reproducir el minuto 0 y recargar luego.
+    const startT =
+      params.startPositionSec && params.startPositionSec > 30 ? Math.floor(params.startPositionSec) : 1;
 
     let resolved: TpipelineResolveResult;
     try {
@@ -1068,7 +1073,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     tpipelineState = { resolved, audio, myGen };
     isTpipeline.value = true;
     tpipelineDuration.value = resolved.duration;
-    tpipelineOffset.value = 1;
+    tpipelineOffset.value = startT;
     activeTrack.value = audio;
     if (isSpanish) {
       spanishTrack.value = audio;
@@ -1078,10 +1083,10 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       loadingMessage.value = '📡 Conectando con el servidor...';
       await loadShakaIfNeeded();
 
-      const mpdUrl = buildMpdUrl(resolved.fullPathId, resolved.cdn, audio, 1);
+      const mpdUrl = buildMpdUrl(resolved.fullPathId, resolved.cdn, audio, startT);
 
-      await pingSeek(resolved.mediaId, 1);
-      const segReady = await waitForSegmentAt(resolved.cdn, resolved.fullPathId, audio, 1, 8000);
+      await pingSeek(resolved.mediaId, startT);
+      const segReady = await waitForSegmentAt(resolved.cdn, resolved.fullPathId, audio, startT, 8000);
       if (!segReady) console.warn('[/t/] Primer segmento timeout — intentando igual');
 
       if (playerStore.isStale(myGen)) return true;
@@ -1126,6 +1131,13 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     type: 'movie' | 'tv';
     season?: number;
     episode?: number;
+    /**
+     * Posición guardada ("continuar viendo"). En el pipeline /t/ se usa para
+     * arrancar el MPD DIRECTAMENTE en esa posición (no desde t=1), evitando que
+     * el audio del minuto 0 suene de fondo en mobile cuando, al recargar shaka
+     * dentro del fullscreen de iOS, el audio inicial no se silencia limpio.
+     */
+    startPositionSec?: number;
   }) {
     const video = opts.videoRef.value;
     if (!video) return;
@@ -1268,7 +1280,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     if (rdId) {
       isTpipeline.value = false;
       tpipelineState = null;
-      const tpipelineOk = await tryTpipeline({ video, rdId, myGen, selected, streamFn });
+      const tpipelineOk = await tryTpipeline({ video, rdId, myGen, selected, streamFn, startPositionSec: params.startPositionSec });
       if (tpipelineOk) {
         isLoadingRd.value = false;
         return;
