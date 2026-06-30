@@ -1141,8 +1141,10 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <!-- Selector de servidores Anime1V — preserva `_renderAnimeSourceSelector` -->
-      <div v-else class="source-selector">
+      <!-- Selector de servidores Anime1V — preserva `_renderAnimeSourceSelector`.
+           `source-selector--anime`: en MÓVIL este SÍ debe verse (a diferencia del de
+           RD), porque si el servidor auto-elegido falla en iOS hay que poder cambiar. -->
+      <div v-else class="source-selector source-selector--anime">
         <template v-if="animeServerButtons.showLangToggle">
           <button class="source-btn" :class="{ active: animeServerButtons.subActive }" @click="switchAnime1Lang('SUB')">🇯🇵 SUB</button>
           <button class="source-btn" :class="{ active: !animeServerButtons.subActive }" @click="switchAnime1Lang('DUB')">🇲🇽 DUB</button>
@@ -1873,8 +1875,20 @@ html.tv-mode .source-btn:focus {
     right: 12px;
     bottom: 76px;
   }
-  .source-selector {
+  /* Oculta SOLO el selector de RD (⚡RD/UnlimPlay/vidlink) en móvil — el de anime
+     SÍ debe verse para poder cambiar de servidor si el auto-elegido falla en iOS. */
+  .source-selector:not(.source-selector--anime) {
     display: none !important;
+  }
+  /* Selector de anime en móvil: scroll horizontal bajo el título, sin tapar el video. */
+  .source-selector--anime {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+  }
+  .source-selector--anime::-webkit-scrollbar {
+    display: none;
   }
   /* La X de cerrar SIEMPRE clickeable en mobile — sin esto el primer toque solo
      reaparece los controles y hace falta un segundo toque para cerrar. */
