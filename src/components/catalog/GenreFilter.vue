@@ -18,6 +18,7 @@
 import type { GenreOption } from '../../services/catalog';
 import { useDeviceStore } from '../../stores/device';
 import TvGenreBar from './TvGenreBar.vue';
+import CategoryDropdown from './CategoryDropdown.vue';
 
 const props = defineProps<{
   options: GenreOption[];
@@ -36,6 +37,13 @@ const deviceStore = useDeviceStore();
        escritorio/móvil se mantiene la barra de pills de siempre (sin cambios). -->
   <TvGenreBar
     v-if="deviceStore.isTV"
+    :options="props.options"
+    :active-id="props.activeId"
+    @select="emit('select', $event)"
+  />
+  <!-- Móvil: botón "Categorías ▼" con menú desplegable (estilo Netflix). -->
+  <CategoryDropdown
+    v-else-if="deviceStore.isMobile"
     :options="props.options"
     :active-id="props.activeId"
     @select="emit('select', $event)"

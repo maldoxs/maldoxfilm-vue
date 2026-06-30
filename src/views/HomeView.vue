@@ -148,20 +148,31 @@ function onSelect({ id, type }: { id: MediaItem['id']; type: 'movie' | 'tv' }) {
   <div class="home-view">
     <HeroBanner />
 
-    <!-- Tabs Películas / Series / Populares — preserva `.tabs-bar` (línea ~2701). -->
-    <div class="tabs-bar">
-      <button class="tab" :class="{ active: tab === 'movies' }" @click="switchTab('movies')">Películas</button>
-      <button class="tab" :class="{ active: tab === 'series' }" @click="switchTab('series')">Series</button>
-      <button class="tab" :class="{ active: tab === 'popular' }" @click="switchTab('popular')">Populares</button>
+    <!-- Móvil: pills de NAVEGACIÓN a cada sección (estilo Netflix). Cada una abre
+         su pantalla con dropdown de categorías. NO filtran inline. -->
+    <div v-if="deviceStore.isMobile" class="tabs-bar tabs-bar-nav">
+      <button class="tab" @click="router.push('/series')">Series</button>
+      <button class="tab" @click="router.push('/peliculas')">Películas</button>
+      <button class="tab" @click="router.push('/anime')">Anime</button>
+      <button class="tab" @click="router.push('/mi-lista')">Mi lista</button>
     </div>
 
-    <!-- Barra de géneros — solo para Películas/Series (preserva `#categories`). -->
-    <GenreFilter
-      v-if="showGenreBar"
-      :options="homeGenreOptions"
-      :active-id="genre.activeGenreId.value"
-      @select="genre.selectGenre"
-    />
+    <!-- Desktop/TV: tabs que filtran inline — preserva `.tabs-bar` (línea ~2701). -->
+    <template v-else>
+      <div class="tabs-bar">
+        <button class="tab" :class="{ active: tab === 'movies' }" @click="switchTab('movies')">Películas</button>
+        <button class="tab" :class="{ active: tab === 'series' }" @click="switchTab('series')">Series</button>
+        <button class="tab" :class="{ active: tab === 'popular' }" @click="switchTab('popular')">Populares</button>
+      </div>
+
+      <!-- Barra de géneros — solo para Películas/Series (preserva `#categories`). -->
+      <GenreFilter
+        v-if="showGenreBar"
+        :options="homeGenreOptions"
+        :active-id="genre.activeGenreId.value"
+        @select="genre.selectGenre"
+      />
+    </template>
 
     <!-- Continuar viendo -->
     <ContinueWatching @select="onSelect" />
@@ -349,6 +360,10 @@ function onSelect({ id, type }: { id: MediaItem['id']; type: 'movie' | 'tv' }) {
     scrollbar-width: none;
     background: transparent;
     justify-content: center;
+  }
+  /* Barra de navegación (4 pills): scroll desde la izquierda para que no se corten. */
+  .tabs-bar-nav {
+    justify-content: flex-start;
   }
   .tabs-bar::-webkit-scrollbar {
     display: none;

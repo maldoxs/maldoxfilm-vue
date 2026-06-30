@@ -231,4 +231,25 @@ function onSelect({ id }: { id: MediaItem['id'] }) {
   color: var(--text-muted, #9a9a9a);
   margin-top: 2px;
 }
+
+/* ── Móvil: cabecera centrada estilo Netflix (título arriba, dropdown debajo) ── */
+@media (max-width: 640px) {
+  .series-view {
+    padding-top: 16px;
+  }
+  .page-head {
+    justify-content: center;
+    padding: 8px 16px 8px;
+  }
+  .page-head-bar {
+    display: none;
+  }
+  .page-head-title {
+    font-size: 1.25rem;
+    text-align: center;
+  }
+  .page-head-sub {
+    display: none;
+  }
+}
 </style>

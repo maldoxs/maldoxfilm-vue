@@ -108,6 +108,8 @@ function onSelect({ id }: { id: MediaItem['id'] }) {
 
 <template>
   <div class="anime-view">
+    <!-- Cabecera centrada — solo móvil (estilo Netflix). -->
+    <div v-if="deviceStore.isMobile" class="anime-head-mobile">Anime</div>
     <GenreFilter :options="animeGenreOptions" :active-id="activeGenreId" @select="selectGenre" />
 
     <Carousel
@@ -162,5 +164,12 @@ function onSelect({ id }: { id: MediaItem['id'] }) {
 .anime-view {
   padding-top: 12px;
   padding-bottom: 48px;
+}
+.anime-head-mobile {
+  font-family: 'Oswald', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-align: center;
+  padding: 16px 16px 4px;
 }
 </style>
