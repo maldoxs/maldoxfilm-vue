@@ -472,7 +472,12 @@ function onRdStarted() {
  */
 function onNativeFullscreenExit() {
   if (!deviceStore.isMobile) return;
-  closePlayer(true);
+  // CLAVE: NO navegar dentro del propio evento `webkitendfullscreen`. iOS todavía
+  // está procesando la transición de SALIDA del fullscreen; si desmontamos el
+  // <video> ahí, iOS queda en un estado sucio y el PRÓXIMO webkitEnterFullscreen
+  // se IGNORA (la siguiente reproducción sale inline/negra) → bug "alternado".
+  // Diferimos el cierre a un macrotask posterior, ya con la transición resuelta.
+  setTimeout(() => closePlayer(true), 0);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
