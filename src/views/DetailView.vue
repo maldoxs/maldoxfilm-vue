@@ -1163,11 +1163,7 @@ onBeforeUnmount(() => {
     padding: 0 16px 60px;
   }
   .dp-stats {
-    flex-wrap: wrap;
-  }
-  .dp-stat {
-    flex: none;
-    width: 50%;
+    display: none;
   }
   .dp-ep-grid {
     grid-template-columns: 1fr;
@@ -1183,6 +1179,12 @@ onBeforeUnmount(() => {
   .dp-sec-btn {
     padding: 10px 18px;
     font-size: 0.82rem;
+  }
+  .dp-overview {
+    display: none;
+  }
+  .dp-sec-btn:last-child {
+    display: none;
   }
 }
 

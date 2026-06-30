@@ -957,7 +957,7 @@ function closePlayer() {
   // `position: sticky` (NO `fixed`) justamente para que SOBREVIVA al fullscreen de
   // webkit (donde `fixed` deja de pegarse al scrollear). No hacemos `exitFullscreen`
   // en TV (ver useFullscreen), así que queda oculta de forma estable.
-  if (deviceStore.isTV) {
+  if (deviceStore.isTV || deviceStore.isMobile) {
     try {
       document.documentElement.requestFullscreen?.().catch(() => {});
     } catch {
@@ -1832,6 +1832,9 @@ html.tv-mode .source-btn:focus {
     width: 260px;
     right: 12px;
     bottom: 76px;
+  }
+  .source-selector {
+    display: none !important;
   }
 }
 
