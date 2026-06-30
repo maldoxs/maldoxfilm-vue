@@ -472,7 +472,7 @@ function onRdStarted() {
  */
 function onNativeFullscreenExit() {
   if (!deviceStore.isMobile) return;
-  closePlayer();
+  closePlayer(true);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -934,7 +934,7 @@ function persistProgressOnClose() {
   }
 }
 
-function closePlayer() {
+function closePlayer(forceDetail = false) {
   fullscreen.exit();
   persistProgressOnClose();
   stopProgressTracking();
@@ -964,6 +964,14 @@ function closePlayer() {
   //   apuntando al detalle. Por eso NO sirve mirar `state.back` (parece el detalle pero hay
   //   una entrada del player en el medio): `router.back()` caía en esa entrada duplicada y
   //   "Volver" pedía dos clicks. Solución: en iframe vamos DIRECTO al detalle con `push`.
+  // forceDetail (mobile, salida del fullscreen nativo): navegación DETERMINISTA al
+  // detalle con replace — NO depende del historial (que en mobile puede tener una
+  // entrada intermedia y obligar a tocar la X dos veces). replace deja el stack en
+  // [catálogo → detalle], así que el "Volver" del detalle sigue funcionando.
+  if (forceDetail && cur.id != null) {
+    router.replace(detailRoute);
+    return;
+  }
   const prevEntry =
     typeof window !== 'undefined' && window.history.state ? window.history.state.back : null;
   const cameFromDetail =
@@ -1095,7 +1103,7 @@ onBeforeUnmount(() => {
     :class="{ 'controls-hidden': controlsHidden }"
     @mousemove="onPlayerActivity"
   >
-    <button class="player-back" :class="{ 'icon-close-mode': deviceStore.isMobile }" title="Volver" @click="closePlayer">
+    <button class="player-back" :class="{ 'icon-close-mode': deviceStore.isMobile }" title="Volver" @click="closePlayer()">
       <svg v-if="!deviceStore.isMobile" class="icon-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="15 18 9 12 15 6" />
       </svg>
