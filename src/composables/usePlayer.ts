@@ -405,18 +405,41 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
           clearTimeout(tmo);
           if (video.duration && isFinite(video.duration) && video.duration > MIN_VALID_DURATION_SEC) {
             played = true;
-            // "Continuar viendo": posicionar ANTES de play() (y del fullscreen) para no
-            // reproducir el minuto 0. En iOS, hacer el seek DESPUÉS de entrar en fullscreen
-            // desincroniza audio/video (el audio sigue sonando desde el inicio de fondo).
-            if (startPositionSec && startPositionSec > 30 && startPositionSec < video.duration) {
+            const resumeAt =
+              startPositionSec && startPositionSec > 30 && startPositionSec < video.duration
+                ? startPositionSec
+                : 0;
+            if (resumeAt > 0) {
+              // "Continuar viendo": posicionar ANTES de play() y entrar MUTEADO. Aunque
+              // seteemos currentTime aquí, el play() de iOS reproduce un instante desde
+              // el frame 0 mientras el seek se resuelve async → se oye ~1s del inicio.
+              // Mantenemos el audio en silencio hasta que el seek COMPLETE ('seeked'),
+              // y recién ahí restauramos volumen. Así nunca se oye la melodía del inicio.
+              video.muted = true;
+              const restoreAudio = () => {
+                video.muted = false;
+                video.volume = 1;
+              };
+              // Si 'seeked' no dispara (edge), un timeout restaura el audio igual.
+              const audioFallback = setTimeout(restoreAudio, 1500);
+              video.addEventListener(
+                'seeked',
+                () => {
+                  clearTimeout(audioFallback);
+                  restoreAudio();
+                },
+                { once: true }
+              );
               try {
-                video.currentTime = startPositionSec;
+                video.currentTime = resumeAt;
               } catch {
-                /* algunos navegadores requieren 'canplay' — el seek tardío de onRdStarted cubre ese caso */
+                clearTimeout(audioFallback);
+                restoreAudio(); // el seek tardío de onRdStarted cubre el reposicionamiento
               }
+            } else {
+              video.muted = false;
+              video.volume = 1;
             }
-            video.muted = false;
-            video.volume = 1;
             video.play().catch(() => {});
             opts.onStarted();
             resolve();
