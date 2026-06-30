@@ -141,6 +141,28 @@ function onDeleteKeydown(e: KeyboardEvent, id: string) {
 .ml-body {
   padding: 0 40px 80px;
 }
+
+/* ── Móvil: cabecera centrada estilo Netflix (igual que Series/Películas/Anime) ── */
+@media (max-width: 640px) {
+  .ml-header {
+    justify-content: center;
+    padding: 16px 16px 8px;
+    margin-bottom: 12px;
+  }
+  .ml-bar {
+    display: none;
+  }
+  .ml-title {
+    font-size: 1.25rem;
+    text-align: center;
+  }
+  .ml-count {
+    display: none;
+  }
+  .ml-body {
+    padding: 0 16px 80px;
+  }
+}
 .ml-empty {
   color: var(--text-muted, #9a9a9a);
   text-align: center;
