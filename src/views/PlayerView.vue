@@ -428,6 +428,16 @@ function hideLoadingAndStart() {
 function onRdStarted() {
   iframeLoading.value = false;
 
+  // En mobile iOS el <video playsinline> no entra en fullscreen automáticamente.
+  // webkitEnterFullscreen() funciona desde el evento @started (contexto de gesto del usuario).
+  if (deviceStore.isMobile) {
+    const v = videoPlayerRef.value?.videoRef;
+    if (v) {
+      const vAny = v as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+      vAny.webkitEnterFullscreen?.();
+    }
+  }
+
   startProgressTracking();
   if (playerStore.current.type === 'tv') {
     setTimeout(() => scheduleAutoNext(), 2000);
@@ -957,7 +967,7 @@ function closePlayer() {
   // `position: sticky` (NO `fixed`) justamente para que SOBREVIVA al fullscreen de
   // webkit (donde `fixed` deja de pegarse al scrollear). No hacemos `exitFullscreen`
   // en TV (ver useFullscreen), así que queda oculta de forma estable.
-  if (deviceStore.isTV || deviceStore.isMobile) {
+  if (deviceStore.isTV) {
     try {
       document.documentElement.requestFullscreen?.().catch(() => {});
     } catch {
