@@ -1148,40 +1148,70 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 640px) {
-  /* Hero compacto — imagen arriba, contenido debajo */
+  /* Netflix mobile: imagen LIMPIA arriba (sin contenido encima), todo el
+     texto y botones FLUYEN debajo sobre el fondo sólido de la página. */
   .dp-hero {
-    height: 52vw;
-    min-height: 220px;
-    align-items: flex-end;
+    display: block;
+    height: auto;
+    min-height: 0;
+    padding: 0;
+    overflow: visible;
   }
+  /* La imagen pasa de overlay absoluto a un bloque con altura fija al tope */
+  .dp-hero-bg {
+    position: relative;
+    height: 56vw;
+    min-height: 210px;
+    background-position: center 18%;
+  }
+  /* Degradado solo en el borde inferior para fundir la imagen con la página */
+  .dp-hero-bg::after {
+    background: linear-gradient(0deg, rgba(14, 14, 14, 1) 0%, rgba(14, 14, 14, 0) 38%);
+  }
+  /* El cuerpo deja de ser overlay: fluye debajo de la imagen */
   .dp-hero-body {
-    padding: 0 16px 16px;
+    position: relative;
+    z-index: 2;
+    margin-top: -34px;
+    padding: 0 16px;
     max-width: 100%;
   }
   .dp-type-badge {
     display: none;
   }
   .dp-title {
-    font-size: 1.5rem;
+    font-size: 1.6rem;
     text-transform: none;
+    margin-bottom: 8px;
   }
   .dp-meta {
     font-size: 0.75rem;
     flex-wrap: wrap;
     gap: 5px;
+    margin-bottom: 14px;
   }
-  /* Botones estilo Netflix — Reproducir blanco full-width, Mi Lista gris */
+  /* Sinopsis VISIBLE debajo de la duración, como Netflix */
+  .dp-overview {
+    display: block;
+    font-size: 0.84rem;
+    line-height: 1.55;
+    color: rgba(240, 240, 240, 0.82);
+    margin-bottom: 16px;
+  }
+  /* Botones estilo Netflix — Reproducir blanco full-width, Mi Lista gris,
+     DEBAJO de la sinopsis */
   .dp-actions {
     flex-direction: column;
-    gap: 8px;
-    margin-top: 12px;
+    gap: 9px;
+    margin-top: 4px;
   }
   .dp-play-btn {
     width: 100%;
     background: #fff;
     color: #000;
-    font-size: 0.9rem;
-    padding: 11px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    padding: 12px;
     border-radius: 4px;
     text-align: center;
     justify-content: center;
@@ -1190,22 +1220,19 @@ onBeforeUnmount(() => {
     width: 100%;
     background: rgba(109,109,110,0.7);
     color: #fff;
-    font-size: 0.9rem;
-    padding: 11px;
+    font-size: 0.95rem;
+    padding: 12px;
     border-radius: 4px;
     text-align: center;
     justify-content: center;
     border: none;
   }
-  /* Ocultar stats, overview del hero, botón Volver, reparto y tráilers */
+  /* Ocultar stats, botón Volver, reparto y tráilers */
   .dp-stats {
     display: none;
   }
   .dp-section--cast,
   .dp-section--trailers {
-    display: none;
-  }
-  .dp-overview {
     display: none;
   }
   .dp-sec-btn:last-child {

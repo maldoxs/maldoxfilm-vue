@@ -82,8 +82,9 @@ html.mobile-mode .bottom-nav {
 }
 .bottom-nav-inner {
   display: flex;
-  justify-content: space-between;
-  padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px));
+  justify-content: space-around;
+  width: 100%;
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px));
 }
 .bottom-nav-item {
   flex: 1;

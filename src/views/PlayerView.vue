@@ -1846,6 +1846,12 @@ html.tv-mode .source-btn:focus {
   .source-selector {
     display: none !important;
   }
+  /* La X de cerrar SIEMPRE clickeable en mobile — sin esto el primer toque solo
+     reaparece los controles y hace falta un segundo toque para cerrar. */
+  .player-page.controls-hidden .player-back {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 /* ── TV mode — preserva overrides de líneas ~2270-2400 ── */
