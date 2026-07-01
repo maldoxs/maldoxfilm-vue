@@ -372,6 +372,12 @@ onBeforeUnmount(() => {
     <!-- Hero -->
     <div class="dp-hero">
       <div class="dp-hero-bg" :style="backdropUrl ? { backgroundImage: `url(${backdropUrl})` } : {}"></div>
+      <!-- Flecha Volver (solo móvil): superpuesta arriba a la izquierda del hero, patrón Netflix. -->
+      <button v-if="deviceStore.isMobile" class="dp-back-mobile" aria-label="Volver" @click="goBack">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+      </button>
       <div class="dp-hero-body">
         <div v-if="loading" class="spinner" style="margin: 0 auto"></div>
         <div v-else-if="loadError" class="dp-error">
@@ -528,6 +534,29 @@ onBeforeUnmount(() => {
   align-items: flex-end;
   overflow: hidden;
   padding-bottom: 44px;
+}
+/* Flecha Volver (solo móvil) superpuesta arriba a la izquierda del hero. */
+.dp-back-mobile {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  left: 12px;
+  z-index: 5;
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.dp-back-mobile svg {
+  width: 22px;
+  height: 22px;
 }
 .dp-hero-bg {
   position: absolute;
