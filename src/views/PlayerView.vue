@@ -646,6 +646,23 @@ function resetAnimeSelector() {
   selectedAnime1Lang.value = 'SUB';
 }
 
+/**
+ * pickDefaultAnimeServerIdx — servidor de anime por defecto según el dispositivo.
+ * En MÓVIL (WebKit de iOS) el embed HLS usa MSE y falla ("This video file cannot be played",
+ * JW Player error 102630) → se prefiere una fuente PROGRESIVA (MP4Upload) o cualquiera que NO
+ * sea HLS, que iOS reproduce nativo. En desktop/TV (Blink) HLS es la mejor (default original).
+ */
+function pickDefaultAnimeServerIdx(filtered: AnimeServerEntry[]): number {
+  if (deviceStore.isMobile) {
+    const mp4Idx = filtered.findIndex((s) => /mp4/i.test(s.label));
+    if (mp4Idx >= 0) return mp4Idx;
+    const nonHlsIdx = filtered.findIndex((s) => !/hls/i.test(s.label));
+    return nonHlsIdx >= 0 ? nonHlsIdx : 0;
+  }
+  const hlsIdx = filtered.findIndex((s) => /hls/i.test(s.label));
+  return hlsIdx >= 0 ? hlsIdx : filtered.length > 1 ? 1 : 0;
+}
+
 async function fetchAnimeServersForEpisode(season: number, episode: number) {
   const myGen = playerStore.generation;
   const currentId = playerStore.current.id;
@@ -681,13 +698,10 @@ async function fetchAnimeServersForEpisode(season: number, episode: number) {
 
     const serverList = buildAnimeServerList(streamixUrl, epRes.data);
     animeServersCache.value = serverList;
-    // UNA sola carga: HLS si existe, si no el primer servidor disponible.
+    // UNA sola carga: default según dispositivo (móvil evita HLS — ver pickDefaultAnimeServerIdx).
     setTimeout(() => {
       if (playerStore.isStale(myGen)) return;
-      const filtered = animeServerButtons.value.servers;
-      const hlsIdx = filtered.findIndex((s) => /hls/i.test(s.label));
-      if (hlsIdx >= 0) selectAnimeServer(hlsIdx);
-      else selectAnimeServer(filtered.length > 1 ? 1 : 0);
+      selectAnimeServer(pickDefaultAnimeServerIdx(animeServerButtons.value.servers));
     }, 0);
   } catch {
     loadStreamixOnly();
@@ -703,12 +717,9 @@ function selectAnimeServer(idx: number) {
 
 function switchAnime1Lang(lang: 'SUB' | 'DUB') {
   selectedAnime1Lang.value = lang;
-  // Auto-seleccionar HLS del nuevo grupo
+  // Auto-seleccionar el servidor default del nuevo grupo (móvil evita HLS).
   setTimeout(() => {
-    const filtered = animeServerButtons.value.servers;
-    const hlsIdx = filtered.findIndex((s) => /hls/i.test(s.label));
-    if (hlsIdx >= 0) selectAnimeServer(hlsIdx);
-    else if (filtered.length > 0) selectAnimeServer(0);
+    selectAnimeServer(pickDefaultAnimeServerIdx(animeServerButtons.value.servers));
   }, 0);
 }
 
