@@ -266,24 +266,26 @@ function goToDetail() {
   }
   .btn-play {
     flex: 1;
-    max-width: 160px;
+    max-width: 200px;
     justify-content: center;
     background: #fff;
     color: #000;
-    padding: 10px 16px;
-    font-size: 0.85rem;
-    border-radius: 4px;
+    padding: 14px 20px;
+    font-size: 0.98rem;
+    font-weight: 700;
+    border-radius: 5px;
   }
   .btn-info {
     flex: 1;
-    max-width: 160px;
+    max-width: 200px;
     justify-content: center;
     background: rgba(109,109,110,0.7);
     color: #fff;
     border: none;
-    padding: 10px 16px;
-    font-size: 0.85rem;
-    border-radius: 4px;
+    padding: 14px 20px;
+    font-size: 0.98rem;
+    font-weight: 700;
+    border-radius: 5px;
   }
 }
 </style>
