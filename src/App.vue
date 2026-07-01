@@ -127,5 +127,11 @@ function onToggleAppFullscreen() {
 }
 .app-main.mode-mobile {
   padding-bottom: 64px; /* deja espacio para `.bottom-nav` fija */
+  /* iOS Safari: `body { overflow-x: hidden }` NO siempre corta el scroll horizontal (el
+     desborde ocurre en `html`) → quedaba un ESPACIO VACÍO a la derecha en el catálogo. Se
+     clipea acá SOLO en móvil (no hay nav sticky que romper, a diferencia de TV). `clip` no
+     crea contexto de scroll (no afecta sticky ni el scroll interno de los carruseles). */
+  overflow-x: clip;
+  max-width: 100vw;
 }
 </style>
