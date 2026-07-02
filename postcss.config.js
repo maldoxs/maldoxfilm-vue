@@ -20,6 +20,7 @@
 import { fileURLToPath } from 'node:url';
 import postcssGlobalData from '@csstools/postcss-global-data';
 import postcssCustomProperties from 'postcss-custom-properties';
+import autoprefixer from 'autoprefixer';
 
 // Ruta absoluta al archivo con el bloque :root (robusto ante el cwd de ejecución).
 const rootVarsFile = fileURLToPath(new URL('./src/style.css', import.meta.url));
@@ -30,5 +31,8 @@ export default {
     postcssGlobalData({ files: [rootVarsFile] }),
     // 2º agrega el valor fijo antes de cada var() (conservando el var() para navegadores modernos).
     postcssCustomProperties({ preserve: true }),
+    // 3º agrega prefijos de proveedor (-webkit-, -moz-) según el browserslist (piso Chromium 38).
+    // Corre AL FINAL para prefijar también lo que generaron los plugins anteriores. Aditivo.
+    autoprefixer(),
   ],
 };

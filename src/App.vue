@@ -131,6 +131,7 @@ function onToggleAppFullscreen() {
      desborde ocurre en `html`) → quedaba un ESPACIO VACÍO a la derecha en el catálogo. Se
      clipea acá SOLO en móvil (no hay nav sticky que romper, a diferencia de TV). `clip` no
      crea contexto de scroll (no afecta sticky ni el scroll interno de los carruseles). */
+  overflow-x: hidden; /* fallback Chromium 38 / iOS viejo (sin overflow:clip) — moderno usa clip abajo */
   overflow-x: clip;
   max-width: 100vw;
 }

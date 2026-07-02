@@ -117,6 +117,9 @@ onBeforeUnmount(() => {
   padding-top: 96px;
 }
 .cat-dd-menu {
+  /* Fallback Chromium 38 (LG webOS 3): sin min() → 360px acotado por max-width:78vw = min(78vw,360px). Moderno usa la línea min() de abajo. */
+  width: 360px;
+  max-width: 78vw;
   width: min(78vw, 360px);
   max-height: 70vh;
   overflow-y: auto;

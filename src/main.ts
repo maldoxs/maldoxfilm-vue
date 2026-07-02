@@ -1,6 +1,9 @@
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
 import './style.css';
+// Fallbacks de layout SOLO para navegadores viejos (Chromium 38 / LG webOS 3). Todo va
+// dentro de @supports not(...), así que el navegador moderno lo ignora por completo.
+import './legacy-compat.css';
 import App from './App.vue';
 import router from './router';
 import { useDeviceStore } from './stores/device';

@@ -8,6 +8,13 @@
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview"
   },
+  "//browserslist": "Piso de compatibilidad (LG webOS 3 = Chromium 38, p.ej. UH8500). Lo lee autoprefixer para agregar prefijos -webkit-/-moz-. NO afecta el target del build moderno de Vite (eso es build.target) ni a plugin-legacy (que tiene sus targets explícitos en vite.config.ts).",
+  "browserslist": [
+    "chrome >= 38",
+    "safari >= 9",
+    "ios_saf >= 9",
+    "firefox >= 40"
+  ],
   "dependencies": {
     "@netlify/blobs": "^10.7.9",
     "hls.js": "^1.6.16",
@@ -21,6 +28,7 @@
     "@vitejs/plugin-legacy": "^8.1.0",
     "@vitejs/plugin-vue": "^6.0.6",
     "@vue/tsconfig": "^0.9.1",
+    "autoprefixer": "^10.5.2",
     "jsdom": "^29.1.1",
     "postcss-custom-properties": "^15.0.1",
     "terser": "^5.48.0",

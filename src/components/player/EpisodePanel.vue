@@ -140,6 +140,9 @@ function onSeasonChange(e: Event) {
   top: 0;
   right: 0;
   bottom: 0;
+  /* Fallback Chromium 38: 440px acotado por max-width:92vw = min(440px,92vw). Moderno usa min() abajo. */
+  width: 440px;
+  max-width: 92vw;
   width: min(440px, 92vw);
   z-index: 30;
   display: flex;

@@ -139,6 +139,7 @@ function goToDetail() {
 }
 .hero-title {
   font-family: 'Oswald', sans-serif;
+  font-size: 3.4rem; /* fallback Chromium 38 (sin clamp) — moderno usa clamp abajo */
   font-size: clamp(2.2rem, 5vw, 4rem);
   font-weight: 700;
   line-height: 1.05;

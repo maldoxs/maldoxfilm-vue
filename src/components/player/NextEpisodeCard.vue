@@ -61,6 +61,9 @@ const emit = defineEmits<{
   right: 18px;
   bottom: 92px;
   z-index: 28;
+  /* Fallback Chromium 38: 420px acotado por max-width:84vw = min(420px,84vw). Moderno usa min() abajo. */
+  width: 420px;
+  max-width: 84vw;
   width: min(420px, 84vw);
   background: rgba(20, 20, 20, 0.97);
   border: 1px solid var(--border, #333);
