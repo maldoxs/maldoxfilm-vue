@@ -40,6 +40,15 @@ async function bootstrap() {
 
   app.use(router);
   app.mount('#app');
+
+  // ── Service Worker (PWA) ──
+  // Registra el SW solo si está disponible. Falla sin error si el navegador no lo soporta.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker
+      .register('/service-worker.js', { scope: '/' })
+      .then(() => console.log('[PWA] Service Worker registered'))
+      .catch((err) => console.warn('[PWA] Service Worker registration failed:', err));
+  }
 }
 
 bootstrap();
