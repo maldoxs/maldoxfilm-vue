@@ -218,6 +218,9 @@ async function _shakaLoad(video: HTMLVideoElement, url: string, startTime?: numb
   // (3 intentos, timeout corto) Shaka se rendía y caía al iframe. Ahora reintenta
   // con paciencia (timeout largo, más intentos, backoff) → espera al segmento como
   // hace RD. Es el fix real del "se pega/cae al adelantar" en pelis que transcodean.
+  // TV a nivel módulo (la clase la pone stores/device.ts en el <html>). La TV vieja tiene
+  // poca RAM → NO puede sostener un buffer grande sin pegarse por memoria; tablet/desktop sí.
+  const isTvNow = document.documentElement.classList.contains('tv-mode');
   const streamingCfg: Record<string, unknown> = {
     retryParameters: {
       maxAttempts: 6,
@@ -228,8 +231,14 @@ async function _shakaLoad(video: HTMLVideoElement, url: string, startTime?: numb
       connectionTimeout: 0, // sin límite de conexión (RD long-pollea el segmento)
       stallTimeout: 0,
     },
-    bufferingGoal: 30, // buffer hacia adelante generoso (menos rebuffer)
-    rebufferingGoal: 2,
+    // COLCHÓN hacia adelante: en la CDN de RD los segmentos a veces llegan más lento que el
+    // realtime → con 30s el buffer se vaciaba y cortaba. Más colchón = sobrevive los baches de
+    // RD sin cortar. TV conservador (RAM); tablet/desktop generoso.
+    bufferingGoal: isTvNow ? 40 : 60,
+    // Al recuperarse de un corte, esperar a acumular ESTE colchón antes de reanudar. Con 2s
+    // reanudaba y se re-cortaba al instante ("se para a cada rato"). Subirlo hace los cortes
+    // MENOS FRECUENTES (uno más largo en vez de micro-cortes seguidos) → sensación más fluida.
+    rebufferingGoal: isTvNow ? 4 : 6,
     bufferBehind: isLowMemoryDevice() ? 10 : 30,
   };
   p.configure({ streaming: streamingCfg });

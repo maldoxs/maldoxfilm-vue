@@ -42,4 +42,24 @@ async function bootstrap() {
   app.mount('#app');
 }
 
+// ── LIMPIEZA: desregistrar Service Worker huérfano (experimento PWA revertido) ──
+// El experimento PWA registró un Service Worker en los dispositivos que lo visitaron. Al
+// revertir el código, el ARCHIVO se borró pero el SW YA REGISTRADO sigue activo e intercepta
+// TODAS las requests (incluidos los segmentos del pipeline /t/) hasta que se desregistra →
+// causaba stutter/jitter en tablet/TV. Esto lo elimina automáticamente en cada dispositivo
+// (no hace falta entrar a DevTools, funciona también en la TV). Ya NO usamos PWA.
+// Es idempotente: si no hay SW, no hace nada.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker
+    .getRegistrations()
+    .then((regs) => regs.forEach((reg) => reg.unregister()))
+    .catch(() => {});
+  if ('caches' in window) {
+    caches
+      .keys()
+      .then((keys) => keys.forEach((k) => caches.delete(k)))
+      .catch(() => {});
+  }
+}
+
 bootstrap();
