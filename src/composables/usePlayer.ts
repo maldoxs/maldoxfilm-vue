@@ -71,7 +71,14 @@ const AUDIO_SWITCH_WATCHDOG_MS = 90000;
 // avanzar → la peli "se pega". Esto vigila que `currentTime` avance mientras
 // está en play y, si se traba, recarga el DASH actual desde la posición.
 const STALL_CHECK_INTERVAL_MS = 2000; // cada cuánto se revisa el avance
-const STALL_RECOVER_MS = 8000; // sin avanzar (en play) este tiempo → recuperar
+const STALL_RECOVER_MS = 8000; // sin avanzar (en play) este tiempo → recuperar (transcode legacy)
+// PIPELINE /t/: Shaka ya está configurado para ESPERAR el segmento de RD hasta 60s (retry
+// paciente). Cuando RD tarda en generar un segmento (10-15s en pelis pesadas), el video se
+// congela unos segundos pero Shaka lo recupera SOLO y sin cortar. Con el umbral de 8s el
+// monitor se adelantaba y hacía una RECARGA disruptiva (destruir+recrear Shaka con spinner
+// = "Reconectando con el servidor") que además podía entrar en bucle. Umbral más paciente
+// para /t/ → deja que Shaka se recupere solo; solo recarga si de verdad quedó muerto (>20s).
+const STALL_RECOVER_TPIPE_MS = 20000; // /t/: dar tiempo al retry de Shaka antes de recargar
 const STALL_RECOVER_SEEK_MS = 4500; // tras un seek (adelantar/retroceder), recuperar más rápido
 const SEEK_RECENT_WINDOW_MS = 20000; // ventana en la que un stall cuenta como "post-seek"
 // Seek trabado SIN buffer: cuánto esperar antes de volver a posición reproducible.
@@ -218,9 +225,6 @@ async function _shakaLoad(video: HTMLVideoElement, url: string, startTime?: numb
   // (3 intentos, timeout corto) Shaka se rendía y caía al iframe. Ahora reintenta
   // con paciencia (timeout largo, más intentos, backoff) → espera al segmento como
   // hace RD. Es el fix real del "se pega/cae al adelantar" en pelis que transcodean.
-  // TV a nivel módulo (la clase la pone stores/device.ts en el <html>). La TV vieja tiene
-  // poca RAM → NO puede sostener un buffer grande sin pegarse por memoria; tablet/desktop sí.
-  const isTvNow = document.documentElement.classList.contains('tv-mode');
   const streamingCfg: Record<string, unknown> = {
     retryParameters: {
       maxAttempts: 6,
@@ -231,14 +235,8 @@ async function _shakaLoad(video: HTMLVideoElement, url: string, startTime?: numb
       connectionTimeout: 0, // sin límite de conexión (RD long-pollea el segmento)
       stallTimeout: 0,
     },
-    // COLCHÓN hacia adelante: en la CDN de RD los segmentos a veces llegan más lento que el
-    // realtime → con 30s el buffer se vaciaba y cortaba. Más colchón = sobrevive los baches de
-    // RD sin cortar. TV conservador (RAM); tablet/desktop generoso.
-    bufferingGoal: isTvNow ? 40 : 60,
-    // Al recuperarse de un corte, esperar a acumular ESTE colchón antes de reanudar. Con 2s
-    // reanudaba y se re-cortaba al instante ("se para a cada rato"). Subirlo hace los cortes
-    // MENOS FRECUENTES (uno más largo en vez de micro-cortes seguidos) → sensación más fluida.
-    rebufferingGoal: isTvNow ? 4 : 6,
+    bufferingGoal: 30, // buffer hacia adelante generoso (menos rebuffer)
+    rebufferingGoal: 2,
     bufferBehind: isLowMemoryDevice() ? 10 : 30,
   };
   p.configure({ streaming: streamingCfg });
@@ -761,7 +759,13 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // Backoff por cada recuperación previa: darle tiempo al transcoder a alcanzar el
       // tramo en vez de recargar (reiniciar) una y otra vez → menos caídas al iframe.
       const recentSeek = lastSeekAt > 0 && Date.now() - lastSeekAt < SEEK_RECENT_WINDOW_MS;
-      const base = recentSeek ? STALL_RECOVER_SEEK_MS : STALL_RECOVER_MS;
+      // En el pipeline /t/ se es MÁS paciente (Shaka espera el segmento de RD solo, sin recarga);
+      // en transcode legacy se recupera antes (ahí la sesión sí muere y hay que recargar).
+      const base = recentSeek
+        ? STALL_RECOVER_SEEK_MS
+        : isTpipeline.value
+          ? STALL_RECOVER_TPIPE_MS
+          : STALL_RECOVER_MS;
       const threshold = base + stallRecoveries * STALL_BACKOFF_MS;
       if (Date.now() - stallStuckSince >= threshold) {
         void runStallRecovery(video, myGen);
