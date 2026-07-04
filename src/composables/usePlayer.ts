@@ -75,11 +75,15 @@ const STALL_RECOVER_MS = 8000; // sin avanzar (en play) este tiempo → recupera
 const STALL_RECOVER_SEEK_MS = 4500; // tras un seek (adelantar/retroceder), recuperar más rápido
 const SEEK_RECENT_WINDOW_MS = 20000; // ventana en la que un stall cuenta como "post-seek"
 // Seek trabado SIN buffer: cuánto esperar antes de volver a posición reproducible.
-// CERCA del punto actual → RD puede extender el transcode unos segundos → más paciencia.
-// LEJOS (minutos) → RD no tiene ese tramo y no lo va a generar → desistir rápido.
+// CORREGIDO (2026-07-04): el supuesto anterior ("lejos RD no lo va a generar, desistir
+// rápido") era ERRÓNEO — confirmado con el reproductor OFICIAL de RD: el seek lejano en
+// el transcode SÍ funciona (con las mismas pausas/tironeos que ya conocemos), solo que
+// tarda. Con 5s de paciencia el seek lejano NUNCA llegaba a completarse (la red anti-
+// congelamiento lo revertía antes de que RD sirviera el segmento) → parecía "no dejar
+// adelantar". Ahora se le da la MISMA paciencia generosa que al seek cercano.
 const NEAR_SEEK_SEC = 120; // distancia (s) hasta la que un seek se considera "cercano"
 const SEEK_FREEZE_NEAR_MS = 12000; // paciencia para seek cercano (dar tiempo a RD)
-const SEEK_FREEZE_FAR_MS = 5000; // seek lejano → volver rápido (no se va a poder)
+const SEEK_FREEZE_FAR_MS = 20000; // seek lejano → misma paciencia (RD SÍ lo sirve, solo tarda más)
 // (NOTA: ya NO recargamos el manifest en el seek — RD no expone un mecanismo de seek
 // replicable desde la API pública; recargar mataba el player. El seek lo maneja Shaka nativo.)
 const STALL_BACKOFF_MS = 8000; // por cada recuperación previa, esperar este extra (dar tiempo al transcoder)
