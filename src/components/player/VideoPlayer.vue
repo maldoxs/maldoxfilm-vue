@@ -21,7 +21,7 @@
  * eso vive en `PlayerView.vue` (Fase 5), que es quien conoce `playerState`/
  * `SOURCES` y decide cuál `<VideoPlayer>` o `<iframe>` mostrar.
  */
-import { ref, computed, watch, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import SubtitleOverlay from './SubtitleOverlay.vue';
 import PlayerSettingsPanel from './PlayerSettingsPanel.vue';
 import { usePlayer, type UsePlayerReturn } from '../../composables/usePlayer';
@@ -381,6 +381,63 @@ watch(() => player.tpipelineSeeking.value, (seeking) => {
   if (ctx) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 });
 
+// ── CAPA 1 — Enmascarar los cortes de reproducción del pipeline /t/ ──────────
+// El /t/ genera los segmentos en vivo (buffer ~0): cuando RD tarda, el video se traba
+// y se ve un corte brusco. En vez de eso, congelamos el ÚLTIMO CUADRO + spinner (igual
+// que en el seek) para que el corte se vea como una pausa limpia, no un parpadeo.
+// SOLO en /t/ (Direct Play NO se traba: bufferea ~130s). Debounce de 400ms para NO
+// enmascarar microcortes (<400ms) — ahí el <video> ya deja el cuadro quieto solo.
+const bufferingStall = ref(false);
+let stallShowTimer: ReturnType<typeof setTimeout> | null = null;
+
+function captureFreezeFrame() {
+  const video = videoRef.value;
+  const canvas = freezeCanvasRef.value;
+  if (!video || !canvas || video.readyState < 2) return;
+  canvas.width = video.videoWidth || 1280;
+  canvas.height = video.videoHeight || 720;
+  const ctx = canvas.getContext('2d');
+  if (ctx) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+}
+
+function onVideoWaiting() {
+  if (!player.isTpipeline.value) return; // solo /t/ (Direct Play no se traba)
+  if (player.tpipelineSeeking.value) return; // el seek ya tiene su propio freeze
+  if (stallShowTimer) clearTimeout(stallShowTimer);
+  stallShowTimer = setTimeout(() => {
+    const v = videoRef.value;
+    if (!v || v.paused || v.ended || v.seeking) return; // pausa/fin/seek: no enmascarar
+    captureFreezeFrame();
+    bufferingStall.value = true;
+  }, 400);
+}
+
+function onVideoResume() {
+  if (stallShowTimer) {
+    clearTimeout(stallShowTimer);
+    stallShowTimer = null;
+  }
+  bufferingStall.value = false;
+}
+
+onMounted(() => {
+  const v = videoRef.value;
+  if (!v) return;
+  v.addEventListener('waiting', onVideoWaiting);
+  v.addEventListener('playing', onVideoResume);
+  v.addEventListener('seeked', onVideoResume);
+});
+
+onBeforeUnmount(() => {
+  if (stallShowTimer) clearTimeout(stallShowTimer);
+  const v = videoRef.value;
+  if (v) {
+    v.removeEventListener('waiting', onVideoWaiting);
+    v.removeEventListener('playing', onVideoResume);
+    v.removeEventListener('seeked', onVideoResume);
+  }
+});
+
 // ── Subtítulos en fullscreen nativo (SOLO móvil) ─────────────────────────────
 // El fullscreen nativo de iOS (`webkitEnterFullscreen`) muestra únicamente el
 // <video> y sus TextTracks NATIVOS — el overlay DOM <SubtitleOverlay> NO es
@@ -469,9 +526,9 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="player-frame-wrap" @mousemove="resetControlsAutoHide">
-      <!-- Freeze-frame + loader durante seek del pipeline /t/ -->
-      <canvas v-show="player.tpipelineSeeking.value" ref="freezeCanvasRef" class="tpipeline-freeze"></canvas>
-      <div v-if="player.tpipelineSeeking.value" class="tpipeline-loader"></div>
+      <!-- Freeze-frame + loader durante seek Y durante los cortes de reproducción del /t/ (Capa 1) -->
+      <canvas v-show="player.tpipelineSeeking.value || bufferingStall" ref="freezeCanvasRef" class="tpipeline-freeze"></canvas>
+      <div v-if="player.tpipelineSeeking.value || bufferingStall" class="tpipeline-loader"></div>
 
       <video ref="videoRef" class="video-el" playsinline @click="onVideoClick"></video>
 
