@@ -1334,7 +1334,9 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // Mensaje HONESTO al usuario (a pedido, 2026-07-04): este título NO tiene versión
       // H264+AAC cacheada → reproducción normal fluida, pero saltar LEJOS puede tardar o
       // devolverte a la posición anterior (red anti-congelamiento ya existente, línea ~716).
-      opts.onToast('▶ Reproducción normal fluida · seek lejano limitado');
+      // Simétrico con "✅ Seek fluido" (Direct Play): "⚠️ Seek limitado" (triángulo de
+      // precaución) cuando el título NO cumple H264+AAC.
+      opts.onToast('⚠️ Seek limitado');
     }
 
     // ── Transcode vía RD API + probe de audio español (líneas ~7915-7964) ──
