@@ -502,6 +502,9 @@ onBeforeUnmount(() => {
             @mousedown="nfControls.onSeekBarMouseDown"
             @mousemove="nfControls.onSeekBarMouseMove"
           >
+            <!-- Buffer descargado (estilo RD oficial): muestra hasta dónde un seek sería
+                 instantáneo. Detrás del fill de progreso, delante del fondo de la barra. -->
+            <div class="nf-seek-buffered" :style="{ width: nfControls.bufferedPct.value + '%' }"></div>
             <div class="nf-seek-fill" :style="{ width: nfControls.progressPct.value + '%' }"></div>
             <div class="nf-seek-dot" :style="{ left: nfControls.progressPct.value + '%' }"></div>
             <div class="nf-seek-tooltip" :style="{ left: nfControls.tooltipPct.value + '%' }">{{ nfControls.tooltipLabel.value }}</div>
@@ -735,7 +738,20 @@ onBeforeUnmount(() => {
 .nf-seek-bar:hover {
   height: 5px;
 }
+.nf-seek-buffered {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 2px;
+  pointer-events: none;
+  transition: width 0.2s ease;
+}
 .nf-seek-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
   height: 100%;
   background: var(--accent, #3d5afe);
   border-radius: 2px;

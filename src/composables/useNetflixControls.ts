@@ -63,6 +63,14 @@ export interface UseNetflixControlsReturn {
   speed: Ref<number>;
   /** Porcentaje (0-100) de progreso — congelado durante seek manual. */
   progressPct: Ref<number>;
+  /**
+   * Porcentaje (0-100) hasta dónde hay buffer descargado/generado (equivalente a la
+   * barra gris del reproductor oficial de RD). Deja ver de antemano hasta dónde un
+   * seek sería instantáneo. Solo tiene sentido para Direct Play/transcode legacy
+   * (`video.buffered` nativo); en el pipeline /t/ queda en 0 (cada seek recarga el
+   * manifest en la posición pedida, no aplica "buffer previo").
+   */
+  bufferedPct: Ref<number>;
   /** "0:00" / "1:23:45" — tiempo transcurrido. */
   elapsedLabel: Ref<string>;
   /** "-12:34" estilo Netflix — tiempo restante (formateado, sin signo: el original tampoco lo agrega). */
@@ -105,6 +113,7 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
   const volume = ref(1);
   const speed = ref(1);
   const progressPct = ref(0);
+  const bufferedPct = ref(0);
   const elapsedLabel = ref('0:00');
   const remainingLabel = ref('0:00');
   const tooltipLabel = ref('');
@@ -140,6 +149,32 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     if (!seeking) progressPct.value = pct;
     elapsedLabel.value = formatNfTime(t);
     remainingLabel.value = formatNfTime((dur || 0) - t);
+    updateBuffered(v, dur);
+  }
+
+  /**
+   * updateBuffered — lee `video.buffered` (nativo del <video>, sin red extra) y calcula
+   * hasta dónde llega el tramo de buffer que CONTIENE la posición actual (no el total
+   * acumulado de tramos sueltos — si hubo un seek lejano puede haber un tramo viejo atrás
+   * que no sirve). Con `timeOverride` activo (pipeline /t/) no aplica: cada segmento se
+   * pide bajo demanda con offset propio, `video.buffered` no representa la duración real.
+   */
+  function updateBuffered(v: HTMLVideoElement, dur: number) {
+    if (!dur || opts.timeOverride?.() != null) {
+      bufferedPct.value = 0;
+      return;
+    }
+    try {
+      const buf = v.buffered;
+      const ct = v.currentTime;
+      let end = ct;
+      for (let i = 0; i < buf.length; i++) {
+        if (buf.start(i) <= ct + 0.5 && buf.end(i) >= end) end = buf.end(i);
+      }
+      bufferedPct.value = Math.min(100, (end / dur) * 100);
+    } catch {
+      bufferedPct.value = 0;
+    }
   }
 
   const onPlay = () => {
@@ -290,6 +325,7 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     v.addEventListener('play', onPlay);
     v.addEventListener('pause', onPause);
     v.addEventListener('timeupdate', onTick);
+    v.addEventListener('progress', onTick); // buffer avanza aunque el video esté pausado
     volume.value = v.volume || 1;
     isPlaying.value = !v.paused;
     syncVolumeState();
@@ -307,6 +343,7 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     v.removeEventListener('play', onPlay);
     v.removeEventListener('pause', onPause);
     v.removeEventListener('timeupdate', onTick);
+    v.removeEventListener('progress', onTick);
   }
 
   onBeforeUnmount(() => {
@@ -321,6 +358,7 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     volume,
     speed,
     progressPct,
+    bufferedPct,
     elapsedLabel,
     remainingLabel,
     tooltipLabel,
