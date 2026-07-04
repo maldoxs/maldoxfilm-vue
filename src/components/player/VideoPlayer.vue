@@ -358,8 +358,22 @@ function onVideoClick() {
   nfControls.togglePlay();
 }
 
+/**
+ * loadRdSource (expuesto) — envuelve `player.loadRdSource` para reactivar el overlay de
+ * carga (spinner) ANTES de cargar. `<VideoPlayer>` queda SIEMPRE montado entre episodios
+ * (v-show, para no perder estado — ver cabecera del archivo), así que `isLoading` queda en
+ * `false` (de cuando el episodio anterior ya había arrancado) y NO se resetea solo. Sin este
+ * wrapper, al cambiar de episodio la pantalla queda en negro SIN loader hasta que el nuevo
+ * stream arranca (`onStarted` recién ahí pone isLoading=false). `onStarted` ya se encarga de
+ * apagarlo cuando el nuevo stream esté listo.
+ */
+function loadRdSourceWithLoading(params: Parameters<typeof player.loadRdSource>[0]) {
+  isLoading.value = true;
+  return player.loadRdSource(params);
+}
+
 defineExpose({
-  loadRdSource: player.loadRdSource,
+  loadRdSource: loadRdSourceWithLoading,
   switchAudioTrack: player.switchAudioTrack,
   videoRef,
   fullscreen,
