@@ -71,14 +71,7 @@ const AUDIO_SWITCH_WATCHDOG_MS = 90000;
 // avanzar → la peli "se pega". Esto vigila que `currentTime` avance mientras
 // está en play y, si se traba, recarga el DASH actual desde la posición.
 const STALL_CHECK_INTERVAL_MS = 2000; // cada cuánto se revisa el avance
-const STALL_RECOVER_MS = 8000; // sin avanzar (en play) este tiempo → recuperar (transcode legacy)
-// PIPELINE /t/: Shaka ya está configurado para ESPERAR el segmento de RD hasta 60s (retry
-// paciente). Cuando RD tarda en generar un segmento (10-15s en pelis pesadas), el video se
-// congela unos segundos pero Shaka lo recupera SOLO y sin cortar. Con el umbral de 8s el
-// monitor se adelantaba y hacía una RECARGA disruptiva (destruir+recrear Shaka con spinner
-// = "Reconectando con el servidor") que además podía entrar en bucle. Umbral más paciente
-// para /t/ → deja que Shaka se recupere solo; solo recarga si de verdad quedó muerto (>20s).
-const STALL_RECOVER_TPIPE_MS = 20000; // /t/: dar tiempo al retry de Shaka antes de recargar
+const STALL_RECOVER_MS = 8000; // sin avanzar (en play) este tiempo → recuperar
 const STALL_RECOVER_SEEK_MS = 4500; // tras un seek (adelantar/retroceder), recuperar más rápido
 const SEEK_RECENT_WINDOW_MS = 20000; // ventana en la que un stall cuenta como "post-seek"
 // Seek trabado SIN buffer: cuánto esperar antes de volver a posición reproducible.
@@ -759,13 +752,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // Backoff por cada recuperación previa: darle tiempo al transcoder a alcanzar el
       // tramo en vez de recargar (reiniciar) una y otra vez → menos caídas al iframe.
       const recentSeek = lastSeekAt > 0 && Date.now() - lastSeekAt < SEEK_RECENT_WINDOW_MS;
-      // En el pipeline /t/ se es MÁS paciente (Shaka espera el segmento de RD solo, sin recarga);
-      // en transcode legacy se recupera antes (ahí la sesión sí muere y hay que recargar).
-      const base = recentSeek
-        ? STALL_RECOVER_SEEK_MS
-        : isTpipeline.value
-          ? STALL_RECOVER_TPIPE_MS
-          : STALL_RECOVER_MS;
+      const base = recentSeek ? STALL_RECOVER_SEEK_MS : STALL_RECOVER_MS;
       const threshold = base + stallRecoveries * STALL_BACKOFF_MS;
       if (Date.now() - stallStuckSince >= threshold) {
         void runStallRecovery(video, myGen);
