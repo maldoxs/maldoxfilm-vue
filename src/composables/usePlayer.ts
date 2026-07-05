@@ -1312,17 +1312,18 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // continúa al transcode
     }
 
-    // ── Pipeline /t/ — SOLO para archivos que YA califican Direct Play (H264+AAC) ──
-    // EXPERIMENTO (a pedido del usuario, 2026-07-04): para archivos que NO son H264+AAC
-    // (van por /t/ y RD los genera EN VIVO → cortes intermitentes en reproducción normal),
-    // se prueba VOLVER al transcode legacy — que antes de /t/ reproducía FLUIDO, con el
-    // costo conocido de que adelantar/retroceder LEJOS podía colgarse. /t/ resolvía ESE
-    // seek lejano a cambio de introducir los cortes. Para el uso real (ver seguido, poco
-    // seek lejano) el transcode legacy puede sentirse mejor. H264+AAC (Direct Play) NO se
-    // toca — ya vuela por el camino de arriba, ni pasa por acá.
-    // Rollback: git reset --hard pre-legacy-para-no-directplay && git push origin main --force
-    const qualifiesForTpipeline = !streamIsX265 && selected.hasAAC;
-    if (rdId && qualifiesForTpipeline) {
+    // ── Pipeline /t/ — upgrade transparente (far-seek + AAC para cualquier archivo) ──
+    // Se intenta SIEMPRE que haya rdId. Si falla, cae al transcode legacy sin corte.
+    //
+    // REVERTIDO (2026-07-04) el experimento "/t/ solo para H264+AAC, resto a legacy":
+    // el legacy tenía el MISMO problema de fondo (confirmado con el reproductor OFICIAL
+    // de real-debrid.com con el mismo archivo: también se corta) — el cuello de botella
+    // es la velocidad de generación de RD para estos archivos puntuales, no el camino que
+    // elegimos nosotros. /t/ SÍ resuelve el seek lejano (el legacy podía colgarse ahí), así
+    // que se vuelve a /t/ para todos. Se conservan las mejoras que sí valen la pena:
+    // la barra de buffer (gris) en la seek bar y la paciencia del seek nativo (usadas por
+    // Direct Play).
+    if (rdId) {
       isTpipeline.value = false;
       tpipelineState = null;
       const tpipelineOk = await tryTpipeline({ video, rdId, myGen, selected, streamFn, startPositionSec: params.startPositionSec });
@@ -1333,14 +1334,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       if (playerStore.isStale(myGen)) return;
       // /t/ falló → seguir al transcode legacy (transparente)
       console.warn('[/t/] Fallback → transcode DASH legacy');
-    } else if (rdId) {
-      console.warn('[/t/] EXPERIMENTO: stream no-DirectPlay (AAC:', selected.hasAAC, '| x265:', streamIsX265, ') → se salta /t/, va directo a transcode legacy');
-      // Mensaje HONESTO al usuario (a pedido, 2026-07-04): este título NO tiene versión
-      // H264+AAC cacheada → reproducción normal fluida, pero saltar LEJOS puede tardar o
-      // devolverte a la posición anterior (red anti-congelamiento ya existente, línea ~716).
-      // Simétrico con "✅ Seek fluido" (Direct Play): "⚠️ Seek limitado" (triángulo de
-      // precaución) cuando el título NO cumple H264+AAC.
-      opts.onToast('⚠️ Seek limitado');
     }
 
     // ── Transcode vía RD API + probe de audio español (líneas ~7915-7964) ──
