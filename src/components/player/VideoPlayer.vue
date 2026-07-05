@@ -80,6 +80,9 @@ const playerPageRef = ref<HTMLElement | null>(null);
 const seekBarRef = ref<HTMLElement | null>(null);
 const fullscreenIconRef = ref<HTMLElement | null>(null);
 const freezeCanvasRef = ref<HTMLCanvasElement | null>(null);
+// TEMPORAL (diagnóstico TV, 2026-07-05) — badge en pantalla con el paso del pipeline /t/.
+// Sacar junto con el resto del diagnóstico una vez resuelto. Ver tag `pre-diag-badge-tv`.
+const diagMsg = ref('');
 
 // ── Subtítulos ──────────────────────────────────────────────────────────────
 let _playerRef: UsePlayerReturn | null = null;
@@ -134,6 +137,10 @@ const player: UsePlayerReturn = usePlayer({
     emit('started');
   },
   onToast: (msg) => showToast(msg),
+  // TEMPORAL (diagnóstico TV, 2026-07-05) — ver tag `pre-diag-badge-tv` para sacarlo.
+  onDiag: (msg) => {
+    diagMsg.value = msg;
+  },
   onNativeSpanishDetected: () => {
     subtitles.enabled.value = false;
     subtitles.status.value = '🔊 Audio en Español';
@@ -482,6 +489,9 @@ onBeforeUnmount(() => {
       <p class="player-loading-hint">El servidor obtiene el contenido en tiempo real.<br />Puede tardar hasta 15 segundos.</p>
     </div>
 
+    <!-- TEMPORAL (diagnóstico TV) — badge chico, no tapa "Seek fluido". Sacar cuando se resuelva. -->
+    <div v-if="diagMsg" class="tdiag-badge">{{ diagMsg }}</div>
+
     <div class="player-frame-wrap" @mousemove="resetControlsAutoHide">
       <!-- Freeze-frame + loader durante seek del pipeline /t/ -->
       <canvas v-show="player.tpipelineSeeking.value" ref="freezeCanvasRef" class="tpipeline-freeze"></canvas>
@@ -643,6 +653,22 @@ onBeforeUnmount(() => {
   height: 100%;
   object-fit: contain;
   background: #000;
+}
+/* TEMPORAL (diagnóstico TV) — chico, esquina, NO tapa "Seek fluido" ni el resto de la UI. */
+.tdiag-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 99999;
+  background: rgba(0, 128, 0, 0.85);
+  color: #fff;
+  font-size: 12px;
+  font-family: monospace;
+  padding: 4px 8px;
+  border-radius: 4px;
+  pointer-events: none;
+  max-width: 90vw;
+  word-break: break-word;
 }
 .player-loading {
   position: absolute;

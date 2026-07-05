@@ -99,7 +99,7 @@ const MAX_STALL_RECOVERIES = 4; // recuperaciones sin éxito → cambiar de fuen
 // se inyecta a la vez, los llamadores concurrentes esperan al mismo callback.
 let _hlsLoading = false;
 function loadHlsIfNeeded(): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const w = window as unknown as { Hls?: unknown };
     if (w.Hls) return resolve();
     if (_hlsLoading) {
@@ -125,14 +125,30 @@ function loadHlsIfNeeded(): Promise<void> {
     // a byte. No cambia ningún comportamiento funcional.
     s.integrity = 'sha512-livj3YhgdqpYdRFIbB6vkXJYGrCURfkc19oK1WZWW2RfIaxFYfsWEiu1VysTT4VuodWvYL2Irbb5kv67I1g6Qg==';
     s.crossOrigin = 'anonymous';
-    s.onload = () => resolve();
+    // Mismo fix que loadShakaIfNeeded (2026-07-05): timeout + onerror para no colgar la
+    // Promise para siempre si el CDN no responde.
+    const timeout = setTimeout(() => {
+      _hlsLoading = false;
+      reject(new Error('HLS.js CDN timeout (15s)'));
+    }, SCRIPT_LOAD_TIMEOUT_MS);
+    s.onload = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+    s.onerror = () => {
+      clearTimeout(timeout);
+      _hlsLoading = false;
+      reject(new Error('HLS.js CDN script error'));
+    };
     document.head.appendChild(s);
   });
 }
 
+const SCRIPT_LOAD_TIMEOUT_MS = 15000; // si el CDN no responde en 15s, desistir (antes colgaba para siempre)
+
 let _shakaLoading = false;
 function loadShakaIfNeeded(): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const w = window as unknown as { shaka?: { polyfill: { installAll(): void } } };
     if (w.shaka) return resolve();
     if (_shakaLoading) {
@@ -152,9 +168,24 @@ function loadShakaIfNeeded(): Promise<void> {
     // verificado contra https://api.cdnjs.com.
     s.integrity = 'sha512-085ivZ5s6z+Qk9InxYMJoXF6JuMRfnTJGpeOph6TKmgsnkqxMhcauQIWINE6FnBt/KJBvcx7JjRAXc+ZvNJuyQ==';
     s.crossOrigin = 'anonymous';
+    // BUG encontrado (2026-07-05): sin `onerror` ni timeout, si el CDN no responde
+    // (red lenta/distinta en TV vs desktop) la Promise NUNCA se resolvía → el flujo
+    // quedaba colgado para siempre en "Conectando con el servidor". Ahora rechaza tras
+    // 15s o si el <script> falla, y el llamador (ya envuelto en try/catch) cae al
+    // camino de respaldo en vez de trabarse.
+    const timeout = setTimeout(() => {
+      _shakaLoading = false;
+      reject(new Error('Shaka CDN timeout (15s)'));
+    }, SCRIPT_LOAD_TIMEOUT_MS);
     s.onload = () => {
+      clearTimeout(timeout);
       w.shaka!.polyfill.installAll();
       resolve();
+    };
+    s.onerror = () => {
+      clearTimeout(timeout);
+      _shakaLoading = false;
+      reject(new Error('Shaka CDN script error'));
     };
     document.head.appendChild(s);
   });
@@ -271,6 +302,12 @@ export interface UsePlayerOptions {
   onStarted: () => void;
   /** Callback: mostrar un toast (equiv. `showToast`). */
   onToast: (msg: string) => void;
+  /**
+   * TEMPORAL (diagnóstico TV, 2026-07-05) — badge en pantalla con el paso exacto del
+   * pipeline /t/. Sin consola en TV, es la única forma de ver dónde se traba "conectando
+   * con el servidor". Sacar una vez encontrada la causa. Ver tag `pre-diag-badge-tv`.
+   */
+  onDiag?: (msg: string) => void;
   /** Callback: el stream tiene audio nativo en español detectado en DASH (subs OFF por defecto). */
   onNativeSpanishDetected?: () => void;
   /** Callback: stream listo — para inicializar buscador de subtítulos / selector de audio. */
@@ -803,8 +840,13 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     };
     video.addEventListener('timeupdate', clearWatchdogIfStarted);
 
-    await loadShakaIfNeeded();
     try {
+      // Movido DENTRO del try (2026-07-05): loadShakaIfNeeded ahora puede rechazar (timeout
+      // 15s si el CDN no responde) — antes de este fix, si el script fallaba, la promesa
+      // NUNCA se resolvía y el reproductor quedaba colgado para siempre en "Conectando con
+      // el servidor" (bug real encontrado en TV). Ahora el rechazo cae en el catch de abajo,
+      // que ya sabe mostrar el toast y cambiar de reproductor.
+      await loadShakaIfNeeded();
       await _shakaLoad(video, url);
       if (hasNativeSpanish) opts.onNativeSpanishDetected?.();
       spanishTrack.value = spanishTrackName;
@@ -856,7 +898,18 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       w.hlsInstance = null;
     }
 
-    await loadHlsIfNeeded();
+    try {
+      await loadHlsIfNeeded();
+    } catch (e) {
+      // loadHlsIfNeeded ahora puede rechazar (timeout 15s si el CDN no responde). Manejo
+      // LOCAL (esta función no tenía try/catch propio) — mismo patrón que el "no soportado"
+      // de abajo: avisar y cambiar de reproductor en vez de dejar la excepción sin capturar.
+      console.warn('[RD] HLS.js no cargó:', e);
+      if (playerStore.isStale(myGen)) return;
+      opts.onToast('⚡ RD: HLS no disponible — cambiando de reproductor');
+      opts.onFallbackToNextSource();
+      return;
+    }
     const HlsCtor = (window as unknown as { Hls?: { new (cfg: unknown): HlsInstanceLike; isSupported(): boolean; Events: Record<string, string>; ErrorTypes: Record<string, string> } }).Hls;
 
     if (HlsCtor && HlsCtor.isSupported()) {
@@ -1093,11 +1146,14 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     const startT =
       params.startPositionSec && params.startPositionSec > 30 ? Math.floor(params.startPositionSec) : 1;
 
+    opts.onDiag?.('1 resolve...');
     let resolved: TpipelineResolveResult;
     try {
       loadingMessage.value = '🔍 Preparando streaming avanzado...';
       resolved = await resolveTpipeline(rdId);
+      opts.onDiag?.(`2 resolve OK cdn=${resolved.cdn}`);
     } catch (e) {
+      opts.onDiag?.(`X resolve FALLÓ: ${String(e).slice(0, 80)}`);
       console.warn('[/t/] resolve falló → fallback a transcode legacy:', e);
       return false;
     }
@@ -1118,23 +1174,31 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
 
     try {
       loadingMessage.value = '📡 Conectando con el servidor...';
+      opts.onDiag?.('3 loadShaka...');
       await loadShakaIfNeeded();
+      opts.onDiag?.('4 loadShaka OK');
 
       const mpdUrl = buildMpdUrl(resolved.fullPathId, resolved.cdn, audio, startT);
 
+      opts.onDiag?.('5 pingSeek...');
       await pingSeek(resolved.mediaId, startT);
+      opts.onDiag?.('6 pingSeek OK, waitSeg...');
       const segReady = await waitForSegmentAt(resolved.cdn, resolved.fullPathId, audio, startT, 8000);
+      opts.onDiag?.(`7 waitSeg=${segReady}`);
       if (!segReady) console.warn('[/t/] Primer segmento timeout — intentando igual');
 
       if (playerStore.isStale(myGen)) return true;
 
+      opts.onDiag?.('8 shakaLoad...');
       await _shakaLoad(video, mpdUrl);
+      opts.onDiag?.('9 shakaLoad OK');
       currentDashUrl = mpdUrl;
 
       dashBaseUrl.value = `https://${resolved.cdn}/t/${resolved.fullPathId}/`;
 
       video.muted = false;
       await video.play().catch(() => {});
+      opts.onDiag?.('10 play() listo');
 
       const hasNativeSpanish = isSpanish;
       if (hasNativeSpanish) opts.onNativeSpanishDetected?.();
@@ -1153,6 +1217,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       opts.onToast(isLat ? '✅ Seek fluido · Audio Latino' : '✅ Seek fluido');
       return true;
     } catch (e) {
+      opts.onDiag?.(`X carga FALLÓ: ${String(e).slice(0, 100)}`);
       console.warn('[/t/] carga falló → fallback a transcode legacy:', e);
       isTpipeline.value = false;
       tpipelineState = null;
