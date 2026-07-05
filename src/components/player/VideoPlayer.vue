@@ -358,8 +358,21 @@ function onVideoClick() {
   nfControls.togglePlay();
 }
 
+/**
+ * loadRdSourceWrapped — al empezar a cargar un título nuevo: (1) resetea la barra de
+ * progreso a 0 (el <video> se reusa entre títulos → sin esto muestra el % viejo de la peli
+ * anterior, ~100% si estaba cerca del final, hasta que la nueva carga), y (2) muestra el
+ * overlay de carga (spinner) — antes quedaba pantalla negra sin aviso al cambiar de título.
+ * `onStarted` (ya existente) apaga isLoading cuando el nuevo stream arranca de verdad.
+ */
+function loadRdSourceWrapped(params: Parameters<typeof player.loadRdSource>[0]) {
+  nfControls.resetProgress();
+  isLoading.value = true;
+  return player.loadRdSource(params);
+}
+
 defineExpose({
-  loadRdSource: player.loadRdSource,
+  loadRdSource: loadRdSourceWrapped,
   switchAudioTrack: player.switchAudioTrack,
   videoRef,
   fullscreen,

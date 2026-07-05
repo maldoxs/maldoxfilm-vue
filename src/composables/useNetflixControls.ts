@@ -87,6 +87,12 @@ export interface UseNetflixControlsReturn {
   /** Wire/unwire de los listeners del <video> — llamar cuando la fuente cambia (equiv. `_nfSetupControls`/`_nfClearProgress`). */
   attach(): void;
   detach(): void;
+  /**
+   * resetProgress — pone la barra/labels en 0. Se llama al EMPEZAR a cargar un título nuevo:
+   * como el <video> se reusa entre títulos, sin esto la barra mostraría el % viejo (la peli
+   * anterior cerca del final = ~100%) hasta que la nueva cargue.
+   */
+  resetProgress(): void;
 }
 
 /** _nfFmt — formato "m:ss" / "h:mm:ss". Preservado EXACTO de la línea ~4119-4124. */
@@ -316,6 +322,13 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     v.removeEventListener('volumechange', onVolumeChange);
   }
 
+  function resetProgress() {
+    seeking = false;
+    progressPct.value = 0;
+    elapsedLabel.value = '0:00';
+    remainingLabel.value = '0:00';
+  }
+
   onBeforeUnmount(() => {
     detach();
     if (dragMoveHandler) document.removeEventListener('mousemove', dragMoveHandler);
@@ -340,6 +353,7 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     onSeekBarClick,
     onSeekBarMouseDown,
     onSeekBarMouseMove,
+    resetProgress,
     attach,
     detach,
   };
