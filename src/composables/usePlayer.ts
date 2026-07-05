@@ -1037,7 +1037,15 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       const ready = await waitForSegmentAt(resolved.cdn, resolved.fullPathId, audio, t);
       console.warn(`[/t/] Segmento ${ready ? 'listo' : 'timeout'} en t=${t}s`);
 
-      if (playerStore.isStale(myGen)) return;
+      // BUG CORREGIDO (2026-07-05): este `return` cortaba ANTES de restaurar el audio
+      // (el `video.muted = false` de más abajo nunca corría) → el audio quedaba mudo,
+      // y como el <video> es el MISMO elemento reusado entre títulos, ese silencio se
+      // arrastraba a la SIGUIENTE película (aunque fuera Direct Play). Ahora se restaura
+      // el audio ANTES de salir, sea cual sea el motivo de salida.
+      if (playerStore.isStale(myGen)) {
+        video.muted = false;
+        return;
+      }
 
       const mpdUrl = buildMpdUrl(resolved.fullPathId, resolved.cdn, audio, t);
       await _shakaLoad(video, mpdUrl);
@@ -1185,6 +1193,12 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     tpipelineState = null;
     tpipelineOffset.value = 0;
     tpipelineSeeking.value = false;
+    // PROTECCIÓN (2026-07-05): el <video> es el MISMO elemento DOM reusado entre títulos
+    // (nunca se recrea). Si algún camino de seek/carga anterior silenció el audio y no
+    // llegó a restaurarlo (bug real encontrado: un `return` temprano en tpipelineReloadMpd
+    // salteaba el `muted = false`), ese silencio se arrastraba a la SIGUIENTE película. Se
+    // fuerza audio SIN silenciar al empezar cada título nuevo, sin importar el motivo.
+    video.muted = false;
     const myGen = playerStore.generation; // capturado ANTES del fetch — equiv. `const myGen = ++_playerGen`
     isLoadingRd.value = true;
     loadingMessage.value = '🔍 Buscando en Real-Debrid...';
