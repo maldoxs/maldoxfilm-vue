@@ -149,6 +149,11 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     isPlaying.value = false;
   };
   const onTick = () => tick();
+  // El pipeline /t/ silencia/restaura `video.muted` internamente (durante seek/carga) sin
+  // pasar por toggleMute/setVolume → el ícono de volumen quedaba mostrando "mute" aunque el
+  // audio sonara. Escuchar 'volumechange' del <video> mantiene el ícono sincronizado con el
+  // estado REAL del audio, venga el cambio de donde venga.
+  const onVolumeChange = () => syncVolumeState();
 
   // ── setSpeed — preserva `spSetSpeed` (línea ~4429-4441): aplica
   // `video.playbackRate = speed` y guarda `_playerSpeed`. El toast "⏩ Nx"
@@ -290,6 +295,7 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     v.addEventListener('play', onPlay);
     v.addEventListener('pause', onPause);
     v.addEventListener('timeupdate', onTick);
+    v.addEventListener('volumechange', onVolumeChange);
     volume.value = v.volume || 1;
     isPlaying.value = !v.paused;
     syncVolumeState();
@@ -307,6 +313,7 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     v.removeEventListener('play', onPlay);
     v.removeEventListener('pause', onPause);
     v.removeEventListener('timeupdate', onTick);
+    v.removeEventListener('volumechange', onVolumeChange);
   }
 
   onBeforeUnmount(() => {
