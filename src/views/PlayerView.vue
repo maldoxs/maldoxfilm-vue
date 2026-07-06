@@ -1060,6 +1060,19 @@ async function init() {
   const type = props.type;
 
   document.body.style.overflow = 'hidden';
+  // FIX (2026-07-06, a pedido): reafirmar fullscreen al ENTRAR al reproductor, no solo al
+  // salir (ver closePlayer más abajo, mismo truco ya existente). Antes se "perdía" en la
+  // transición Home→Player, notándose como que la pantalla se achica. Se llama LO MÁS
+  // TEMPRANO Y SÍNCRONO posible (antes de cualquier `await` de este init) — el gesto del
+  // usuario que disparó la navegación (click en "Reproducir") sigue vigente acá, pero se
+  // pierde si se pide después de cruzar un `await`.
+  if (deviceStore.isTV) {
+    try {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } catch {
+      /* silenciar */
+    }
+  }
   controlsHidden.value = false;
   armControlsHide(); // auto-oculta el topbar tras 3.5s (desktop y táctil)
 

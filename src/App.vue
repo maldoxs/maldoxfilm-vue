@@ -12,7 +12,7 @@
  * shell solo decide CUÁL montar según `deviceStore.mode`, evitando montar
  * (y suscribir listeners de) navs que no se van a usar.
  */
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import NavDesktop from './components/layout/NavDesktop.vue';
 import NavMobile from './components/layout/NavMobile.vue';
@@ -99,6 +99,25 @@ function onToggleAppFullscreen() {
   if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
   else document.documentElement.requestFullscreen?.().catch(() => {});
 }
+
+// FIX (2026-07-06, a pedido): que el fullscreen se sienta "por defecto" en TV, sin que el
+// usuario tenga que buscar el botón del NavTV. El navegador NO permite pedir fullscreen sin
+// un gesto real del usuario (rechaza silenciosamente cualquier intento al cargar la app sin
+// interacción) — así que no se puede activar literalmente "al cargar". Se engancha al
+// PRIMER click/tecla en cualquier parte de la app (ya es un gesto válido), pide fullscreen
+// una sola vez, y se desengancha — el usuario lo siente como si viniera activado de entrada.
+onMounted(() => {
+  if (!deviceStore.isTV) return;
+  const requestOnce = () => {
+    document.removeEventListener('click', requestOnce);
+    document.removeEventListener('keydown', requestOnce);
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    }
+  };
+  document.addEventListener('click', requestOnce);
+  document.addEventListener('keydown', requestOnce);
+});
 </script>
 
 <template>
