@@ -93,9 +93,11 @@ const MAX_STALL_RECOVERIES = 4; // recuperaciones sin éxito → cambiar de fuen
 // ── Carga dinámica de hls.js / Shaka Player (líneas ~3884-3937) ─────────────
 // Se preserva el patrón "singleton + polling" del original: solo un <script>
 // se inyecta a la vez, los llamadores concurrentes esperan al mismo callback.
+const SCRIPT_LOAD_TIMEOUT_MS = 15000; // si el CDN no responde en 15s, desistir (antes colgaba para siempre)
+
 let _hlsLoading = false;
 function loadHlsIfNeeded(): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const w = window as unknown as { Hls?: unknown };
     if (w.Hls) return resolve();
     if (_hlsLoading) {
@@ -121,14 +123,30 @@ function loadHlsIfNeeded(): Promise<void> {
     // a byte. No cambia ningún comportamiento funcional.
     s.integrity = 'sha512-livj3YhgdqpYdRFIbB6vkXJYGrCURfkc19oK1WZWW2RfIaxFYfsWEiu1VysTT4VuodWvYL2Irbb5kv67I1g6Qg==';
     s.crossOrigin = 'anonymous';
-    s.onload = () => resolve();
+    // BUG encontrado (2026-07-05): sin 'onerror' ni timeout, si el CDN no responde (red
+    // distinta/más lenta en TV vs desktop) la Promise NUNCA se resolvía ni rechazaba → el
+    // reproductor quedaba colgado para siempre "cargando". Ahora rechaza a los 15s o si el
+    // <script> falla, y el llamador (con su propio try/catch) cae al respaldo.
+    const timeout = setTimeout(() => {
+      _hlsLoading = false;
+      reject(new Error('HLS.js CDN timeout (15s)'));
+    }, SCRIPT_LOAD_TIMEOUT_MS);
+    s.onload = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+    s.onerror = () => {
+      clearTimeout(timeout);
+      _hlsLoading = false;
+      reject(new Error('HLS.js CDN script error'));
+    };
     document.head.appendChild(s);
   });
 }
 
 let _shakaLoading = false;
 function loadShakaIfNeeded(): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const w = window as unknown as { shaka?: { polyfill: { installAll(): void } } };
     if (w.shaka) return resolve();
     if (_shakaLoading) {
@@ -148,9 +166,22 @@ function loadShakaIfNeeded(): Promise<void> {
     // verificado contra https://api.cdnjs.com.
     s.integrity = 'sha512-085ivZ5s6z+Qk9InxYMJoXF6JuMRfnTJGpeOph6TKmgsnkqxMhcauQIWINE6FnBt/KJBvcx7JjRAXc+ZvNJuyQ==';
     s.crossOrigin = 'anonymous';
+    // Mismo fix que loadHlsIfNeeded (2026-07-05): timeout + onerror para no colgar la
+    // Promise para siempre si el CDN no responde (candidato principal de "TV se queda
+    // cargando, desktop anda bien" — desktop ya lo tenía cacheado de tanto probar hoy).
+    const timeout = setTimeout(() => {
+      _shakaLoading = false;
+      reject(new Error('Shaka CDN timeout (15s)'));
+    }, SCRIPT_LOAD_TIMEOUT_MS);
     s.onload = () => {
+      clearTimeout(timeout);
       w.shaka!.polyfill.installAll();
       resolve();
+    };
+    s.onerror = () => {
+      clearTimeout(timeout);
+      _shakaLoading = false;
+      reject(new Error('Shaka CDN script error'));
     };
     document.head.appendChild(s);
   });
@@ -799,8 +830,13 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     };
     video.addEventListener('timeupdate', clearWatchdogIfStarted);
 
-    await loadShakaIfNeeded();
     try {
+      // Movido DENTRO del try (2026-07-05): loadShakaIfNeeded ahora puede rechazar (timeout
+      // 15s si el CDN no responde). Antes de este fix, si el script fallaba, la promesa
+      // NUNCA se resolvía y el reproductor quedaba colgado para siempre "cargando" (bug real
+      // en TV). Ahora el rechazo cae en el catch de abajo, que ya sabe avisar y cambiar de
+      // reproductor.
+      await loadShakaIfNeeded();
       await _shakaLoad(video, url);
       if (hasNativeSpanish) opts.onNativeSpanishDetected?.();
       spanishTrack.value = spanishTrackName;
@@ -852,7 +888,18 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       w.hlsInstance = null;
     }
 
-    await loadHlsIfNeeded();
+    try {
+      await loadHlsIfNeeded();
+    } catch (e) {
+      // loadHlsIfNeeded ahora puede rechazar (timeout 15s si el CDN no responde). Manejo
+      // LOCAL (esta función no tenía try/catch propio) — mismo patrón que el "no soportado"
+      // de abajo: avisar y cambiar de reproductor en vez de dejar la excepción sin capturar.
+      console.warn('[RD] HLS.js no cargó:', e);
+      if (playerStore.isStale(myGen)) return;
+      opts.onToast('⚡ RD: HLS no disponible — cambiando de reproductor');
+      opts.onFallbackToNextSource();
+      return;
+    }
     const HlsCtor = (window as unknown as { Hls?: { new (cfg: unknown): HlsInstanceLike; isSupported(): boolean; Events: Record<string, string>; ErrorTypes: Record<string, string> } }).Hls;
 
     if (HlsCtor && HlsCtor.isSupported()) {
