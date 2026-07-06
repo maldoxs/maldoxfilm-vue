@@ -450,8 +450,21 @@ function onRdStarted() {
         const vp = videoPlayerRef.value;
         if (!vp) return;
         if (vp.isTpipeline) {
-          void vp.tpipelineSeekTo(prog.positionSec!);
-          console.warn(`[PLAYER] Retomando en /t/ → ${Math.floor(prog.positionSec! / 60)}:${String(Math.floor(prog.positionSec! % 60)).padStart(2, '0')}`);
+          // FIX doble-resume (2026-07-05): el pipeline /t/ YA arranca el MPD directo en la
+          // posición guardada (loadRdSource recibe startPositionSec → tryTpipeline startT,
+          // mejora del 2026-06-30). Re-seekear acá a la MISMA posición era REDUNDANTE y
+          // DESTRUCTIVO: recargaba Shaka, tiraba el buffer ya acumulado (~33s) y obligaba a
+          // RD a REGENERAR un segmento que a veces se cuelga → "From" arrancaba bien y a los
+          // ~500ms se iba a negro (evidencia: log playing t=6.8 buffer +33.2 → Seek t=1475 →
+          // Segmento timeout → waiting buffer 0). Solo se re-seekea si el pipeline NO quedó
+          // cerca de la posición guardada (p.ej. cargas sin startPositionSec).
+          const curReal = (vp.tpipelineOffset || 0) + (vp.videoRef?.currentTime || 0);
+          if (Math.abs(curReal - prog.positionSec!) > 30) {
+            void vp.tpipelineSeekTo(prog.positionSec!);
+            console.warn(`[PLAYER] Retomando en /t/ → ${Math.floor(prog.positionSec! / 60)}:${String(Math.floor(prog.positionSec! % 60)).padStart(2, '0')}`);
+          } else {
+            console.warn(`[PLAYER] /t/ ya arrancó en la posición guardada (${Math.floor(curReal / 60)}:${String(Math.floor(curReal % 60)).padStart(2, '0')}) — sin re-seek`);
+          }
         } else {
           const v = vp.videoRef;
           if (v && prog.positionSec) {
