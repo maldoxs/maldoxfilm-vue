@@ -95,6 +95,31 @@ const MAX_STALL_RECOVERIES = 4; // recuperaciones sin éxito → cambiar de fuen
 // se inyecta a la vez, los llamadores concurrentes esperan al mismo callback.
 const SCRIPT_LOAD_TIMEOUT_MS = 15000; // si el CDN no responde en 15s, desistir (antes colgaba para siempre)
 
+/**
+ * playNoBlock — BUG encontrado en TV vía badge de diagnóstico (2026-07-06): en el pipeline
+ * /t/, tras `_shakaLoad` cargar bien el manifest (confirmado, checkpoint "9 shakaLoad OK"),
+ * `await video.play().catch(()=>{})` se quedaba COLGADO PARA SIEMPRE en esa TV — la promesa
+ * de `.play()` nunca se resuelve NI rechaza (motor viejo/webOS no cumple el spec estándar).
+ * Como `video.play()` YA dispara la reproducción real en cuanto se llama (efecto colateral
+ * inmediato, no depende de que la promesa se resuelva), esperarla es innecesario y
+ * peligroso. Esta función corre `.play()` pero NUNCA bloquea más de `timeoutMs`: si la
+ * promesa no se resuelve a tiempo, sigue igual (la reproducción ya se disparó del lado del
+ * navegador). NO cambia nada en navegadores donde `.play()` sí resuelve rápido (Direct Play
+ * no usa esta función — solo /t/, que es donde se confirmó el cuelgue).
+ */
+function playNoBlock(video: HTMLVideoElement, timeoutMs = 4000): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    video.play().then(done, done);
+    setTimeout(done, timeoutMs);
+  });
+}
+
 let _hlsLoading = false;
 function loadHlsIfNeeded(): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -1106,7 +1131,9 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       currentDashUrl = mpdUrl;
 
       video.muted = false;
-      await video.play().catch(() => {});
+      // playNoBlock (2026-07-06): mismo bug de video.play() colgado para siempre en TV,
+      // confirmado por badge de diagnóstico — ver definición de playNoBlock más arriba.
+      await playNoBlock(video);
       console.warn(`[/t/] Shaka listo en offset=${t}s`);
     } catch (e) {
       console.warn('[/t/] reloadMpd falló:', e);
@@ -1202,7 +1229,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       dashBaseUrl.value = `https://${resolved.cdn}/t/${resolved.fullPathId}/`;
 
       video.muted = false;
-      await video.play().catch(() => {});
+      await playNoBlock(video);
       opts.onDiag?.('10 play() listo');
 
       const hasNativeSpanish = isSpanish;
