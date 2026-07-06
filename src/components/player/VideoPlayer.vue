@@ -451,14 +451,19 @@ let waitingDebounce: ReturnType<typeof setTimeout> | null = null;
 function onVideoWaiting() {
   // El seek de /t/ (tpipelineSeeking) ya tiene su propio freeze-frame + loader — no duplicar.
   if (player.tpipelineSeeking.value) return;
+  // BUG encontrado (2026-07-06, a pedido): durante la carga INICIAL (isLoading=true, el
+  // spinner grande de .player-loading ya cubre la pantalla), el <video> también dispara
+  // 'waiting' (sin datos aún) → se veían DOS loaders superpuestos (el grande + este chico).
+  // Mientras isLoading esté activo, .player-loading ya comunica "cargando" — no duplicar.
+  if (isLoading.value) return;
   captureFreezeFrame(); // por si el corte fue tan repentino que 'timeupdate' no llegó a capturar
-  // Debounce corto (200ms): evita el parpadeo del overlay en microcortes de milisegundos
-  // que se resuelven solos (el <video> ya los absorbe sin que se note). Si el corte dura
-  // más que eso, es un corte real → se muestra.
+  // Umbral de 2s (a pedido): los cortes CORTOS (<2s) el <video> los absorbe solo, sin que se
+  // note — no hace falta tapar la pantalla. Solo los cortes LARGOS (>2s) muestran el freeze-
+  // frame + spinner.
   if (waitingDebounce) clearTimeout(waitingDebounce);
   waitingDebounce = setTimeout(() => {
     bufferingOverlay.value = true;
-  }, 200);
+  }, 2000);
 }
 
 function onVideoPlayingResumed() {
