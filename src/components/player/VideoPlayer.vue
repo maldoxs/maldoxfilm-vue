@@ -395,10 +395,19 @@ defineExpose({
   isLoading,
 });
 
-// Freeze-frame: al empezar un seek del pipeline /t/, capturar el último cuadro
-// del video en el canvas para que la pantalla no se ponga negra durante la recarga.
-watch(() => player.tpipelineSeeking.value, (seeking) => {
-  if (!seeking) return;
+// ── Overlay UNIFICADO anti-pantalla-negra (2026-07-06, a pedido del usuario) ─────────────
+// Antes había huecos: el freeze-frame solo cubría el seek de /t/ (tpipelineSeeking), pero
+// los cortes A MITAD de reproducción (RD generando lento, recuperación de stall) dejaban
+// pasar cuadros negros crudos sin ningún aviso. La clave del fix: CAPTURAR EL CUADRO DE
+// FORMA CONTINUA mientras reproduce bien (no en el momento del corte — para entonces ya es
+// tarde, el intento anterior de esta sesión falló por eso) para que SIEMPRE haya un cuadro
+// reciente listo para mostrar apenas se traba, sea cual sea la causa (seek, stall-recovery,
+// buffering). `bufferingOverlay` se activa con el evento NATIVO 'waiting' del <video> (que
+// dispara sin importar el motivo del corte) y se apaga con 'playing'.
+const bufferingOverlay = ref(false);
+let lastCaptureAt = 0;
+
+function captureFreezeFrame() {
   const video = videoRef.value;
   const canvas = freezeCanvasRef.value;
   if (!video || !canvas || video.readyState < 2) return;
@@ -406,6 +415,58 @@ watch(() => player.tpipelineSeeking.value, (seeking) => {
   canvas.height = video.videoHeight || 720;
   const ctx = canvas.getContext('2d');
   if (ctx) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+}
+
+function onVideoTimeUpdateCapture() {
+  const video = videoRef.value;
+  if (!video || video.paused || video.seeking || video.readyState < 2) return;
+  const now = Date.now();
+  if (now - lastCaptureAt < 300) return; // throttle — no hace falta capturar cada frame
+  lastCaptureAt = now;
+  captureFreezeFrame();
+}
+
+let waitingDebounce: ReturnType<typeof setTimeout> | null = null;
+
+function onVideoWaiting() {
+  // El seek de /t/ (tpipelineSeeking) ya tiene su propio freeze-frame + loader — no duplicar.
+  if (player.tpipelineSeeking.value) return;
+  captureFreezeFrame(); // por si el corte fue tan repentino que 'timeupdate' no llegó a capturar
+  // Debounce corto (200ms): evita el parpadeo del overlay en microcortes de milisegundos
+  // que se resuelven solos (el <video> ya los absorbe sin que se note). Si el corte dura
+  // más que eso, es un corte real → se muestra.
+  if (waitingDebounce) clearTimeout(waitingDebounce);
+  waitingDebounce = setTimeout(() => {
+    bufferingOverlay.value = true;
+  }, 200);
+}
+
+function onVideoPlayingResumed() {
+  if (waitingDebounce) {
+    clearTimeout(waitingDebounce);
+    waitingDebounce = null;
+  }
+  bufferingOverlay.value = false;
+}
+
+watch(videoRef, (video, prev) => {
+  if (prev) {
+    prev.removeEventListener('timeupdate', onVideoTimeUpdateCapture);
+    prev.removeEventListener('waiting', onVideoWaiting);
+    prev.removeEventListener('playing', onVideoPlayingResumed);
+  }
+  if (video) {
+    video.addEventListener('timeupdate', onVideoTimeUpdateCapture);
+    video.addEventListener('waiting', onVideoWaiting);
+    video.addEventListener('playing', onVideoPlayingResumed);
+  }
+});
+
+// Freeze-frame: al empezar un seek del pipeline /t/, capturar el último cuadro
+// del video en el canvas para que la pantalla no se ponga negra durante la recarga.
+watch(() => player.tpipelineSeeking.value, (seeking) => {
+  if (!seeking) return;
+  captureFreezeFrame();
 });
 
 // ── Subtítulos en fullscreen nativo (SOLO móvil) ─────────────────────────────
@@ -475,10 +536,14 @@ watch(() => subtitles.enabled.value, () => applyNativeTrackMode());
 
 onBeforeUnmount(() => {
   if (hideTimer) clearTimeout(hideTimer);
+  if (waitingDebounce) clearTimeout(waitingDebounce);
   const video = videoRef.value;
   if (video) {
     video.removeEventListener('webkitbeginfullscreen', onBeginNativeFs);
     video.removeEventListener('webkitendfullscreen', onEndNativeFs);
+    video.removeEventListener('timeupdate', onVideoTimeUpdateCapture);
+    video.removeEventListener('waiting', onVideoWaiting);
+    video.removeEventListener('playing', onVideoPlayingResumed);
   }
   player.destroy();
   nfControls.detach();
@@ -496,9 +561,11 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="player-frame-wrap" @mousemove="resetControlsAutoHide">
-      <!-- Freeze-frame + loader durante seek del pipeline /t/ -->
-      <canvas v-show="player.tpipelineSeeking.value" ref="freezeCanvasRef" class="tpipeline-freeze"></canvas>
-      <div v-if="player.tpipelineSeeking.value" class="tpipeline-loader"></div>
+      <!-- Freeze-frame + loader: seek del pipeline /t/ (tpipelineSeeking) O cualquier corte
+           a mitad de reproducción (bufferingOverlay, disparado por el 'waiting' nativo del
+           <video> — cubre stall-recovery, buffering, cualquier motivo, no solo el seek). -->
+      <canvas v-show="player.tpipelineSeeking.value || bufferingOverlay" ref="freezeCanvasRef" class="tpipeline-freeze"></canvas>
+      <div v-if="player.tpipelineSeeking.value || bufferingOverlay" class="tpipeline-loader"></div>
 
       <video ref="videoRef" class="video-el" playsinline @click="onVideoClick"></video>
 
