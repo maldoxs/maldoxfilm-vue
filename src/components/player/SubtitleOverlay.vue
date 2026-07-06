@@ -60,7 +60,7 @@ defineProps<{
 }
 .sub-overlay-text {
   color: #fff;
-  font-size: 1.8rem;
+  font-size: 2.15rem; /* subido a pedido del usuario (era 1.8rem) */
   font-weight: 700;
   line-height: 1.6;
   display: inline-block;
@@ -76,7 +76,7 @@ defineProps<{
 
 @media (max-width: 640px) {
   .sub-overlay-text {
-    font-size: 1.25rem;
+    font-size: 1.5rem; /* subido a pedido del usuario (era 1.25rem) */
   }
 }
 </style>
