@@ -219,7 +219,14 @@ const nfControls = useNetflixControls({
   },
   durationOverride: () => {
     if (!player.isTpipeline.value) return null;
-    return player.tpipelineDuration.value || null;
+    // BUG encontrado (2026-07-06): si RD no reporta duración para este archivo puntual
+    // (mediaInfos.duration=0 — dato faltante de RD, no de nuestro código), esto caía a
+    // `video.duration` NATIVO — pero en /t/ el manifest se genera dinámicamente en el
+    // offset pedido (`?t=X`) y su duración declarada puede reflejar solo lo que queda
+    // desde ahí, NO el total del episodio → la barra salía rota (cerca del 100% al
+    // reanudar lejos del inicio). Preferir el runtime de TMDB (confiable) antes que
+    // caer al nativo, que no es de fiar en este camino.
+    return player.tpipelineDuration.value || props.runtimeSec || null;
   },
   seekOverride: (seconds: number) => {
     if (player.isTpipeline.value) {
