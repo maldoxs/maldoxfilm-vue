@@ -426,6 +426,26 @@ function onVideoTimeUpdateCapture() {
   captureFreezeFrame();
 }
 
+// Respaldo por intervalo fijo (2026-07-06, a pedido): en un corte LARGO (RD degradándose
+// unos segundos ANTES de trabarse del todo) 'timeupdate' puede volverse irregular o dejar
+// de disparar justo cuando más se necesita el último cuadro fresco. Este intervalo corre
+// SIEMPRE, independiente de 'timeupdate', así el canvas nunca queda con un cuadro viejo.
+let freezeInterval: ReturnType<typeof setInterval> | null = null;
+function startFreezeIntervalCapture() {
+  stopFreezeIntervalCapture();
+  freezeInterval = setInterval(() => {
+    const video = videoRef.value;
+    if (!video || video.paused || video.seeking || video.readyState < 2) return;
+    captureFreezeFrame();
+  }, 400);
+}
+function stopFreezeIntervalCapture() {
+  if (freezeInterval) {
+    clearInterval(freezeInterval);
+    freezeInterval = null;
+  }
+}
+
 let waitingDebounce: ReturnType<typeof setTimeout> | null = null;
 
 function onVideoWaiting() {
@@ -459,6 +479,9 @@ watch(videoRef, (video, prev) => {
     video.addEventListener('timeupdate', onVideoTimeUpdateCapture);
     video.addEventListener('waiting', onVideoWaiting);
     video.addEventListener('playing', onVideoPlayingResumed);
+    startFreezeIntervalCapture();
+  } else {
+    stopFreezeIntervalCapture();
   }
 });
 
@@ -537,6 +560,7 @@ watch(() => subtitles.enabled.value, () => applyNativeTrackMode());
 onBeforeUnmount(() => {
   if (hideTimer) clearTimeout(hideTimer);
   if (waitingDebounce) clearTimeout(waitingDebounce);
+  stopFreezeIntervalCapture();
   const video = videoRef.value;
   if (video) {
     video.removeEventListener('webkitbeginfullscreen', onBeginNativeFs);
