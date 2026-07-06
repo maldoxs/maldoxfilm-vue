@@ -1153,7 +1153,7 @@ onBeforeUnmount(() => {
     :class="{ 'controls-hidden': controlsHidden }"
     @mousemove="onPlayerActivity"
   >
-    <button class="player-back" :class="{ 'icon-close-mode': deviceStore.isMobile }" title="Volver" @click="closePlayer()">
+    <button class="player-back" :class="{ 'icon-close-mode': deviceStore.isMobile }" aria-label="Volver" @click="closePlayer()">
       <svg v-if="!deviceStore.isMobile" class="icon-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="15 18 9 12 15 6" />
       </svg>
@@ -1173,7 +1173,6 @@ onBeforeUnmount(() => {
           :key="btn.idx"
           class="source-btn"
           :class="{ active: btn.active }"
-          :title="btn.isRd ? 'Real-Debrid — streams HD, sin anuncios' : btn.label"
           @click="switchSource(btn.idx)"
         >
           {{ btn.icon }} {{ btn.label }}
@@ -1194,7 +1193,6 @@ onBeforeUnmount(() => {
           :key="i"
           class="source-btn"
           :class="{ active: i === activeAnimeServerIdx }"
-          :title="srv.label"
           @click="selectAnimeServer(i)"
         >
           {{ srv.label }}
@@ -1206,7 +1204,7 @@ onBeforeUnmount(() => {
            tienen la barra de controles propia con su ⛶). En el camino RD se oculta para dejar
            un único botón de fullscreen abajo (patrón estándar). En TV siempre visible (se navega
            con control remoto y la barra inferior se auto-oculta). -->
-      <button v-if="deviceStore.isTV || !isRdSource" ref="fullscreenIconRef" class="player-fullscreen-btn" title="Pantalla completa" @click="fullscreen.toggle">
+      <button v-if="deviceStore.isTV || !isRdSource" ref="fullscreenIconRef" class="player-fullscreen-btn" aria-label="Pantalla completa" @click="fullscreen.toggle">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path :d="fullscreen.isFullscreen.value ? FULLSCREEN_PATH_D.enter : FULLSCREEN_PATH_D.exit" />
         </svg>
@@ -1291,7 +1289,7 @@ onBeforeUnmount(() => {
       />
       <!-- ⛶ del player (CLICK, no hover): fullscreen NUESTRO (de página), que conserva los
            controles de episodios — a diferencia del ⛶ interno del iframe (fullscreen nativo). -->
-      <button class="ep-fs-btn" title="Pantalla completa" aria-label="Pantalla completa" @click="fullscreen.toggle">
+      <button class="ep-fs-btn" aria-label="Pantalla completa" @click="fullscreen.toggle">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path :d="fullscreen.isFullscreen.value ? FULLSCREEN_PATH_D.enter : FULLSCREEN_PATH_D.exit" />
         </svg>

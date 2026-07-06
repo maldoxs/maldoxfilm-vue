@@ -54,7 +54,6 @@ const visible = computed(() => !props.hidden);
       class="source-btn"
       :class="{ active: activeIndex === RD_SRC_IDX }"
       :data-src-idx="RD_SRC_IDX"
-      title="Real-Debrid — streams HD, sin anuncios"
       @click="emit('select', RD_SRC_IDX)"
     >
       ⚡ RD
@@ -65,7 +64,6 @@ const visible = computed(() => !props.hidden);
       class="source-btn"
       :class="{ active: activeIndex === i }"
       :data-src-idx="i"
-      :title="src.name"
       @click="emit('select', i)"
     >
       {{ src.icon }} {{ src.name }}

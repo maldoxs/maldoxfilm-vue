@@ -23,7 +23,6 @@ const emit = defineEmits<{
 <template>
   <button
     class="ep-trigger"
-    title="Siguiente episodio"
     aria-label="Siguiente episodio"
     @mouseenter="emit('next-enter')"
     @mouseleave="emit('next-leave')"
@@ -36,7 +35,6 @@ const emit = defineEmits<{
   </button>
   <button
     class="ep-trigger"
-    title="Lista de episodios"
     aria-label="Lista de episodios"
     @mouseenter="emit('list-enter')"
     @mouseleave="emit('list-leave')"

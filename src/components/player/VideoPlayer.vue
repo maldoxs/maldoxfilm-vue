@@ -747,14 +747,18 @@ onBeforeUnmount(() => {
   line-height: 1.4;
 }
 
-/* Pipeline /t/ — freeze-frame + loader durante seek */
+/* Pipeline /t/ — freeze-frame + loader durante seek/corte. z-index 55/56: BUG encontrado
+   (2026-07-06) — estaba en 5/6, por DEBAJO del overlay de subtítulos (z-index 50), así que
+   los subtítulos se veían "atravesando" la pantalla de carga (aparecían antes que el video
+   real). Ahora queda por encima, cubriendo TODO — video negro Y subtítulos — mientras dure
+   el corte. Sigue por debajo de .player-loading (60), que es el overlay de carga inicial. */
 .tpipeline-freeze {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
-  z-index: 5;
+  z-index: 55;
   background: #000;
   pointer-events: none;
 }
@@ -769,7 +773,7 @@ onBeforeUnmount(() => {
   border-top: 3px solid #3d5afe;
   border-radius: 50%;
   animation: tpipeline-spin 0.8s linear infinite;
-  z-index: 6;
+  z-index: 56;
   pointer-events: none;
 }
 @keyframes tpipeline-spin {
