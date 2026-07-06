@@ -323,13 +323,6 @@ export interface UsePlayerOptions {
   onStarted: () => void;
   /** Callback: mostrar un toast (equiv. `showToast`). */
   onToast: (msg: string) => void;
-  /**
-   * TEMPORAL (diagnóstico TV, 2026-07-06) — badge en pantalla con el paso exacto del
-   * pipeline /t/. Sin consola en TV, es la única forma de ver dónde se traba. Sacar una
-   * vez encontrada la causa. Ver tag `pre-diag-badge-v2`. Cambio SOLO visual, no altera
-   * ningún comportamiento de reproducción.
-   */
-  onDiag?: (msg: string) => void;
   /** Callback: el stream tiene audio nativo en español detectado en DASH (subs OFF por defecto). */
   onNativeSpanishDetected?: () => void;
   /** Callback: stream listo — para inicializar buscador de subtítulos / selector de audio. */
@@ -1178,14 +1171,11 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     const startT =
       params.startPositionSec && params.startPositionSec > 30 ? Math.floor(params.startPositionSec) : 1;
 
-    opts.onDiag?.('1 resolve...');
     let resolved: TpipelineResolveResult;
     try {
       loadingMessage.value = '🔍 Preparando streaming avanzado...';
       resolved = await resolveTpipeline(rdId);
-      opts.onDiag?.(`2 resolve OK cdn=${resolved.cdn}`);
     } catch (e) {
-      opts.onDiag?.(`X resolve FALLÓ: ${String(e).slice(0, 80)}`);
       console.warn('[/t/] resolve falló → fallback a transcode legacy:', e);
       return false;
     }
@@ -1206,31 +1196,23 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
 
     try {
       loadingMessage.value = '📡 Conectando con el servidor...';
-      opts.onDiag?.('3 loadShaka...');
       await loadShakaIfNeeded();
-      opts.onDiag?.('4 loadShaka OK');
 
       const mpdUrl = buildMpdUrl(resolved.fullPathId, resolved.cdn, audio, startT);
 
-      opts.onDiag?.('5 pingSeek...');
       await pingSeek(resolved.mediaId, startT);
-      opts.onDiag?.('6 pingSeek OK, waitSeg...');
       const segReady = await waitForSegmentAt(resolved.cdn, resolved.fullPathId, audio, startT, 8000);
-      opts.onDiag?.(`7 waitSeg=${segReady}`);
       if (!segReady) console.warn('[/t/] Primer segmento timeout — intentando igual');
 
       if (playerStore.isStale(myGen)) return true;
 
-      opts.onDiag?.('8 shakaLoad...');
       await _shakaLoad(video, mpdUrl);
-      opts.onDiag?.('9 shakaLoad OK');
       currentDashUrl = mpdUrl;
 
       dashBaseUrl.value = `https://${resolved.cdn}/t/${resolved.fullPathId}/`;
 
       video.muted = false;
       await playNoBlock(video);
-      opts.onDiag?.('10 play() listo');
 
       const hasNativeSpanish = isSpanish;
       if (hasNativeSpanish) opts.onNativeSpanishDetected?.();
@@ -1249,7 +1231,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       opts.onToast(isLat ? '✅ Seek fluido · Audio Latino' : '✅ Seek fluido');
       return true;
     } catch (e) {
-      opts.onDiag?.(`X carga FALLÓ: ${String(e).slice(0, 100)}`);
       console.warn('[/t/] carga falló → fallback a transcode legacy:', e);
       isTpipeline.value = false;
       tpipelineState = null;
