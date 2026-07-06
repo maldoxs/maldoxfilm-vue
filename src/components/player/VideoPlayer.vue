@@ -386,6 +386,13 @@ defineExpose({
   isTpipeline: player.isTpipeline,
   tpipelineOffset: player.tpipelineOffset,
   tpipelineSeekTo: player.tpipelineSeekTo,
+  /**
+   * isLoading (expuesto) — permite mostrar el spinner puntualmente desde PlayerView
+   * durante el seek nativo de "continuar viendo" en Direct Play (ver PlayerView.vue,
+   * bloque de resume): ese seek ocurre DESPUÉS de que onStarted ya apagó el loader,
+   * así que sin esto la pantalla queda negra sin aviso mientras busca el byte range.
+   */
+  isLoading,
 });
 
 // Freeze-frame: al empezar un seek del pipeline /t/, capturar el último cuadro

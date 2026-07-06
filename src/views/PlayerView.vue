@@ -468,6 +468,21 @@ function onRdStarted() {
         } else {
           const v = vp.videoRef;
           if (v && prog.positionSec) {
+            // FIX (2026-07-06): este seek nativo ocurre DESPUÉS de que onStarted ya apagó
+            // el spinner (arrancó en el minuto 0 primero) → sin esto, mientras el navegador
+            // busca el byte del minuto guardado (Range request), la pantalla quedaba NEGRA
+            // sin ningún aviso. Se prende el loader puntualmente y se apaga al completar el
+            // seek ('seeked') — con un timeout de seguridad por si el evento no llega.
+            vp.isLoading = true;
+            const onResumeSeeked = () => {
+              v.removeEventListener('seeked', onResumeSeeked);
+              vp.isLoading = false;
+            };
+            v.addEventListener('seeked', onResumeSeeked);
+            setTimeout(() => {
+              v.removeEventListener('seeked', onResumeSeeked);
+              vp.isLoading = false;
+            }, 8000);
             v.currentTime = prog.positionSec;
             console.warn(`[PLAYER] Retomando en ${Math.floor(prog.positionSec / 60)}:${String(Math.floor(prog.positionSec % 60)).padStart(2, '0')}`);
           }
