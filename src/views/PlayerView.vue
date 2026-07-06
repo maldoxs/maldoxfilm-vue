@@ -773,13 +773,23 @@ function loadUrlInPlayer(url: string) {
 // CARGA DE FUENTES — preserva `loadPlayerSource` (líneas ~7717-8265)
 // ════════════════════════════════════════════════════════════════════════════
 
-/** stopRdPlayback — preserva `video.pause(); video.src=''` al inicio de cada `loadPlayerSource` (línea ~7748). */
-function stopRdPlayback() {
+/**
+ * stopRdPlayback — preserva `video.pause(); video.src=''` al inicio de cada `loadPlayerSource` (línea ~7748).
+ * @param blank Si true (default), además vacía el `<video>` (`removeAttribute('src')` + `load()`).
+ *   En `closePlayer()` se llama con `false`: vaciarlo ahí, ANTES de que el router navegue, pintaba
+ *   una pantalla NEGRA (el `<video>` queda en blanco pero `.player-page` sigue montado hasta que
+ *   termina la navegación) → "Volver" mostraba un flash negro antes de llegar al detalle. El corte
+ *   de audio ya lo cubre `v.pause()` (síncrono); el vaciado real lo hace `usePlayer.destroy()` al
+ *   desmontar `VideoPlayer` (después de navegar) — mismo criterio que ya usa `stopIframePlayback`.
+ */
+function stopRdPlayback(blank = true) {
   const v = videoPlayerRef.value?.videoRef;
   if (v) {
     v.pause();
-    v.removeAttribute('src');
-    v.load();
+    if (blank) {
+      v.removeAttribute('src');
+      v.load();
+    }
   }
 }
 
@@ -989,7 +999,7 @@ function closePlayer(forceDetail = false) {
   persistProgressOnClose();
   stopProgressTracking();
   cancelAutoNext();
-  stopRdPlayback();
+  stopRdPlayback(false); // NO vaciar el <video> acá: pintaba pantalla negra antes de que el router navegue (ver doc de stopRdPlayback).
   stopIframePlayback(false); // NO blanquear acá: agregaría entrada al historial → doble-back. Lo hace onBeforeUnmount tras navegar.
   clearIframeMsgTimers();
   if (controlsHideTimeout) {
