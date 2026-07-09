@@ -131,6 +131,11 @@ const player: UsePlayerReturn = usePlayer({
   onStarted: () => {
     isLoading.value = false;
     nfControls.attach();
+    // Arma el auto-hide de `.nf-controls` (barra de reproducción) apenas arranca el
+    // video. Sin esto, `resetControlsAutoHide()` solo se disparaba con un mousemove/
+    // interacción posterior — en TV, si el usuario no mueve el control remoto justo
+    // después de entrar, la barra quedaba visible para siempre ("se pega").
+    resetControlsAutoHide();
     emit('started');
   },
   onToast: (msg) => showToast(msg),

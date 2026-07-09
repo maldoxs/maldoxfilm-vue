@@ -1051,7 +1051,7 @@ function closePlayer(forceDetail = false) {
   // `position: sticky` (NO `fixed`) justamente para que SOBREVIVA al fullscreen de
   // webkit (donde `fixed` deja de pegarse al scrollear). No hacemos `exitFullscreen`
   // en TV (ver useFullscreen), así que queda oculta de forma estable.
-  if (deviceStore.isTV) {
+  if (deviceStore.isTV && !document.fullscreenElement) {
     try {
       document.documentElement.requestFullscreen?.().catch(() => {});
     } catch {
@@ -1081,7 +1081,10 @@ async function init() {
   // TEMPRANO Y SÍNCRONO posible (antes de cualquier `await` de este init) — el gesto del
   // usuario que disparó la navegación (click en "Reproducir") sigue vigente acá, pero se
   // pierde si se pide después de cruzar un `await`.
-  if (deviceStore.isTV) {
+  // Solo pedirlo si NO está ya en fullscreen: reafirmar de más (con la barra del
+  // navegador ya oculta) disparaba un micro-reflow visible ("la pantalla se agranda
+  // un poco") en el WebKit de la TV — mismo guard que ya usa App.vue (línea ~115).
+  if (deviceStore.isTV && !document.fullscreenElement) {
     try {
       document.documentElement.requestFullscreen?.().catch(() => {});
     } catch {
