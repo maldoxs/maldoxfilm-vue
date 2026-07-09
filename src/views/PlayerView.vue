@@ -999,7 +999,12 @@ function closePlayer(forceDetail = false) {
   persistProgressOnClose();
   stopProgressTracking();
   cancelAutoNext();
-  stopRdPlayback(false); // NO vaciar el <video> acá: pintaba pantalla negra antes de que el router navegue (ver doc de stopRdPlayback).
+  // NO tocar el <video> acá (ni pause ni vaciar): en la TV, pausar el <video> le hace soltar
+  // el frame decodeado y pinta NEGRO de inmediato (a diferencia de desktop, donde pausar deja
+  // el último frame congelado) — eso pintaba pantalla negra + barra de controles visible
+  // durante el ~1s que tarda el router en navegar al detalle. El <video> sigue reproduciendo
+  // (mismo criterio que el iframe, ver nota de abajo) hasta que `VideoPlayer` se desmonta y
+  // `usePlayer.destroy()` lo pausa/vacía DESPUÉS de completar la navegación.
   stopIframePlayback(false); // NO blanquear acá: agregaría entrada al historial → doble-back. Lo hace onBeforeUnmount tras navegar.
   clearIframeMsgTimers();
   if (controlsHideTimeout) {
