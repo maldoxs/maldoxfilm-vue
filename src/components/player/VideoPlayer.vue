@@ -454,21 +454,27 @@ function stopFreezeIntervalCapture() {
 let waitingDebounce: ReturnType<typeof setTimeout> | null = null;
 
 function onVideoWaiting() {
-  // El seek de /t/ (tpipelineSeeking) ya tiene su propio freeze-frame + loader — no duplicar.
-  if (player.tpipelineSeeking.value) return;
+  // NOTA: ya NO se retorna temprano si tpipelineSeeking está activo. Antes ese guard
+  // impedía que bufferingOverlay se activara durante el seek → apenas terminaba el seek
+  // (tpipelineSeeking=false) con el video AÚN buffereando, el overlay desaparecía y quedaba
+  // un HUECO NEGRO sin indicación hasta que arrancaba. Como tpipelineSeeking y
+  // bufferingOverlay muestran el MISMO overlay (canvas + loader, ver v-if del template),
+  // dejarlos convivir NO duplica nada: solo hace que el overlay se mantenga CONTINUO desde
+  // el seek hasta que 'playing' confirma que la peli arrancó de verdad.
   // BUG encontrado (2026-07-06, a pedido): durante la carga INICIAL (isLoading=true, el
   // spinner grande de .player-loading ya cubre la pantalla), el <video> también dispara
   // 'waiting' (sin datos aún) → se veían DOS loaders superpuestos (el grande + este chico).
   // Mientras isLoading esté activo, .player-loading ya comunica "cargando" — no duplicar.
   if (isLoading.value) return;
-  captureFreezeFrame(); // por si el corte fue tan repentino que 'timeupdate' no llegó a capturar
-  // Umbral de 2s (a pedido): los cortes CORTOS (<2s) el <video> los absorbe solo, sin que se
-  // note — no hace falta tapar la pantalla. Solo los cortes LARGOS (>2s) muestran el freeze-
-  // frame + spinner.
+  // NO capturar acá: en el 'waiting' el <video> YA está en stall → readyState cae y
+  // captureFreezeFrame() dibuja NEGRO, sobrescribiendo el último cuadro BUENO de la captura
+  // continua (timeupdate/intervalo). Confiamos solo en la captura continua.
+  // Umbral de 1s: los cortes MUY cortos (<1s) el <video> los absorbe solo; más largos
+  // muestran el freeze-frame + loader (antes 2s dejaba ver negro más tiempo en TV).
   if (waitingDebounce) clearTimeout(waitingDebounce);
   waitingDebounce = setTimeout(() => {
     bufferingOverlay.value = true;
-  }, 2000);
+  }, 1000);
 }
 
 function onVideoPlayingResumed() {
@@ -495,12 +501,12 @@ watch(videoRef, (video, prev) => {
   }
 });
 
-// Freeze-frame: al empezar un seek del pipeline /t/, capturar el último cuadro
-// del video en el canvas para que la pantalla no se ponga negra durante la recarga.
-watch(() => player.tpipelineSeeking.value, (seeking) => {
-  if (!seeking) return;
-  captureFreezeFrame();
-});
+// Freeze-frame en el seek /t/: NO se captura acá. `tpipelineReloadMpd` hace `video.pause()`
+// de forma síncrona apenas pone tpipelineSeeking=true; este watch correría DESPUÉS del pause
+// → en la TV el decoder ya soltó el cuadro y captureFreezeFrame() dibujaría NEGRO,
+// sobrescribiendo el último cuadro BUENO de la captura continua. ESE era el bug de "al
+// retroceder se pone negra en vez de congelada". El canvas ya se MUESTRA con tpipelineSeeking
+// vía v-show; ahora conserva el cuadro bueno en vez de pisarlo con negro.
 
 // ── Subtítulos en fullscreen nativo (SOLO móvil) ─────────────────────────────
 // El fullscreen nativo de iOS (`webkitEnterFullscreen`) muestra únicamente el
