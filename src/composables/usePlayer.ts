@@ -85,6 +85,21 @@ const SEEK_FREEZE_FAR_MS = 5000; // seek lejano → volver rápido (no se va a p
 const STALL_BACKOFF_MS = 8000; // por cada recuperación previa, esperar este extra (dar tiempo al transcoder)
 const MAX_STALL_RECOVERIES = 4; // recuperaciones sin éxito → cambiar de fuente (con backoff, ~más paciencia)
 
+// ── PACIENCIA EXTRA EN TV (2026-07-10) ───────────────────────────────────────
+// Diagnóstico: en TV el decoder es más débil y RD genera los segmentos /t/ más lento →
+// el video se traba más seguido y por más tiempo que en desktop. Con el umbral de desktop
+// (STALL_RECOVER_MS = 8s) el monitor de stall DESTRUÍA y recreaba Shaka (`_shakaLoad`) en
+// CADA bache normal de RD → readyState cae a 0 (pantalla NEGRA, ver logs `ready=0`), se
+// tira el buffer, y tras 4 intentos recarga TODO desde cero ("reconectando con el servidor"
+// en loop). En desktop esto casi nunca dispara (segmentos rápidos) → por eso se pega en TV
+// y no en desktop. El teardown pelea contra la paciencia que Shaka YA tiene (timeout de 60s
+// por segmento, ver streamingCfg). Se le da a la TV mucha más paciencia ANTES del teardown
+// destructivo: que ESPERE el segmento como hace el player oficial de RD, en vez de
+// reiniciarse. El teardown sigue existiendo, pero solo para trabas de verdad largas (sesión
+// muerta tras pausa larga), no para el goteo normal de RD.
+const STALL_RECOVER_MS_TV = 25000; // TV: 25s en play sin avanzar antes de recuperar (vs 8s desktop)
+const STALL_RECOVER_SEEK_MS_TV = 12000; // TV: 12s tras un seek antes de recuperar (vs 4.5s desktop)
+
 // ── PRE-CACHEO Direct Play (#5) ──────────────────────────────────────────────
 // Mientras reproduce el transcode, sondea a RD si ya cacheó el MP4/H264/AAC; al
 // quedar listo, cambia a Direct Play (seek perfecto). Sondeo espaciado para no
@@ -808,7 +823,13 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // Backoff por cada recuperación previa: darle tiempo al transcoder a alcanzar el
       // tramo en vez de recargar (reiniciar) una y otra vez → menos caídas al iframe.
       const recentSeek = lastSeekAt > 0 && Date.now() - lastSeekAt < SEEK_RECENT_WINDOW_MS;
-      const base = recentSeek ? STALL_RECOVER_SEEK_MS : STALL_RECOVER_MS;
+      // En TV, umbrales MUCHO más pacientes (ver nota de STALL_RECOVER_MS_TV): el teardown
+      // destructivo de Shaka en cada bache de RD era la causa de que se pegue en TV y no en
+      // desktop. Se deja que Shaka espere el segmento (su timeout de 60s ya lo cubre).
+      const isTvNow = opts.isTv?.() ?? false;
+      const recoverMs = isTvNow ? STALL_RECOVER_MS_TV : STALL_RECOVER_MS;
+      const recoverSeekMs = isTvNow ? STALL_RECOVER_SEEK_MS_TV : STALL_RECOVER_SEEK_MS;
+      const base = recentSeek ? recoverSeekMs : recoverMs;
       const threshold = base + stallRecoveries * STALL_BACKOFF_MS;
       if (Date.now() - stallStuckSince >= threshold) {
         void runStallRecovery(video, myGen);
