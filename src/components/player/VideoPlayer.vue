@@ -599,7 +599,10 @@ onBeforeUnmount(() => {
            a mitad de reproducción (bufferingOverlay, disparado por el 'waiting' nativo del
            <video> — cubre stall-recovery, buffering, cualquier motivo, no solo el seek). -->
       <canvas v-show="player.tpipelineSeeking.value || bufferingOverlay" ref="freezeCanvasRef" class="tpipeline-freeze"></canvas>
-      <div v-if="player.tpipelineSeeking.value || bufferingOverlay" class="tpipeline-loader"></div>
+      <div v-if="player.tpipelineSeeking.value || bufferingOverlay" class="tpipeline-loader">
+        <div class="tpipeline-spinner"></div>
+        <span class="tpipeline-loader-text">Cargando…</span>
+      </div>
 
       <video ref="videoRef" class="video-el" playsinline @click="onVideoClick"></video>
 
@@ -796,22 +799,40 @@ onBeforeUnmount(() => {
   background: #000;
   pointer-events: none;
 }
+/* Loader del seek/corte /t/. Cubre toda el área con un oscurecido SUTIL (vignette): en
+   desktop deja ver el frozen-frame por los bordes; en TV, donde el canvas suele quedar
+   NEGRO (el navegador no lee el <video> por hardware al canvas), este spinner grande +
+   "Cargando…" hace que se lea como CARGANDO y no como una pantalla negra rota. Es el fix
+   del "queda 1s en negro al adelantar/retroceder" en TV. */
 .tpipeline-loader {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 36px;
-  height: 36px;
-  border: 3px solid rgba(255, 255, 255, 0.15);
+  inset: 0;
+  z-index: 56;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  pointer-events: none;
+  background: radial-gradient(circle at center, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0.2) 35%, transparent 65%);
+}
+.tpipeline-spinner {
+  width: 46px;
+  height: 46px;
+  border: 3px solid rgba(255, 255, 255, 0.18);
   border-top: 3px solid #3d5afe;
   border-radius: 50%;
   animation: tpipeline-spin 0.8s linear infinite;
-  z-index: 56;
-  pointer-events: none;
+}
+.tpipeline-loader-text {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 @keyframes tpipeline-spin {
-  to { transform: translate(-50%, -50%) rotate(360deg); }
+  to { transform: rotate(360deg); }
 }
 
 .nf-controls {
