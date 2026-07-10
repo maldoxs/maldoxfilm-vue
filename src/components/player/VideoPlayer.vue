@@ -593,11 +593,13 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="playerPageRef" class="video-player" :class="{ 'controls-hidden': controlsHidden }">
-    <!-- Overlay de carga — reemplaza #playerLoading (línea ~3740-3746) -->
+    <!-- Overlay de carga — reemplaza #playerLoading (línea ~3740-3746).
+         Mensaje ÚNICO "Cargando…" (a pedido): antes el texto iba cambiando
+         (`loadingMessage`: "Conectando con el servidor..." → toast "Seek fluido" → etc.),
+         lo que confundía. Ahora siempre dice lo mismo, igual que el loader del seek/corte. -->
     <div v-if="isLoading" class="player-loading">
       <div class="spinner"></div>
-      <p class="player-loading-text">{{ player.loadingMessage.value || 'Conectando señal...' }}</p>
-      <p class="player-loading-hint">El servidor obtiene el contenido en tiempo real.<br />Puede tardar hasta 15 segundos.</p>
+      <p class="player-loading-text">Cargando…</p>
     </div>
 
     <div class="player-frame-wrap" @mousemove="resetControlsAutoHide">

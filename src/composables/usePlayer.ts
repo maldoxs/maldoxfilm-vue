@@ -1257,8 +1257,8 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       });
 
       console.warn(`[/t/] ✅ Pipeline activo — ${resolved.filename} | audio: ${audio} | CDN: ${resolved.cdn}`);
-      const isLat = /lat|spa|es/i.test(audio);
-      opts.onToast(isLat ? '✅ Seek fluido · Audio Latino' : '✅ Seek fluido');
+      // NOTA: se quitó el toast "✅ Seek fluido" (a pedido) — confundía porque decía "fluido"
+      // justo cuando el /t/ podía trabarse. El único mensaje de carga es "Cargando…".
       return true;
     } catch (e) {
       console.warn('[/t/] carga falló → fallback a transcode legacy:', e);
@@ -1412,7 +1412,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         const hasSpaDirect = isDualLatFilename(streamFn);
         opts.onStreamReady?.({ selected, hasNativeSpanish: hasSpaDirect, spanishTrack: null });
         startStallMonitor(video, myGen, recoverReloadSrc(streamUrl));
-        opts.onToast(hasSpaDirect ? '✅ Seek fluido · Audio Latino' : '✅ Seek fluido');
+        // Toast "Seek fluido" quitado (a pedido) — un solo mensaje "Cargando…", sin toasts.
         isLoadingRd.value = false;
         return;
       }
