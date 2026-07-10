@@ -299,16 +299,7 @@ async function _shakaLoad(video: HTMLVideoElement, url: string, startTime?: numb
       connectionTimeout: 0, // sin límite de conexión (RD long-pollea el segmento)
       stallTimeout: 0,
     },
-    // bufferingGoal: cuánto buffer hacia adelante intenta juntar Shaka.
-    // TV/low-mem: 15s (vs 30s desktop). Diagnóstico del tartamudeo en TV: RD genera los
-    // segmentos /t/ EN VIVO a ~1x, bajo demanda. Con 30s de lookahead, Shaka pide segmentos
-    // muy por delante que RD todavía NO generó → esos pedidos compiten con la generación del
-    // segmento ACTUAL (RD se satura sirviendo varios a la vez) → el buffer inmediato se
-    // vacía → tartamudeo. Ya se documentó que SUBIR el buffer empeoraba (memoria del
-    // proyecto); acá se prueba la dirección CONTRARIA: pedir menos lookahead para no saturar
-    // a RD y que priorice el segmento que se está por reproducir. Desktop mantiene 30 (su
-    // red/decoder sí llena el colchón sin pelear con RD).
-    bufferingGoal: isLowMemoryDevice() ? 15 : 30,
+    bufferingGoal: 30, // buffer hacia adelante generoso (menos rebuffer)
     rebufferingGoal: 2,
     bufferBehind: isLowMemoryDevice() ? 10 : 30,
   };

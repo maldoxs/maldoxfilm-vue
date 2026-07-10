@@ -228,6 +228,12 @@ const nfControls = useNetflixControls({
   },
   seekOverride: (seconds: number) => {
     if (player.isTpipeline.value) {
+      // Capturar el cuadro AHORA, en el instante del seek: el <video> todavía está
+      // REPRODUCIENDO la posición vieja (readyState 4, sin pausa) → drawImage da un cuadro
+      // BUENO (funciona en TV). tpipelineReloadMpd hará video.pause() 300ms después, y para
+      // entonces el decoder ya soltó el cuadro (en TV daría NEGRO). Capturando acá, el overlay
+      // del seek (tpipelineSeeking) muestra la imagen CONGELADA en vez de negro al adelantar.
+      captureFreezeFrame();
       void player.tpipelineSeekTo(seconds);
     } else {
       // Direct Play / transcode legacy: seek nativo (HTTP Range). Silenciar hasta
