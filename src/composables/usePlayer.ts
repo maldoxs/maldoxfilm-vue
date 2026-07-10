@@ -579,6 +579,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   let lastSeekAt = 0;
   let lastPlayingPos = 0; // última posición donde el video AVANZABA de verdad (zona reproducible)
   let seekStuckSince = 0; // desde cuándo un seek está trabado SIN buffer (far-seek a tramo no generado)
+  let lastBufferAhead = 0; // buffer por delante en el tick anterior — detecta si la descarga PROGRESA aunque currentTime aún no arranque
 
   // ── Instrumentación (#3) — log compacto de los eventos críticos del <video> con
   // tiempo, buffer por delante, readyState/networkState. Sirve para capturar EXACTO
@@ -630,6 +631,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     lastSeekAt = 0;
     lastPlayingPos = 0;
     seekStuckSince = 0;
+    lastBufferAhead = 0;
   }
 
   // ── Recuperaciones por camino (recargan el stream desde la posición actual) ──
@@ -812,6 +814,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       if (stallRecovering || switchingAudio || video.paused || video.ended) {
         stallLastTime = video.currentTime;
         stallStuckSince = 0;
+        lastBufferAhead = bufferAhead(video);
         return;
       }
       const t = video.currentTime;
@@ -821,9 +824,24 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         lastPlayingPos = t; // posición segura para volver si un seek futuro se traba
         stallStuckSince = 0;
         stallRecoveries = 0;
+        lastBufferAhead = bufferAhead(video);
         return;
       }
-      // En play pero sin avanzar → cronometrar cuánto lleva trabado.
+      // currentTime NO avanza. Pero ¿el BUFFER está creciendo? BUG REAL encontrado (log del
+      // usuario, 2026-07-10): en /t/, tras (re)cargar en un offset, el video queda en
+      // currentTime≈0 juntando buffer ANTES de arrancar (necesita rebufferingGoal). RD entrega
+      // lento → tarda. Mirando SOLO currentTime, el monitor lo veía "trabado" y RECARGABA →
+      // eso tira el buffer a CERO → nunca llega a arrancar → LOOP recargando en la misma
+      // posición (t=662s repetido en el log) → "se demora mucho". Fix: si el buffer CRECE, la
+      // descarga SÍ progresa (solo es lenta) → NO recuperar, dejar que junte hasta arrancar.
+      const curBuf = bufferAhead(video);
+      if (curBuf > lastBufferAhead + 0.15) {
+        lastBufferAhead = curBuf;
+        stallStuckSince = 0;
+        return;
+      }
+      lastBufferAhead = curBuf;
+      // Ni currentTime ni buffer avanzan → trabado DE VERDAD → cronometrar cuánto lleva.
       if (stallStuckSince === 0) {
         stallStuckSince = Date.now();
         return;
