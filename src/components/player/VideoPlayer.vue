@@ -799,11 +799,10 @@ onBeforeUnmount(() => {
   background: #000;
   pointer-events: none;
 }
-/* Loader del seek/corte /t/. Cubre toda el área con un oscurecido SUTIL (vignette): en
-   desktop deja ver el frozen-frame por los bordes; en TV, donde el canvas suele quedar
-   NEGRO (el navegador no lee el <video> por hardware al canvas), este spinner grande +
-   "Cargando…" hace que se lea como CARGANDO y no como una pantalla negra rota. Es el fix
-   del "queda 1s en negro al adelantar/retroceder" en TV. */
+/* Loader del seek/corte /t/. SIN fondo oscuro: el frozen-frame (canvas, z-index 55) DEBE
+   verse — se comprobó que en la TV el canvas SÍ muestra la imagen congelada. Solo se
+   superpone el spinner + "Cargando…" (con sombra fuerte para leerse sobre cualquier
+   cuadro). Un fondo oscuro acá tapaba la imagen y la hacía ver negra (regresión 41dae4b). */
 .tpipeline-loader {
   position: absolute;
   inset: 0;
@@ -814,22 +813,22 @@ onBeforeUnmount(() => {
   justify-content: center;
   gap: 14px;
   pointer-events: none;
-  background: radial-gradient(circle at center, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0.2) 35%, transparent 65%);
 }
 .tpipeline-spinner {
   width: 46px;
   height: 46px;
-  border: 3px solid rgba(255, 255, 255, 0.18);
+  border: 3px solid rgba(255, 255, 255, 0.25);
   border-top: 3px solid #3d5afe;
   border-radius: 50%;
   animation: tpipeline-spin 0.8s linear infinite;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
 }
 .tpipeline-loader-text {
-  color: rgba(255, 255, 255, 0.92);
+  color: #fff;
   font-size: 0.85rem;
   font-weight: 600;
   letter-spacing: 0.03em;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
 }
 @keyframes tpipeline-spin {
   to { transform: rotate(360deg); }
