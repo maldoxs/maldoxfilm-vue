@@ -39,6 +39,8 @@ const props = defineProps<{
   rdStreamResolver: RdStreamResolver;
   rdClient: RealDebridClient;
   title: string;
+  /** Backdrop de la peli (URL TMDB) — fondo del loader durante seek/carga (sobre todo en TV). */
+  backdropUrl?: string;
   /** Duración de la peli (seg, de TMDB) — fallback cuando `video.duration` es Infinity (transcode RD). */
   runtimeSec?: number;
   /**
@@ -265,6 +267,12 @@ const nfControls = useNetflixControls({
 });
 
 const isLoading = ref(true);
+
+// ── Direct Play (formato correcto: H264+AAC → HTTP nativo, fluido) ───────────
+// Señal FIABLE: NO es /t/ (isTpipeline) NI transcode DASH (dashBaseUrl). Ambos caminos
+// no-directos setean uno de esos; Direct Play deja los dos vacíos. Se usa para el aviso
+// "⚡ Reproducción directa" (solo en las pelis que cumplen el formato, a pedido).
+const isDirectPlay = computed(() => !player.isTpipeline.value && !player.dashBaseUrl.value);
 
 // ── Auto-hide de controles (preserva `controls-hidden` del original) ────────
 const controlsHidden = ref(false);
@@ -638,13 +646,31 @@ onBeforeUnmount(() => {
       <!-- Freeze-frame + loader: seek del pipeline /t/ (tpipelineSeeking) O cualquier corte
            a mitad de reproducción (bufferingOverlay, disparado por el 'waiting' nativo del
            <video> — cubre stall-recovery, buffering, cualquier motivo, no solo el seek). -->
-      <canvas v-show="player.tpipelineSeeking.value || bufferingOverlay" ref="freezeCanvasRef" class="tpipeline-freeze"></canvas>
+      <!-- Backdrop de la peli: fondo del loader cuando el seek/corte carga. En la TV el canvas
+           (frozen-frame) devuelve NEGRO (plano de hardware webOS no se puede leer), así que la
+           imagen de TMDB reemplaza ese negro por la imagen de la peli + "Cargando…". Detrás del
+           canvas (z-index menor): en desktop el canvas con el cuadro real la tapa; en TV el
+           canvas va oculto (v-show !isTV) y se ve el backdrop. -->
+      <img
+        v-if="backdropUrl && (player.tpipelineSeeking.value || bufferingOverlay)"
+        :src="backdropUrl"
+        class="tpipeline-backdrop"
+        alt=""
+      />
+      <canvas v-show="!deviceStore.isTV && (player.tpipelineSeeking.value || bufferingOverlay)" ref="freezeCanvasRef" class="tpipeline-freeze"></canvas>
       <div v-if="player.tpipelineSeeking.value || bufferingOverlay" class="tpipeline-loader">
         <div class="tpipeline-spinner"></div>
         <span class="tpipeline-loader-text">Cargando…</span>
       </div>
 
       <video ref="videoRef" class="video-el" playsinline @click="onVideoClick"></video>
+
+      <!-- Aviso "⚡ Reproducción directa": SOLO en las pelis que cumplen el formato (Direct
+           Play, H264+AAC → fluido). Aparece/desaparece con la barra de controles. En /t/ y
+           transcode NO se muestra (esas pueden cortar). -->
+      <div v-if="isDirectPlay && !isLoading" class="playback-notice" :class="{ hidden: controlsHidden }">
+        ⚡ Reproducción directa
+      </div>
 
       <SubtitleOverlay :text="subtitles.activeCueText.value" :enabled="subtitles.enabled.value" />
 
@@ -829,6 +855,20 @@ onBeforeUnmount(() => {
    los subtítulos se veían "atravesando" la pantalla de carga (aparecían antes que el video
    real). Ahora queda por encima, cubriendo TODO — video negro Y subtítulos — mientras dure
    el corte. Sigue por debajo de .player-loading (60), que es el overlay de carga inicial. */
+/* Backdrop de la peli (TMDB) — fondo del loader durante seek/carga. z-index 54: DEBAJO del
+   canvas (55) y del loader (56). En TV el canvas va oculto → se ve esta imagen en vez de
+   negro. Atenuado (brightness) para que el spinner + "Cargando…" se lean encima. */
+.tpipeline-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 54;
+  background: #000;
+  pointer-events: none;
+  filter: brightness(0.5);
+}
 .tpipeline-freeze {
   position: absolute;
   inset: 0;
@@ -872,6 +912,32 @@ onBeforeUnmount(() => {
 }
 @keyframes tpipeline-spin {
   to { transform: rotate(360deg); }
+}
+
+/* Aviso "⚡ Reproducción directa" — solo en pelis con formato correcto (Direct Play).
+   Arriba-centro, se desvanece junto con la barra de controles. z-index 40 (como .nf-controls,
+   por debajo del freeze/loader del seek). */
+.playback-notice {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: opacity var(--trans, 0.25s ease);
+}
+.playback-notice.hidden {
+  opacity: 0;
 }
 
 .nf-controls {

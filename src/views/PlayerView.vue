@@ -113,6 +113,8 @@ const fullscreen = useFullscreen({
 
 // ── Derivados de `playerStore.current` ───────────────────────────────────────
 const title = computed(() => playerStore.current.title || 'Cargando...');
+// Backdrop de la peli (TMDB) — fondo del loader del reproductor RD durante seek/carga.
+const backdropUrl = ref('');
 /** epInfo — preserva `updateEpInfo` (línea ~7623-7626). */
 const epInfo = computed(() =>
   playerStore.current.type === 'tv' ? `T${playerStore.current.season} · E${playerStore.current.episode}` : ''
@@ -1068,6 +1070,8 @@ interface DetailPayload {
   name?: string;
   number_of_seasons?: number | null;
   runtime?: number | null;
+  backdrop_path?: string | null;
+  poster_path?: string | null;
 }
 
 async function init() {
@@ -1108,6 +1112,10 @@ async function init() {
     detailTitle = data.title || data.name || '';
     totalSeasons = data.number_of_seasons || 1;
     movieRuntime = data.runtime || 0; // duración de la peli (min) → fallback de duración del player
+    // Backdrop de la peli (imagen ancha de TMDB) → fondo del loader durante seek/carga en TV,
+    // donde el frozen-frame por canvas es imposible (plano de hardware webOS). Fallback al póster.
+    const img = data.backdrop_path || data.poster_path || null;
+    backdropUrl.value = img ? `${IMG}w780${img}` : '';
   } catch {
     /* silenciar — preserva el modo degradado del original (título queda vacío, totalSeasons=1) */
   }
@@ -1252,7 +1260,7 @@ onBeforeUnmount(() => {
 
       <!-- Real-Debrid — siempre montado, mostrado vía v-show -->
       <div v-show="isRdSource" class="rd-wrap">
-        <VideoPlayer ref="videoPlayerRef" :rd-stream-resolver="rdStreamResolver" :rd-client="rdClient" :title="title" :runtime-sec="(playerStore.current.runtimeMin || 0) * 60" :page-fullscreen="fullscreen.isFullscreen.value" @started="onRdStarted" @fallback-to-next-source="fallbackToFirstSource" @toggle-fullscreen="fullscreen.toggle" @native-fullscreen-exit="onNativeFullscreenExit">
+        <VideoPlayer ref="videoPlayerRef" :rd-stream-resolver="rdStreamResolver" :rd-client="rdClient" :title="title" :backdrop-url="backdropUrl" :runtime-sec="(playerStore.current.runtimeMin || 0) * 60" :page-fullscreen="fullscreen.isFullscreen.value" @started="onRdStarted" @fallback-to-next-source="fallbackToFirstSource" @toggle-fullscreen="fullscreen.toggle" @native-fullscreen-exit="onNativeFullscreenExit">
           <template v-if="showEpisodeControls" #episode-triggers>
             <EpisodeTriggers
               @next-enter="onNextEnter" @next-leave="onNextLeave" @next-tap="onNextTap"

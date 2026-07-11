@@ -1306,6 +1306,10 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     tpipelineState = null;
     tpipelineOffset.value = 0;
     tpipelineSeeking.value = false;
+    // Reset también dashBaseUrl: solo lo setean los caminos DASH (/t/ y transcode legacy).
+    // Así `!isTpipeline && !dashBaseUrl` identifica de forma FIABLE el Direct Play (formato
+    // correcto, fluido) — sin arrastrar un valor viejo de un título anterior que era /t/.
+    dashBaseUrl.value = null;
     // PROTECCIÓN (2026-07-05): el <video> es el MISMO elemento DOM reusado entre títulos
     // (nunca se recrea). Si algún camino de seek/carga anterior silenció el audio y no
     // llegó a restaurarlo (bug real encontrado: un `return` temprano en tpipelineReloadMpd
