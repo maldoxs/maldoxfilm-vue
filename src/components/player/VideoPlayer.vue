@@ -646,18 +646,7 @@ onBeforeUnmount(() => {
       <!-- Freeze-frame + loader: seek del pipeline /t/ (tpipelineSeeking) O cualquier corte
            a mitad de reproducción (bufferingOverlay, disparado por el 'waiting' nativo del
            <video> — cubre stall-recovery, buffering, cualquier motivo, no solo el seek). -->
-      <!-- Backdrop de la peli: fondo del loader cuando el seek/corte carga. En la TV el canvas
-           (frozen-frame) devuelve NEGRO (plano de hardware webOS no se puede leer), así que la
-           imagen de TMDB reemplaza ese negro por la imagen de la peli + "Cargando…". Detrás del
-           canvas (z-index menor): en desktop el canvas con el cuadro real la tapa; en TV el
-           canvas va oculto (v-show !isTV) y se ve el backdrop. -->
-      <img
-        v-if="backdropUrl && (player.tpipelineSeeking.value || bufferingOverlay)"
-        :src="backdropUrl"
-        class="tpipeline-backdrop"
-        alt=""
-      />
-      <canvas v-show="!deviceStore.isTV && (player.tpipelineSeeking.value || bufferingOverlay)" ref="freezeCanvasRef" class="tpipeline-freeze"></canvas>
+      <canvas v-show="player.tpipelineSeeking.value || bufferingOverlay" ref="freezeCanvasRef" class="tpipeline-freeze"></canvas>
       <div v-if="player.tpipelineSeeking.value || bufferingOverlay" class="tpipeline-loader">
         <div class="tpipeline-spinner"></div>
         <span class="tpipeline-loader-text">Cargando…</span>
@@ -855,20 +844,6 @@ onBeforeUnmount(() => {
    los subtítulos se veían "atravesando" la pantalla de carga (aparecían antes que el video
    real). Ahora queda por encima, cubriendo TODO — video negro Y subtítulos — mientras dure
    el corte. Sigue por debajo de .player-loading (60), que es el overlay de carga inicial. */
-/* Backdrop de la peli (TMDB) — fondo del loader durante seek/carga. z-index 54: DEBAJO del
-   canvas (55) y del loader (56). En TV el canvas va oculto → se ve esta imagen en vez de
-   negro. Atenuado (brightness) para que el spinner + "Cargando…" se lean encima. */
-.tpipeline-backdrop {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  z-index: 54;
-  background: #000;
-  pointer-events: none;
-  filter: brightness(0.5);
-}
 .tpipeline-freeze {
   position: absolute;
   inset: 0;
