@@ -438,6 +438,10 @@ function captureFreezeFrame() {
 function onVideoTimeUpdateCapture() {
   const video = videoRef.value;
   if (!video || video.paused || video.seeking || video.readyState < 2) return;
+  // El video AVANZA DE VERDAD (timeupdate con readyState alto, sin pausa/seek). Recién acá
+  // apagamos el overlay "Cargando…" — NO en el evento 'playing', que en TV se dispara ANTES
+  // de que haya cuadro real y luego se re-traba → dejaba el "negro unos segundos sin nada".
+  if (bufferingOverlay.value) bufferingOverlay.value = false;
   const now = Date.now();
   if (now - lastCaptureAt < 300) return; // throttle — no hace falta capturar cada frame
   lastCaptureAt = now;
@@ -495,7 +499,9 @@ function onVideoPlayingResumed() {
     clearTimeout(waitingDebounce);
     waitingDebounce = null;
   }
-  bufferingOverlay.value = false;
+  // NO apagar bufferingOverlay acá: en TV 'playing' se dispara antes de que haya cuadro real
+  // y luego se re-traba → parpadeo/hueco negro. El overlay se apaga en onVideoTimeUpdateCapture
+  // cuando el video AVANZA de verdad. Acá solo cancelamos el debounce pendiente.
 }
 
 watch(videoRef, (video, prev) => {
