@@ -242,7 +242,7 @@ const nfControls = useNetflixControls({
       // BUENO (funciona en TV). tpipelineReloadMpd hará video.pause() 300ms después, y para
       // entonces el decoder ya soltó el cuadro (en TV daría NEGRO). Capturando acá, el overlay
       // del seek (tpipelineSeeking) muestra la imagen CONGELADA en vez de negro al adelantar.
-      captureFreezeFrame();
+      captureFreezeFrame('seekOverride');
       void player.tpipelineSeekTo(seconds);
     } else {
       // Direct Play / transcode legacy: seek nativo (HTTP Range). Silenciar hasta
@@ -436,14 +436,25 @@ let lastCaptureAt = 0;
 let lastSeenTime = 0; // currentTime del tick anterior — detecta avance real
 let smoothTicks = 0; // ticks consecutivos con avance real — ~1s de reproducción continua
 
-function captureFreezeFrame() {
+function captureFreezeFrame(src = '') {
   const video = videoRef.value;
   const canvas = freezeCanvasRef.value;
-  if (!video || !canvas || video.readyState < 2) return;
+  // DIAG temporal (2026-07-11): loguea solo las capturas ETIQUETADas (las del seek/corte), no
+  // las continuas. Sirve para ver EXACTO por qué el cuadro queda negro al adelantar.
+  const diag = !!src;
+  if (!video || !canvas) {
+    if (diag) console.warn(`[FREEZE ${src}] SKIP sin video/canvas`);
+    return;
+  }
+  if (video.readyState < 2) {
+    if (diag) console.warn(`[FREEZE ${src}] SKIP readyState=${video.readyState} vw=${video.videoWidth} paused=${video.paused} seeking=${video.seeking}`);
+    return;
+  }
   canvas.width = video.videoWidth || 1280;
   canvas.height = video.videoHeight || 720;
   const ctx = canvas.getContext('2d');
   if (ctx) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  if (diag) console.warn(`[FREEZE ${src}] DIBUJÓ readyState=${video.readyState} vw=${video.videoWidth} paused=${video.paused}`);
 }
 
 function onVideoTimeUpdateCapture() {
@@ -507,7 +518,7 @@ function onVideoWaiting() {
   // Capturar el cuadro al trabarse, por si el corte fue tan repentino que 'timeupdate' no
   // llegó a capturarlo. captureFreezeFrame() se protege sola (readyState<2 → no dibuja), así
   // que si el <video> ya soltó el cuadro NO lo pisa con negro; si aún lo tiene, lo congela.
-  captureFreezeFrame();
+  captureFreezeFrame('waiting');
   // Umbral de 1s: los cortes MUY cortos (<1s) el <video> los absorbe solo; más largos
   // muestran el freeze-frame + loader (antes 2s dejaba ver negro más tiempo en TV).
   if (waitingDebounce) clearTimeout(waitingDebounce);
@@ -549,7 +560,7 @@ watch(videoRef, (video, prev) => {
 // el <video> retiene el último cuadro al pausar). Se restaura la captura que había sacado.
 watch(() => player.tpipelineSeeking.value, (seeking) => {
   if (!seeking) return;
-  captureFreezeFrame();
+  captureFreezeFrame('watch');
 });
 
 // ── Subtítulos en fullscreen nativo (SOLO móvil) ─────────────────────────────
