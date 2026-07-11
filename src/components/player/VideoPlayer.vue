@@ -424,6 +424,9 @@ defineExpose({
 // dispara sin importar el motivo del corte) y se apaga con 'playing'.
 const bufferingOverlay = ref(false);
 let lastCaptureAt = 0;
+// Para apagar el loader SOLO con reproducción sostenida (no al primer parpadeo):
+let lastSeenTime = 0; // currentTime del tick anterior — detecta avance real
+let smoothTicks = 0; // ticks consecutivos con avance real — ~1s de reproducción continua
 
 function captureFreezeFrame() {
   const video = videoRef.value;
@@ -438,10 +441,19 @@ function captureFreezeFrame() {
 function onVideoTimeUpdateCapture() {
   const video = videoRef.value;
   if (!video || video.paused || video.seeking || video.readyState < 2) return;
-  // El video AVANZA DE VERDAD (timeupdate con readyState alto, sin pausa/seek). Recién acá
-  // apagamos el overlay "Cargando…" — NO en el evento 'playing', que en TV se dispara ANTES
-  // de que haya cuadro real y luego se re-traba → dejaba el "negro unos segundos sin nada".
-  if (bufferingOverlay.value) bufferingOverlay.value = false;
+  // Apagar el overlay "Cargando…" SOLO con reproducción SOSTENIDA (~1s de avance continuo),
+  // NO al primer parpadeo. En TV, 'timeupdate'/'playing' pueden dispararse en t≈0 con
+  // readyState 4 ANTES de reproducir de verdad, y el video se re-traba enseguida → apagaba el
+  // loader dejando la barra visible + pantalla negra. Exigir ~4 ticks consecutivos de avance
+  // real (currentTime sube) hace que el loader se mantenga hasta que la peli CORRE de verdad.
+  const advancing = video.currentTime > lastSeenTime + 0.02;
+  lastSeenTime = video.currentTime;
+  if (advancing) {
+    smoothTicks++;
+    if (smoothTicks >= 4 && bufferingOverlay.value) bufferingOverlay.value = false;
+  } else {
+    smoothTicks = 0;
+  }
   const now = Date.now();
   if (now - lastCaptureAt < 300) return; // throttle — no hace falta capturar cada frame
   lastCaptureAt = now;
@@ -483,6 +495,7 @@ function onVideoWaiting() {
   // 'waiting' (sin datos aún) → se veían DOS loaders superpuestos (el grande + este chico).
   // Mientras isLoading esté activo, .player-loading ya comunica "cargando" — no duplicar.
   if (isLoading.value) return;
+  smoothTicks = 0; // se trabó → reiniciar la cuenta de "reproducción sostenida"
   // NO capturar acá: en el 'waiting' el <video> YA está en stall → readyState cae y
   // captureFreezeFrame() dibuja NEGRO, sobrescribiendo el último cuadro BUENO de la captura
   // continua (timeupdate/intervalo). Confiamos solo en la captura continua.
