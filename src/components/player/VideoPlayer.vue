@@ -130,6 +130,13 @@ const player: UsePlayerReturn = usePlayer({
   },
   onStarted: () => {
     isLoading.value = false;
+    // Evitar el HUECO NEGRO al reanudar en /t/: onStarted apaga el loader GRANDE
+    // (.player-loading), pero el <video> puede tardar en presentar el primer cuadro (RD
+    // generando el segmento) → quedaba negro SIN NADA hasta que arrancaba. Encendemos el
+    // overlay chico "Cargando…" (bufferingOverlay), que se apaga solo en el primer 'playing'
+    // (onVideoPlayingResumed). Así el loader NUNCA desaparece hasta que la peli arranca de
+    // verdad. Solo /t/ (Direct Play arranca instantáneo por HTTP nativo, no lo necesita).
+    if (player.isTpipeline.value) bufferingOverlay.value = true;
     nfControls.attach();
     // Arma el auto-hide de `.nf-controls` (barra de reproducción) apenas arranca el
     // video. Sin esto, `resetControlsAutoHide()` solo se disparaba con un mousemove/
