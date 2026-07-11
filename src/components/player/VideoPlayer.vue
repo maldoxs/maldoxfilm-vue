@@ -504,9 +504,10 @@ function onVideoWaiting() {
   // Mientras isLoading esté activo, .player-loading ya comunica "cargando" — no duplicar.
   if (isLoading.value) return;
   smoothTicks = 0; // se trabó → reiniciar la cuenta de "reproducción sostenida"
-  // NO capturar acá: en el 'waiting' el <video> YA está en stall → readyState cae y
-  // captureFreezeFrame() dibuja NEGRO, sobrescribiendo el último cuadro BUENO de la captura
-  // continua (timeupdate/intervalo). Confiamos solo en la captura continua.
+  // Capturar el cuadro al trabarse, por si el corte fue tan repentino que 'timeupdate' no
+  // llegó a capturarlo. captureFreezeFrame() se protege sola (readyState<2 → no dibuja), así
+  // que si el <video> ya soltó el cuadro NO lo pisa con negro; si aún lo tiene, lo congela.
+  captureFreezeFrame();
   // Umbral de 1s: los cortes MUY cortos (<1s) el <video> los absorbe solo; más largos
   // muestran el freeze-frame + loader (antes 2s dejaba ver negro más tiempo en TV).
   if (waitingDebounce) clearTimeout(waitingDebounce);
@@ -541,12 +542,15 @@ watch(videoRef, (video, prev) => {
   }
 });
 
-// Freeze-frame en el seek /t/: NO se captura acá. `tpipelineReloadMpd` hace `video.pause()`
-// de forma síncrona apenas pone tpipelineSeeking=true; este watch correría DESPUÉS del pause
-// → en la TV el decoder ya soltó el cuadro y captureFreezeFrame() dibujaría NEGRO,
-// sobrescribiendo el último cuadro BUENO de la captura continua. ESE era el bug de "al
-// retroceder se pone negra en vez de congelada". El canvas ya se MUESTRA con tpipelineSeeking
-// vía v-show; ahora conserva el cuadro bueno en vez de pisarlo con negro.
+// Freeze-frame al empezar un seek del pipeline /t/: capturar el último cuadro en el canvas
+// para que la pantalla NO se ponga negra durante la recarga de Shaka.
+// NOTA (2026-07-11): el usuario confirmó que en SU TV el cuadro SÍ se congela bien con esta
+// captura (mi hipótesis previa de que en TV daba negro tras el pause era falsa para su TV —
+// el <video> retiene el último cuadro al pausar). Se restaura la captura que había sacado.
+watch(() => player.tpipelineSeeking.value, (seeking) => {
+  if (!seeking) return;
+  captureFreezeFrame();
+});
 
 // ── Subtítulos en fullscreen nativo (SOLO móvil) ─────────────────────────────
 // El fullscreen nativo de iOS (`webkitEnterFullscreen`) muestra únicamente el
