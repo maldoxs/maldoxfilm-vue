@@ -651,7 +651,18 @@ onBeforeUnmount(() => {
       <!-- Freeze-frame + loader: seek del pipeline /t/ (tpipelineSeeking) O cualquier corte
            a mitad de reproducción (bufferingOverlay, disparado por el 'waiting' nativo del
            <video> — cubre stall-recovery, buffering, cualquier motivo, no solo el seek). -->
-      <canvas v-show="player.tpipelineSeeking.value || bufferingOverlay" ref="freezeCanvasRef" class="tpipeline-freeze"></canvas>
+      <!-- SOLO EN TV: backdrop de la peli detrás del canvas. Confirmado (2026-07-12): en la TV
+           el canvas NO puede leer el video (el chip decodifica en un plano de hardware separado,
+           invisible para JS — no es CORS: el mismo stream cross-origin SÍ se lee bien en
+           desktop, así que se descarta). El backdrop (imagen TMDB, no depende del video) es la
+           única imagen real que se puede mostrar de fondo en TV durante el seek/corte. -->
+      <img
+        v-if="deviceStore.isTV && backdropUrl && (player.tpipelineSeeking.value || bufferingOverlay)"
+        :src="backdropUrl"
+        class="tpipeline-backdrop"
+        alt=""
+      />
+      <canvas v-show="!deviceStore.isTV && (player.tpipelineSeeking.value || bufferingOverlay)" ref="freezeCanvasRef" class="tpipeline-freeze"></canvas>
       <div v-if="player.tpipelineSeeking.value || bufferingOverlay" class="tpipeline-loader">
         <div class="tpipeline-spinner"></div>
         <span class="tpipeline-loader-text">Cargando…</span>
@@ -849,6 +860,20 @@ onBeforeUnmount(() => {
    los subtítulos se veían "atravesando" la pantalla de carga (aparecían antes que el video
    real). Ahora queda por encima, cubriendo TODO — video negro Y subtítulos — mientras dure
    el corte. Sigue por debajo de .player-loading (60), que es el overlay de carga inicial. */
+/* Backdrop de la peli (TMDB) — SOLO TV, fondo del loader durante seek/corte, en vez de
+   negro. z-index 54: debajo del loader (56); el canvas va oculto en TV (v-show) así que no
+   compite. Atenuado para que el spinner + "Cargando…" se lean bien encima. */
+.tpipeline-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 54;
+  background: #000;
+  pointer-events: none;
+  filter: brightness(0.45);
+}
 .tpipeline-freeze {
   position: absolute;
   inset: 0;
