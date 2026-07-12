@@ -437,6 +437,12 @@ let lastSeenTime = 0; // currentTime del tick anterior — detecta avance real
 let smoothTicks = 0; // ticks consecutivos con avance real — ~1s de reproducción continua
 
 function captureFreezeFrame() {
+  // EN TV: no capturar. Comprobado con el log del usuario (2026-07-11) que en la smart-TV
+  // (webOS) `drawImage` del <video> copia NEGRO (el video vive en un plano de hardware que el
+  // canvas no puede leer). Entonces la captura NO sirve (da negro igual) y SÍ gasta CPU
+  // (drawImage de 1080p ~cada 400ms), compitiendo con el decoder ya justo de la TV → podía
+  // EMPEORAR el tironeo. En desktop/celular el canvas SÍ lee el video → ahí se mantiene.
+  if (deviceStore.isTV) return;
   const video = videoRef.value;
   const canvas = freezeCanvasRef.value;
   if (!video || !canvas || video.readyState < 2) return;
