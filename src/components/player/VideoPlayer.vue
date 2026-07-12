@@ -436,6 +436,26 @@ let lastCaptureAt = 0;
 let lastSeenTime = 0; // currentTime del tick anterior — detecta avance real
 let smoothTicks = 0; // ticks consecutivos con avance real — ~1s de reproducción continua
 
+// ── DIAG en pantalla SOLO para TV (temporal, 2026-07-12) ─────────────────────
+// En la TV no hay consola → para diagnosticar el tironeo hay que mostrarlo en pantalla.
+// Muestra en vivo: posición real, buffer por delante, readyState/networkState y cuántas
+// recargas de /t/ hubo (cada vez que tpipelineSeeking pasa a true). Si al trabarse el buffer
+// está en 0 y las recargas NO suben → RD generando lento. Si las recargas SUBEN sin que el
+// usuario toque nada → el monitor recarga de más (bug de código). Se saca cuando se resuelva.
+const tvDiag = ref('');
+let tvReloadCount = 0;
+watch(() => player.tpipelineSeeking.value, (s, prev) => {
+  if (s && !prev) tvReloadCount++;
+});
+let tvDiagTimer: ReturnType<typeof setInterval> | null = null;
+function tvBufAhead(v: HTMLVideoElement): number {
+  try {
+    return v.buffered.length ? Math.max(0, v.buffered.end(v.buffered.length - 1) - v.currentTime) : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function captureFreezeFrame() {
   // EN TV: no capturar. Comprobado con el log del usuario (2026-07-11) que en la smart-TV
   // (webOS) `drawImage` del <video> copia NEGRO (el video vive en un plano de hardware que el
@@ -543,6 +563,18 @@ watch(videoRef, (video, prev) => {
     video.addEventListener('waiting', onVideoWaiting);
     video.addEventListener('playing', onVideoPlayingResumed);
     startFreezeIntervalCapture();
+    // DIAG TV: actualizar el badge cada 500ms (solo TV).
+    if (deviceStore.isTV && !tvDiagTimer) {
+      tvDiagTimer = setInterval(() => {
+        const v = videoRef.value;
+        if (!v) return;
+        const off = player.isTpipeline.value ? player.tpipelineOffset.value : 0;
+        const real = off + (v.currentTime || 0);
+        const mm = Math.floor(real / 60);
+        const ss = String(Math.floor(real % 60)).padStart(2, '0');
+        tvDiag.value = `${mm}:${ss} buf:+${tvBufAhead(v).toFixed(1)}s rs:${v.readyState} net:${v.networkState} recargas:${tvReloadCount}`;
+      }, 500);
+    }
   } else {
     stopFreezeIntervalCapture();
   }
@@ -627,6 +659,10 @@ onBeforeUnmount(() => {
   if (hideTimer) clearTimeout(hideTimer);
   if (waitingDebounce) clearTimeout(waitingDebounce);
   stopFreezeIntervalCapture();
+  if (tvDiagTimer) {
+    clearInterval(tvDiagTimer);
+    tvDiagTimer = null;
+  }
   const video = videoRef.value;
   if (video) {
     video.removeEventListener('webkitbeginfullscreen', onBeginNativeFs);
@@ -651,6 +687,9 @@ onBeforeUnmount(() => {
       <div class="spinner"></div>
       <p class="player-loading-text">Cargando…</p>
     </div>
+
+    <!-- DIAG TV (temporal): badge visible SOLO en TV para diagnosticar el tironeo sin consola. -->
+    <div v-if="deviceStore.isTV && tvDiag" class="tv-diag">{{ tvDiag }}</div>
 
     <div class="player-frame-wrap" @mousemove="resetControlsAutoHide">
       <!-- Freeze-frame + loader: seek del pipeline /t/ (tpipelineSeeking) O cualquier corte
@@ -923,6 +962,23 @@ onBeforeUnmount(() => {
 }
 .playback-notice.hidden {
   opacity: 0;
+}
+
+/* DIAG TV (temporal) — badge de diagnóstico arriba-izquierda, muy visible para fotografiar. */
+.tv-diag {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 70;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #7CFC00;
+  font-family: monospace;
+  font-size: 1rem;
+  font-weight: 700;
+  border-radius: 6px;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .nf-controls {
