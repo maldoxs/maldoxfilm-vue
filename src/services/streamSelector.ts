@@ -90,6 +90,18 @@ export const hasBadAudio = (s: TorrentioStream): boolean => BAD_AUDIO_RE.test(st
 export const isAV1 = (s: TorrentioStream): boolean => /\bav1\b|\bavo1\b/i.test(streamInfo(s));
 
 /**
+ * isDirectPlayEligible — Direct Play REAL: reproduce nativo (sin transcode) → HTTP
+ * Range/seek instantáneo, nunca se traba (a diferencia de /t/ o transcode, que
+ * dependen de que RD genere el stream al vuelo). Debe coincidir con el gate de
+ * `usePlayer.ts`: un MKV SIN AAC explícito SIEMPRE transcodea (aunque diga x264 y
+ * no diga AC3) → no es Direct Play. Extraída de `scoreStream` para poder REUSARLA
+ * en `resolveActiveStream` (2026-07-12): antes solo vivía inline ahí, así que no se
+ * podía preguntar "¿esta alternativa SÍ sería Direct Play?" en ningún otro lado.
+ */
+export const isDirectPlayEligible = (s: TorrentioStream): boolean =>
+  hasH264(s) && !hasBadAudio(s) && !(isMkv(s) && !hasAAC(s));
+
+/**
  * audioCompatScore — compatibilidad del audio para Direct Play (PRIORIDAD 3).
  * Orden: AAC > AC3 > EAC3/DDP > DTS > TrueHD > Atmos. AAC reproduce nativo (sin
  * transcode); el resto fuerza transcode RD o falla — peor cuanto más "avanzado".
@@ -162,10 +174,7 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
   else if (/\[rd download\]/.test(nm)) pts -= 200;
   else if (hasRD(s)) pts += 0;
 
-  // Direct Play REAL: reproduce nativo (sin transcode) → seek por byte-range. Debe
-  // coincidir con el gate de playback.ts: un MKV SIN AAC explícito SIEMPRE transcodea
-  // (aunque diga x264 y no diga AC3) → no es Direct Play.
-  const directPlay = hasH264(s) && !hasBadAudio(s) && !(isMkv(s) && !hasAAC(s));
+  const directPlay = isDirectPlayEligible(s);
 
   // ── P2 — Códec de video. H264 importa SOBRE TODO para Direct Play (decode nativo +
   // seek). Si igual va a transcode, RD re-encodea la fuente → el códec pesa poco. ──
@@ -368,6 +377,36 @@ export function resolveActiveStream(
     }
   }
 
+  // RONDA "upgrade a fluido" (2026-07-12, a pedido — "no quiero más pausas, quiero
+  // reproducciones fluidas"): si el candidato con match NO es Direct Play (va a
+  // transcodear/`/t/`, que es donde SIEMPRE puede haber cortes — confirmado con evidencia
+  // real, ver sesión), buscar en el resto del pool una alternativa que:
+  //   1) SÍ sea Direct Play real (isDirectPlayEligible), y
+  //   2) también tenga match en `downloads` (o sea, reproducible YA, sin esperar nada).
+  // El pool ya viene ordenado por puntaje descendente, así que la PRIMERA que cumpla
+  // ambas condiciones es la mejor Direct Play disponible. Reemplaza al match actual.
+  // Riesgo bajo: solo corre cuando ya hay match pero NO es fluido — si no aparece nada
+  // mejor, el resultado es IDÉNTICO al actual (se queda con el match de Ronda 1).
+  if (match && !isDirectPlayEligible(activeBest)) {
+    for (const cand of pool) {
+      if (cand.s === activeBest) continue;
+      if (!isDirectPlayEligible(cand.s)) continue;
+      const candFn = extractFilename(cand.s);
+      const candMatch = matchInDownloads(cand.s.url || '', cand.s.url || '', candFn, downloads);
+      if (candMatch && !isJunkMatch(candMatch)) {
+        console.warn(
+          '[RD] Top no es Direct Play — upgrade a fluido:', candFn, '| score:', cand.pts,
+          '(antes:', activeFilename, ')'
+        );
+        match = candMatch;
+        activeBest = cand.s;
+        activeUrl = cand.s.url || '';
+        activeFilename = candFn;
+        break;
+      }
+    }
+  }
+
   if (match) {
     rdId = match.id;
     rdDownloadUrl = match.download || null;
@@ -517,6 +556,20 @@ export function selectBestStream(
     '| lang:', detectedLang, '| score:', pool[0]?.pts,
     '| gb:', getGb(best).toFixed(1),
     '| H264:', hasH264(best), '| AAC:', hasAAC(best)
+  );
+
+  // DIAG temporal (2026-07-12, a pedido) — ranking completo de los primeros 10 candidatos
+  // (no solo el elegido), para poder auditar si el algoritmo eligió bien SIN reconstruir el
+  // cálculo a mano cada vez. Muestra si cada uno es Direct Play real (fluido) o no.
+  console.warn(
+    '[RD] Ranking (top 10):',
+    pool.slice(0, 10).map((p, i) => ({
+      i,
+      pts: p.pts,
+      directPlay: isDirectPlayEligible(p.s),
+      gb: getGb(p.s).toFixed(1),
+      filename: extractFilename(p.s) || p.s.name,
+    }))
   );
 
   const fallbackUrl = pickFallbackUrl(best, withUrl);
