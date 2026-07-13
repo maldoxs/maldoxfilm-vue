@@ -272,17 +272,6 @@ function isLowMemoryDevice(): boolean {
   }
 }
 
-// ── COLCHÓN MÁXIMO (bufferingGoal) — "que la gris vuele" (2026-07-12, a pedido) ──
-// En /t/ RD genera a ~1x, PERO en escenas fáciles (diálogos/planos quietos) genera MÁS
-// rápido que 1x por momentos. Con un techo bajo (90s), Shaka deja de pedir al llegar y TIRA
-// ese excedente. Con un techo GRANDE, Shaka banca todo ese excedente → la barra gris arma
-// una ventaja enorme que cubre las escenas lentas de después, sin depender de que RD sea
-// rápido en el momento exacto. El único límite real es la RAM (no "competir con RD": /t/
-// genera secuencial, así que subir el goal NO cambia QUÉ segmento se pide, solo hasta cuándo
-// se sigue pidiendo). A la tasa transcodeada de /t/ (~3 Mbps): TV/low-mem 300s ≈ ~110-150 MB
-// (seguro), desktop 900s ≈ ~340 MB. El bufferBehind se mantiene chico para no duplicar RAM.
-const MAX_BUFFER_GOAL_SEC = isLowMemoryDevice() ? 300 : 900;
-
 async function _shakaLoad(video: HTMLVideoElement, url: string, startTime?: number) {
   if (_shakaPlayer) {
     try {
@@ -320,10 +309,13 @@ async function _shakaLoad(video: HTMLVideoElement, url: string, startTime?: numb
       connectionTimeout: 0, // sin límite de conexión (RD long-pollea el segmento)
       stallTimeout: 0,
     },
-    // bufferingGoal: 30 → 45 → 90 → MAX_BUFFER_GOAL_SEC (300 TV / 900 desktop). Techo GRANDE
-    // para BANCAR el excedente de RD en escenas fáciles (ver nota de MAX_BUFFER_GOAL_SEC) →
-    // "que la gris vuele". Acotado por RAM, no por "competir con RD". Revertir con pre-buffer-max.
-    bufferingGoal: MAX_BUFFER_GOAL_SEC,
+    // bufferingGoal: 30 → 45 → 90 (2026-07-12, a pedido: "sacarle más ventaja a la gris").
+    // Es el TECHO de cuánto colchón puede juntar por delante. Ahora que el latido continuo
+    // (heartbeat) mantiene a RD generando (4 min estables confirmados), se sube el techo para
+    // aprovechar los momentos en que RD genera >1x y stockpilear más ventaja. NOTA: subir
+    // este valor ya empeoró ANTES sin el heartbeat; el contexto ahora es distinto. Si RD está
+    // consistentemente <1x, no ayuda (la ventaja se achica igual). Revertir con pre-buffer-90.
+    bufferingGoal: 90,
     rebufferingGoal: 2,
     bufferBehind: isLowMemoryDevice() ? 10 : 30,
   };
@@ -638,7 +630,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     }
     console.warn(`[/t/] Pre-buffer: +${bufferAhead(video).toFixed(1)}s tras ${((Date.now() - start) / 1000).toFixed(1)}s de espera`);
     try {
-      _shakaPlayer?.configure({ streaming: { bufferingGoal: MAX_BUFFER_GOAL_SEC } }); // techo grande para bancar excedente (ver nota)
+      _shakaPlayer?.configure({ streaming: { bufferingGoal: 90 } }); // restaurar al normal (90 — ver experimento de streamingCfg)
     } catch {
       /* noop */
     }
