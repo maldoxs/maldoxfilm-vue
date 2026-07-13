@@ -515,6 +515,7 @@ export function buildSelectedStream(params: {
     rdFilesize: active.rdFilesize,
     infoHash: finalHash,
     unavailableInRd: active.unavailableInRd,
+    hasLatinoTag: hasLatino(bestFinal),
   };
 }
 

@@ -74,6 +74,15 @@ export interface SelectedStream {
    * evitar acumulación (ADR-006). Solo viene en el camino server-side.
    */
   serverTorrentId?: string | null;
+  /**
+   * hasLatinoTag — el título/nombre del torrent elegido menciona audio latino/español
+   * (ver `hasLatino` en streamSelector.ts). Bug real encontrado (2026-07-13): el camino
+   * server-side (`rd-stream`, ADR-004) hardcodeaba `hasNativeSpanish: false` SIEMPRE, sin
+   * mirar esto — un torrent "Dual Audio Español Latino Ing" reproducía en inglés porque
+   * nada le pedía a Shaka la pista en español. Se usa para configurar
+   * `preferredAudioLanguage` en Shaka en ese camino.
+   */
+  hasLatinoTag?: boolean;
 }
 
 // ── Resultado intermedio del scoring (stream + puntaje) ──────────────────────

@@ -281,7 +281,7 @@ function isLowMemoryDevice(): boolean {
   }
 }
 
-async function _shakaLoad(video: HTMLVideoElement, url: string, startTime?: number) {
+async function _shakaLoad(video: HTMLVideoElement, url: string, startTime?: number, preferredAudioLang?: string) {
   if (_shakaPlayer) {
     try {
       await _shakaPlayer.destroy();
@@ -329,6 +329,18 @@ async function _shakaLoad(video: HTMLVideoElement, url: string, startTime?: numb
     bufferBehind: isLowMemoryDevice() ? 10 : 30,
   };
   p.configure({ streaming: streamingCfg });
+  // BUG real encontrado (log: "El Padrino"): el camino server-side (rd-stream, DASH
+  // multi-audio) nunca le decía a Shaka qué pista de audio preferir → tomaba la que el
+  // manifest trae por default (a veces inglés, aunque el torrent sea "Dual Audio Español
+  // Latino"). Se le pasa la preferencia ANTES de `load()` (Shaka la aplica al armar la
+  // selección de variantes).
+  if (preferredAudioLang) {
+    try {
+      p.configure({ preferredAudioLanguage: preferredAudioLang });
+    } catch {
+      /* noop — no debe romper la carga si el config no aplica */
+    }
+  }
   await p.load(url, typeof startTime === 'number' && startTime > 0 ? startTime : null);
 }
 
@@ -935,8 +947,9 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     hasNativeSpanish: boolean;
     spanishTrackName: string | null;
     myGen: number;
+    preferredAudioLang?: string;
   }) {
-    const { video, url, isBadAudio, hasNativeSpanish, spanishTrackName, myGen } = params;
+    const { video, url, isBadAudio, hasNativeSpanish, spanishTrackName, myGen, preferredAudioLang } = params;
     let started = false;
     scheduleLoadingMessages(isBadAudio, () => started);
 
@@ -973,7 +986,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // en TV). Ahora el rechazo cae en el catch de abajo, que ya sabe avisar y cambiar de
       // reproductor.
       await loadShakaIfNeeded();
-      await _shakaLoad(video, url);
+      await _shakaLoad(video, url, undefined, preferredAudioLang);
       if (hasNativeSpanish) opts.onNativeSpanishDetected?.();
       spanishTrack.value = spanishTrackName;
       activeTrack.value = spanishTrackName ?? 'eng1';
@@ -1439,7 +1452,12 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // Recordar el torrent creado por rd-stream para borrarlo al cerrar/cambiar (ADR-006).
       currentServerTorrentId = selected.serverTorrentId ?? null;
       opts.onToast('🔄 Optimizando video para tu navegador...');
-      opts.onStreamReady?.({ selected, hasNativeSpanish: false, spanishTrack: null });
+      // BUG real encontrado (log: "El Padrino"): este camino server-side hardcodeaba
+      // `hasNativeSpanish: false` SIEMPRE, sin mirar si el torrent elegido traía audio
+      // latino (`hasLatinoTag`) — un "Dual Audio Español Latino Ing" terminaba sonando
+      // en inglés porque nada le pedía a Shaka la pista en español.
+      const wantsSpanish = !!selected.hasLatinoTag;
+      opts.onStreamReady?.({ selected, hasNativeSpanish: wantsSpanish, spanishTrack: null });
       if (selected.serverDashUrl) {
         // DASH → Shaka (multi-audio + Range). Habilita el panel de cambio de audio.
         dashBaseUrl.value = buildDashBaseUrl(selected.serverDashUrl);
@@ -1447,9 +1465,10 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
           video,
           url: selected.serverDashUrl,
           isBadAudio: false,
-          hasNativeSpanish: false,
+          hasNativeSpanish: wantsSpanish,
           spanishTrackName: null,
           myGen,
+          preferredAudioLang: wantsSpanish ? 'spa' : undefined,
         });
       } else if (selected.serverHlsUrl) {
         await loadHlsTranscoded({ video, url: selected.serverHlsUrl, isBadAudio: false, streamFilename: streamFn, myGen });
