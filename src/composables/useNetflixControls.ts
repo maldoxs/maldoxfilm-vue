@@ -45,6 +45,13 @@ export interface UseNetflixControlsOptions {
    * Pipeline /t/: recarga el MPD en la posición.
    */
   seekOverride?: (seconds: number) => void;
+  /**
+   * Override del "final" del buffer (seg, posición ABSOLUTA en la peli). En Direct Play,
+   * `video.buffered` ya está en la línea de tiempo real → no hace falta. En /t/, cada
+   * recarga del MPD reinicia su propia línea de tiempo en 0 → hay que sumarle el offset
+   * (igual que `timeOverride`) para saber hasta dónde real está descargado.
+   */
+  bufferedEndOverride?: () => number | null;
 }
 
 /**
@@ -63,6 +70,9 @@ export interface UseNetflixControlsReturn {
   speed: Ref<number>;
   /** Porcentaje (0-100) de progreso — congelado durante seek manual. */
   progressPct: Ref<number>;
+  /** Porcentaje (0-100) de cuánto está descargado/bufferizado por delante — indicador visual
+   *  (barra gris) de hasta dónde se puede adelantar sin esperar carga. */
+  bufferedPct: Ref<number>;
   /** "0:00" / "1:23:45" — tiempo transcurrido. */
   elapsedLabel: Ref<string>;
   /** "-12:34" estilo Netflix — tiempo restante (formateado, sin signo: el original tampoco lo agrega). */
@@ -111,6 +121,7 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
   const volume = ref(1);
   const speed = ref(1);
   const progressPct = ref(0);
+  const bufferedPct = ref(0);
   const elapsedLabel = ref('0:00');
   const remainingLabel = ref('0:00');
   const tooltipLabel = ref('');
@@ -136,6 +147,18 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     return ov != null ? ov : vv.currentTime;
   }
 
+  /** Posición ABSOLUTA (seg) hasta donde está bufferizado: override (/t/, con offset) >
+   *  `video.buffered` nativo (Direct Play, ya en la línea de tiempo real). */
+  function effBufferedEnd(vv: HTMLVideoElement): number {
+    const ov = opts.bufferedEndOverride?.();
+    if (ov != null) return ov;
+    try {
+      return vv.buffered.length ? vv.buffered.end(vv.buffered.length - 1) : 0;
+    } catch {
+      return 0;
+    }
+  }
+
   // ── Tick — reemplaza `_nfTick` (línea ~4103-4117) ────────────────────────
   function tick() {
     const v = video();
@@ -146,6 +169,7 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     if (!seeking) progressPct.value = pct;
     elapsedLabel.value = formatNfTime(t);
     remainingLabel.value = formatNfTime((dur || 0) - t);
+    bufferedPct.value = dur ? Math.min(100, (effBufferedEnd(v) / dur) * 100) : 0;
   }
 
   const onPlay = () => {
@@ -325,6 +349,7 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
   function resetProgress() {
     seeking = false;
     progressPct.value = 0;
+    bufferedPct.value = 0;
     elapsedLabel.value = '0:00';
     remainingLabel.value = '0:00';
   }
@@ -341,6 +366,7 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     volume,
     speed,
     progressPct,
+    bufferedPct,
     elapsedLabel,
     remainingLabel,
     tooltipLabel,

@@ -235,6 +235,19 @@ const nfControls = useNetflixControls({
     // caer al nativo, que no es de fiar en este camino.
     return player.tpipelineDuration.value || props.runtimeSec || null;
   },
+  // Barra gris de "cuánto está descargado" (a pedido, 2026-07-12): en /t/ cada recarga del
+  // MPD reinicia su propia línea de tiempo en 0 → sumar el offset para saber hasta dónde,
+  // en la posición REAL de la peli, está bufferizado (igual criterio que timeOverride).
+  bufferedEndOverride: () => {
+    if (!player.isTpipeline.value) return null;
+    const v = videoRef.value;
+    if (!v || !v.buffered.length) return null;
+    try {
+      return player.tpipelineOffset.value + v.buffered.end(v.buffered.length - 1);
+    } catch {
+      return null;
+    }
+  },
   seekOverride: (seconds: number) => {
     if (player.isTpipeline.value) {
       // Capturar el cuadro AHORA, en el instante del seek: el <video> todavía está
@@ -690,6 +703,7 @@ onBeforeUnmount(() => {
             @mousedown="nfControls.onSeekBarMouseDown"
             @mousemove="nfControls.onSeekBarMouseMove"
           >
+            <div class="nf-seek-buffered" :style="{ width: nfControls.bufferedPct.value + '%' }"></div>
             <div class="nf-seek-fill" :style="{ width: nfControls.progressPct.value + '%' }"></div>
             <div class="nf-seek-dot" :style="{ left: nfControls.progressPct.value + '%' }"></div>
             <div class="nf-seek-tooltip" :style="{ left: nfControls.tooltipPct.value + '%' }">{{ nfControls.tooltipLabel.value }}</div>
@@ -984,7 +998,23 @@ onBeforeUnmount(() => {
 .nf-seek-bar:hover {
   height: 5px;
 }
+/* Barra de "descargado/bufferizado" (a pedido, 2026-07-12) — indica hasta dónde se puede
+   adelantar sin esperar carga. Va DEBAJO del relleno azul (mismo z-order que el DOM: se
+   pinta primero); ambas necesitan position:absolute para superponerse sobre el riel en vez
+   de apilarse una debajo de la otra (el riel no es flex, es block normal). */
+.nf-seek-buffered {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.45);
+  border-radius: 2px;
+  pointer-events: none;
+}
 .nf-seek-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
   height: 100%;
   background: var(--accent, #3d5afe);
   border-radius: 2px;
