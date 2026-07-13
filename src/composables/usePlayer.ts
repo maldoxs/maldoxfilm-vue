@@ -858,6 +858,9 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       if (tpipelineState && !_tReloading && Date.now() - lastNudgeAt >= HEARTBEAT_MS) {
         lastNudgeAt = Date.now();
         const realPos = tpipelineOffset.value + video.currentTime;
+        // DIAG temporal (2026-07-12, a pedido: "tengo dudas si está avanzando en pausa") —
+        // rastro visible para confirmar que el latido corre SIEMPRE, incluso en pausa.
+        console.warn(`[/t/] 💓 Latido → t=${realPos.toFixed(1)}s${video.paused ? ' (en PAUSA)' : ''} | buffer +${bufferAhead(video).toFixed(1)}s`);
         void pingSeek(tpipelineState.resolved.mediaId, realPos).catch(() => {});
       }
       // No interferir durante recuperación, cambio de audio, pausa o fin
