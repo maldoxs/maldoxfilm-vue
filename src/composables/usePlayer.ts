@@ -603,25 +603,23 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     }
   }
 
-  // ── Pre-buffer inicial en /t/ (2026-07-12, a pedido) ─────────────────────────
-  // Hasta ahora solo se ajustó el buffer MIENTRAS reproduce. Esto es distinto: antes de
-  // arrancar (video todavía en pausa, sin consumir buffer), esperar a que Shaka junte un
-  // colchón GRANDE (60s) en vez de arrancar con los ~5s de siempre. Un bache de RD más
-  // adelante en la reproducción tiene mucho más margen para absorberse sin notarse.
-  // Costo: tarda más en arrancar (hasta 20s extra, con tope — nunca cuelga el arranque).
-  // Se sube bufferingGoal TEMPORALMENTE para permitir juntar más de los 30s de siempre, y
-  // se restaura a 30 antes de reproducir — así en régimen normal NO compite con RD como ya
-  // se documentó que pasaba al subir el buffer de forma permanente.
-  const PREBUFFER_TARGET_SEC = 60;
-  const PREBUFFER_MAX_WAIT_MS = 20000;
+  // ── Pre-buffer inicial en /t/ (2026-07-12→13, a pedido) ──────────────────────
+  // REDISEÑO (a pedido: "que empiece rápido, y ya reproduciendo ir aplicando algo por
+  // debajo"): antes se esperaba hasta 20s tratando de juntar 60s de colchón ANTES de
+  // arrancar — eso demoraba el inicio sin necesidad. Ahora el objetivo es chico (10s,
+  // apenas un colchón de seguridad) y el tope de espera corto (6s) → arranca rápido. El
+  // trabajo de ir agrandando el colchón de verdad queda para DESPUÉS de arrancar: el
+  // latido continuo (heartbeat, cada 6s) + el bufferingGoal normal (90s) siguen
+  // construyendo ventaja "por debajo" mientras ya se está reproduciendo — que es
+  // justamente lo que ya se confirmó funcionando (4 min sin fallas, buena ventaja).
+  const PREBUFFER_TARGET_SEC = 10;
+  const PREBUFFER_MAX_WAIT_MS = 6000;
   const PREBUFFER_POLL_MS = 500;
   async function waitForPrebuffer(video: HTMLVideoElement, myGen: number) {
     if (!_shakaPlayer) return;
-    try {
-      _shakaPlayer.configure({ streaming: { bufferingGoal: PREBUFFER_TARGET_SEC + 15 } });
-    } catch {
-      /* noop */
-    }
+    // Objetivo chico (10s): el bufferingGoal normal ya es 90, no hace falta subirlo
+    // temporalmente — con arrancar teniendo ~10s de colchón alcanza para no reproducir
+    // "pelado". El resto de la ventaja se construye DESPUÉS, ya reproduciendo (heartbeat).
     const start = Date.now();
     while (Date.now() - start < PREBUFFER_MAX_WAIT_MS) {
       if (playerStore.isStale(myGen)) break;
@@ -629,11 +627,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       await new Promise((r) => setTimeout(r, PREBUFFER_POLL_MS));
     }
     console.warn(`[/t/] Pre-buffer: +${bufferAhead(video).toFixed(1)}s tras ${((Date.now() - start) / 1000).toFixed(1)}s de espera`);
-    try {
-      _shakaPlayer?.configure({ streaming: { bufferingGoal: 90 } }); // restaurar al normal (90 — ver experimento de streamingCfg)
-    } catch {
-      /* noop */
-    }
   }
   function attachDiagnostics(video: HTMLVideoElement) {
     detachDiagnostics();
