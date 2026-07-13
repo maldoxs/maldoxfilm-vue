@@ -128,6 +128,7 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
   const tooltipPct = ref(0);
 
   let seeking = false; // equivalente a `_nfSeeking`
+  let bufferedTimer: ReturnType<typeof setInterval> | null = null;
 
   function video(): HTMLVideoElement | null {
     return opts.videoRef.value ?? null;
@@ -159,6 +160,18 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     }
   }
 
+  /** updateBuffered — recalcula SOLO bufferedPct. Separada de tick() para poder correr en un
+   *  intervalo propio (ver bufferedTimer en attach()): tick() depende de 'timeupdate', que
+   *  deja de disparar en cuanto el video se traba (currentTime congelado) — la barra gris
+   *  quedaba "pegada" en su último valor aunque RD siguiera bajando datos de fondo. Esta
+   *  función no depende de que el video avance, así el gris se actualiza SIEMPRE. */
+  function updateBuffered() {
+    const v = video();
+    if (!v) return;
+    const dur = effDur(v);
+    bufferedPct.value = dur ? Math.min(100, (effBufferedEnd(v) / dur) * 100) : 0;
+  }
+
   // ── Tick — reemplaza `_nfTick` (línea ~4103-4117) ────────────────────────
   function tick() {
     const v = video();
@@ -169,7 +182,7 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     if (!seeking) progressPct.value = pct;
     elapsedLabel.value = formatNfTime(t);
     remainingLabel.value = formatNfTime((dur || 0) - t);
-    bufferedPct.value = dur ? Math.min(100, (effBufferedEnd(v) / dur) * 100) : 0;
+    updateBuffered();
   }
 
   const onPlay = () => {
@@ -335,10 +348,17 @@ export function useNetflixControls(opts: UseNetflixControlsOptions): UseNetflixC
     speed.value = 1;
     v.playbackRate = 1;
     tick();
+    // Barra gris SIEMPRE actualizada, aunque el video esté trabado/pausado (ver updateBuffered).
+    if (bufferedTimer) clearInterval(bufferedTimer);
+    bufferedTimer = setInterval(updateBuffered, 500);
   }
 
   function detach() {
     const v = video();
+    if (bufferedTimer) {
+      clearInterval(bufferedTimer);
+      bufferedTimer = null;
+    }
     if (!v) return;
     v.removeEventListener('play', onPlay);
     v.removeEventListener('pause', onPause);
