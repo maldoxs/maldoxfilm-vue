@@ -85,12 +85,15 @@ const SEEK_FREEZE_FAR_MS = 5000; // seek lejano → volver rápido (no se va a p
 const STALL_BACKOFF_MS = 8000; // por cada recuperación previa, esperar este extra (dar tiempo al transcoder)
 const MAX_STALL_RECOVERIES = 4; // recuperaciones sin éxito → cambiar de fuente (con backoff, ~más paciencia)
 
-// ── EMPUJÓN PREVENTIVO sin reload (2026-07-12) ───────────────────────────────
-// En vez de esperar a que se congele (reactivo), vigilar el colchón (buffer por delante)
-// en CADA tick y pedirle a RD que siga generando ANTES de que la posición actual alcance
-// el borde de lo bufferizado. Un GET liviano (pingSeek), sin tocar Shaka ni el <video>.
-const LOW_BUFFER_NUDGE_SEC = 8; // colchón por debajo de esto → empujar YA, antes de que se note
-const NUDGE_COOLDOWN_MS = 4000; // no repetir el empujón más seguido que esto
+// ── LATIDO (heartbeat) continuo de RD (2026-07-12) ───────────────────────────
+// EVIDENCIA: en la pestaña de red del reproductor OFICIAL de RD, el player manda
+// `streaming/ping/{mediaId}/{pos}` cada ~6-10s DE FORMA CONTINUA (no solo al saltar) →
+// le avisa a RD "sigo mirando ACÁ, seguí generando por delante". Nuestro código solo
+// pingueaba en momentos puntuales → RD, sin el latido esperado, podía bajar el ritmo de
+// generación (la barra gris se frenaba). Ahora replicamos ese latido: ping cada
+// HEARTBEAT_MS mientras el /t/ esté activo (reproduciendo O en pausa — así la gris sigue
+// cargando en pausa). Es un GET liviano: no toca Shaka ni el <video>.
+const HEARTBEAT_MS = 6000; // cada cuánto avisar a RD la posición (imita al player oficial)
 
 // ── PACIENCIA EXTRA EN TV (2026-07-10) ───────────────────────────────────────
 // Diagnóstico: en TV el decoder es más débil y RD genera los segmentos /t/ más lento →
@@ -846,6 +849,15 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         return;
       }
       seekStuckSince = 0;
+      // LATIDO continuo a RD (2026-07-12) — imita al player oficial (ver nota HEARTBEAT_MS).
+      // Va ANTES del guard de pausa a propósito: seguir avisando a RD la posición aunque el
+      // usuario haya pausado → la barra gris sigue cargando en pausa. Solo se saltea si hay
+      // un reload de seek en curso (_tReloading ya está pingueando su propia posición).
+      if (tpipelineState && !_tReloading && Date.now() - lastNudgeAt >= HEARTBEAT_MS) {
+        lastNudgeAt = Date.now();
+        const realPos = tpipelineOffset.value + video.currentTime;
+        void pingSeek(tpipelineState.resolved.mediaId, realPos).catch(() => {});
+      }
       // No interferir durante recuperación, cambio de audio, pausa o fin
       // (una pausa normal NO debe disparar recuperación).
       if (stallRecovering || switchingAudio || video.paused || video.ended) {
@@ -853,22 +865,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         stallStuckSince = 0;
         lastBufferAhead = bufferAhead(video);
         return;
-      }
-      // EMPUJÓN PREVENTIVO (2026-07-12, a pedido: "debe solucionarlo ANTES de que llegue
-      // la barra azul"): no esperar a que se congele. Vigilar el colchón (buffer por
-      // delante, la barra gris) en CADA tick, esté avanzando bien o no. Si cae por debajo
-      // de LOW_BUFFER_NUDGE_SEC, pedirle a RD que siga generando YA — antes de que la
-      // posición actual (barra azul) alcance el borde de lo bufferizado y se note el
-      // corte. Reemplaza al empujón reactivo anterior (que recién actuaba una vez ya
-      // trabado); este actúa mientras TODAVÍA reproduce normal, con el colchón achicándose.
-      if (tpipelineState) {
-        const buf = bufferAhead(video);
-        if (buf < LOW_BUFFER_NUDGE_SEC && Date.now() - lastNudgeAt >= NUDGE_COOLDOWN_MS) {
-          lastNudgeAt = Date.now();
-          const realPos = tpipelineOffset.value + video.currentTime;
-          console.warn(`[/t/] Empujón preventivo — buffer bajo (+${buf.toFixed(1)}s) en t=${realPos.toFixed(1)}s`);
-          void pingSeek(tpipelineState.resolved.mediaId, realPos).catch(() => {});
-        }
       }
       const t = video.currentTime;
       if (t > stallLastTime + 0.1) {
