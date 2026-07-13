@@ -78,7 +78,16 @@ const SEEK_RECENT_WINDOW_MS = 20000; // ventana en la que un stall cuenta como "
 // CERCA del punto actual → RD puede extender el transcode unos segundos → más paciencia.
 // LEJOS (minutos) → RD no tiene ese tramo y no lo va a generar → desistir rápido.
 const NEAR_SEEK_SEC = 120; // distancia (s) hasta la que un seek se considera "cercano"
-const SEEK_FREEZE_NEAR_MS = 12000; // paciencia para seek cercano (dar tiempo a RD)
+// SEEK_FREEZE_NEAR_MS: 12000 → 45000 (2026-07-13, bug real confirmado con log del usuario).
+// Caso: "Continuar viendo" en una peli SIN caché previo (rdId null → cae al transcode
+// server-side, secuencial, NO al pipeline /t/) — el seek automático al minuto guardado
+// (ej. 0:57) ocurre 500ms después de montar, cuando RD recién empieza a transcodear DESDE
+// CERO. Con 12s de paciencia, RD casi nunca llega a tiempo transcodeando secuencialmente
+// hasta el minuto guardado → se rendía y "volvía" (el toast "Esa parte aún no está lista").
+// 45s le da margen real para que RD alcance ese punto antes de desistir. Solo afecta este
+// camino lento (server-side); Direct Play resuelve el seek casi instantáneo (HTTP Range) y
+// rara vez entra siquiera en esta ventana de espera.
+const SEEK_FREEZE_NEAR_MS = 45000; // paciencia para seek cercano (dar tiempo a RD)
 const SEEK_FREEZE_FAR_MS = 5000; // seek lejano → volver rápido (no se va a poder)
 // (NOTA: ya NO recargamos el manifest en el seek — RD no expone un mecanismo de seek
 // replicable desde la API pública; recargar mataba el player. El seek lo maneja Shaka nativo.)
