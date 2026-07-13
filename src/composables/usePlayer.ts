@@ -306,7 +306,11 @@ async function _shakaLoad(video: HTMLVideoElement, url: string, startTime?: numb
       connectionTimeout: 0, // sin límite de conexión (RD long-pollea el segmento)
       stallTimeout: 0,
     },
-    bufferingGoal: 30, // buffer hacia adelante generoso (menos rebuffer)
+    // bufferingGoal: 30 → 45 (2026-07-12, experimento a pedido). NOTA: subir este valor ya
+    // se probó ANTES en este proyecto y empeoró en TV (competía con la generación de RD).
+    // Se prueba de nuevo, con más cuidado (45, no un salto grande) y junto al empujón
+    // preventivo — si empeora, revertir a 30 (ver tag pre-buffer-45).
+    bufferingGoal: 45,
     rebufferingGoal: 2,
     bufferBehind: isLowMemoryDevice() ? 10 : 30,
   };
@@ -621,7 +625,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     }
     console.warn(`[/t/] Pre-buffer: +${bufferAhead(video).toFixed(1)}s tras ${((Date.now() - start) / 1000).toFixed(1)}s de espera`);
     try {
-      _shakaPlayer?.configure({ streaming: { bufferingGoal: 30 } }); // restaurar al normal — NO competir con RD durante la reproducción
+      _shakaPlayer?.configure({ streaming: { bufferingGoal: 45 } }); // restaurar al normal (45, no 30 — ver experimento de streamingCfg)
     } catch {
       /* noop */
     }
