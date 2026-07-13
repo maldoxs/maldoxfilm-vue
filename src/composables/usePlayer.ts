@@ -585,6 +585,39 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       return 0;
     }
   }
+
+  // ── Pre-buffer inicial en /t/ (2026-07-12, a pedido) ─────────────────────────
+  // Hasta ahora solo se ajustó el buffer MIENTRAS reproduce. Esto es distinto: antes de
+  // arrancar (video todavía en pausa, sin consumir buffer), esperar a que Shaka junte un
+  // colchón GRANDE (60s) en vez de arrancar con los ~5s de siempre. Un bache de RD más
+  // adelante en la reproducción tiene mucho más margen para absorberse sin notarse.
+  // Costo: tarda más en arrancar (hasta 20s extra, con tope — nunca cuelga el arranque).
+  // Se sube bufferingGoal TEMPORALMENTE para permitir juntar más de los 30s de siempre, y
+  // se restaura a 30 antes de reproducir — así en régimen normal NO compite con RD como ya
+  // se documentó que pasaba al subir el buffer de forma permanente.
+  const PREBUFFER_TARGET_SEC = 60;
+  const PREBUFFER_MAX_WAIT_MS = 20000;
+  const PREBUFFER_POLL_MS = 500;
+  async function waitForPrebuffer(video: HTMLVideoElement, myGen: number) {
+    if (!_shakaPlayer) return;
+    try {
+      _shakaPlayer.configure({ streaming: { bufferingGoal: PREBUFFER_TARGET_SEC + 15 } });
+    } catch {
+      /* noop */
+    }
+    const start = Date.now();
+    while (Date.now() - start < PREBUFFER_MAX_WAIT_MS) {
+      if (playerStore.isStale(myGen)) break;
+      if (bufferAhead(video) >= PREBUFFER_TARGET_SEC) break;
+      await new Promise((r) => setTimeout(r, PREBUFFER_POLL_MS));
+    }
+    console.warn(`[/t/] Pre-buffer: +${bufferAhead(video).toFixed(1)}s tras ${((Date.now() - start) / 1000).toFixed(1)}s de espera`);
+    try {
+      _shakaPlayer?.configure({ streaming: { bufferingGoal: 30 } }); // restaurar al normal — NO competir con RD durante la reproducción
+    } catch {
+      /* noop */
+    }
+  }
   function attachDiagnostics(video: HTMLVideoElement) {
     detachDiagnostics();
     diagVideo = video;
@@ -1249,6 +1282,12 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       currentDashUrl = mpdUrl;
 
       dashBaseUrl.value = `https://${resolved.cdn}/t/${resolved.fullPathId}/`;
+
+      // Pre-buffer grande ANTES de arrancar (a pedido) — solo en el arranque inicial, NO en
+      // los seeks (tpipelineReloadMpd no lo usa — ahí el usuario ya está esperando activamente
+      // adelantar/retroceder, no tiene sentido hacerlo esperar 60s de más).
+      await waitForPrebuffer(video, myGen);
+      if (playerStore.isStale(myGen)) return true;
 
       video.muted = false;
       await playNoBlock(video);
