@@ -615,16 +615,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   const PREBUFFER_TARGET_SEC = 10;
   const PREBUFFER_MAX_WAIT_MS = 6000;
   const PREBUFFER_POLL_MS = 500;
-  // RED DE SEGURIDAD (2026-07-13, a pedido: "deja de estar fallando tanto"): el arranque
-  // rápido (6s) funciona bien cuando RD responde normal, pero si justo en ESE momento RD
-  // está muy lento (log real: "+0.0s tras 6.0s de espera" — CERO buffer), arrancar igual
-  // con 0 de colchón manda al video directo al corte + "reconectando" sin ningún margen.
-  // Si tras la espera rápida el buffer sigue crítico (< este umbral), dar UNA segunda
-  // oportunidad de espera antes de arrancar sin nada — sigue siendo rápido en el caso
-  // normal (no agrega espera si ya hay algo de colchón), solo protege el caso "RD está
-  // MUY lento ahora mismo".
-  const CRITICAL_BUFFER_SEC = 3;
-  const PREBUFFER_RETRY_WAIT_MS = 7000;
   async function waitForPrebuffer(video: HTMLVideoElement, myGen: number) {
     if (!_shakaPlayer) return;
     // Objetivo chico (10s): el bufferingGoal normal ya es 90, no hace falta subirlo
@@ -637,17 +627,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       await new Promise((r) => setTimeout(r, PREBUFFER_POLL_MS));
     }
     console.warn(`[/t/] Pre-buffer: +${bufferAhead(video).toFixed(1)}s tras ${((Date.now() - start) / 1000).toFixed(1)}s de espera`);
-
-    if (!playerStore.isStale(myGen) && bufferAhead(video) < CRITICAL_BUFFER_SEC) {
-      console.warn('[/t/] Buffer crítico tras el arranque rápido — dando una segunda oportunidad...');
-      const retryStart = Date.now();
-      while (Date.now() - retryStart < PREBUFFER_RETRY_WAIT_MS) {
-        if (playerStore.isStale(myGen)) break;
-        if (bufferAhead(video) >= CRITICAL_BUFFER_SEC) break;
-        await new Promise((r) => setTimeout(r, PREBUFFER_POLL_MS));
-      }
-      console.warn(`[/t/] Segunda espera: +${bufferAhead(video).toFixed(1)}s tras ${((Date.now() - retryStart) / 1000).toFixed(1)}s más`);
-    }
   }
   function attachDiagnostics(video: HTMLVideoElement) {
     detachDiagnostics();
