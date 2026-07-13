@@ -309,11 +309,13 @@ async function _shakaLoad(video: HTMLVideoElement, url: string, startTime?: numb
       connectionTimeout: 0, // sin límite de conexión (RD long-pollea el segmento)
       stallTimeout: 0,
     },
-    // bufferingGoal: 30 → 45 (2026-07-12, experimento a pedido). NOTA: subir este valor ya
-    // se probó ANTES en este proyecto y empeoró en TV (competía con la generación de RD).
-    // Se prueba de nuevo, con más cuidado (45, no un salto grande) y junto al empujón
-    // preventivo — si empeora, revertir a 30 (ver tag pre-buffer-45).
-    bufferingGoal: 45,
+    // bufferingGoal: 30 → 45 → 90 (2026-07-12, a pedido: "sacarle más ventaja a la gris").
+    // Es el TECHO de cuánto colchón puede juntar por delante. Ahora que el latido continuo
+    // (heartbeat) mantiene a RD generando (4 min estables confirmados), se sube el techo para
+    // aprovechar los momentos en que RD genera >1x y stockpilear más ventaja. NOTA: subir
+    // este valor ya empeoró ANTES sin el heartbeat; el contexto ahora es distinto. Si RD está
+    // consistentemente <1x, no ayuda (la ventaja se achica igual). Revertir con pre-buffer-90.
+    bufferingGoal: 90,
     rebufferingGoal: 2,
     bufferBehind: isLowMemoryDevice() ? 10 : 30,
   };
@@ -628,7 +630,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     }
     console.warn(`[/t/] Pre-buffer: +${bufferAhead(video).toFixed(1)}s tras ${((Date.now() - start) / 1000).toFixed(1)}s de espera`);
     try {
-      _shakaPlayer?.configure({ streaming: { bufferingGoal: 45 } }); // restaurar al normal (45, no 30 — ver experimento de streamingCfg)
+      _shakaPlayer?.configure({ streaming: { bufferingGoal: 90 } }); // restaurar al normal (90 — ver experimento de streamingCfg)
     } catch {
       /* noop */
     }
