@@ -85,10 +85,11 @@ const SEEK_FREEZE_FAR_MS = 5000; // seek lejano → volver rápido (no se va a p
 const STALL_BACKOFF_MS = 8000; // por cada recuperación previa, esperar este extra (dar tiempo al transcoder)
 const MAX_STALL_RECOVERIES = 4; // recuperaciones sin éxito → cambiar de fuente (con backoff, ~más paciencia)
 
-// ── EMPUJÓN sin reload (2026-07-12) ──────────────────────────────────────────
-// Antes de llegar al teardown pesado (STALL_RECOVER_MS), pedirle a RD que siga generando
-// desde la posición actual — un GET liviano (pingSeek), sin tocar Shaka ni el <video>.
-const NUDGE_AFTER_MS = 3000; // trabado sin avanzar por este tiempo → primer empujón
+// ── EMPUJÓN PREVENTIVO sin reload (2026-07-12) ───────────────────────────────
+// En vez de esperar a que se congele (reactivo), vigilar el colchón (buffer por delante)
+// en CADA tick y pedirle a RD que siga generando ANTES de que la posición actual alcance
+// el borde de lo bufferizado. Un GET liviano (pingSeek), sin tocar Shaka ni el <video>.
+const LOW_BUFFER_NUDGE_SEC = 8; // colchón por debajo de esto → empujar YA, antes de que se note
 const NUDGE_COOLDOWN_MS = 4000; // no repetir el empujón más seguido que esto
 
 // ── PACIENCIA EXTRA EN TV (2026-07-10) ───────────────────────────────────────
@@ -849,6 +850,22 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         lastBufferAhead = bufferAhead(video);
         return;
       }
+      // EMPUJÓN PREVENTIVO (2026-07-12, a pedido: "debe solucionarlo ANTES de que llegue
+      // la barra azul"): no esperar a que se congele. Vigilar el colchón (buffer por
+      // delante, la barra gris) en CADA tick, esté avanzando bien o no. Si cae por debajo
+      // de LOW_BUFFER_NUDGE_SEC, pedirle a RD que siga generando YA — antes de que la
+      // posición actual (barra azul) alcance el borde de lo bufferizado y se note el
+      // corte. Reemplaza al empujón reactivo anterior (que recién actuaba una vez ya
+      // trabado); este actúa mientras TODAVÍA reproduce normal, con el colchón achicándose.
+      if (tpipelineState) {
+        const buf = bufferAhead(video);
+        if (buf < LOW_BUFFER_NUDGE_SEC && Date.now() - lastNudgeAt >= NUDGE_COOLDOWN_MS) {
+          lastNudgeAt = Date.now();
+          const realPos = tpipelineOffset.value + video.currentTime;
+          console.warn(`[/t/] Empujón preventivo — buffer bajo (+${buf.toFixed(1)}s) en t=${realPos.toFixed(1)}s`);
+          void pingSeek(tpipelineState.resolved.mediaId, realPos).catch(() => {});
+        }
+      }
       const t = video.currentTime;
       if (t > stallLastTime + 0.1) {
         // Avanza con normalidad → resetear contadores.
@@ -878,19 +895,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         stallStuckSince = Date.now();
         return;
       }
-      // EMPUJÓN sin reload (2026-07-12, a pedido: "no puedes ir desbloqueando eso por
-      // debajo"): en cuanto se detecta trabado DE VERDAD (ni tiempo ni buffer avanzan),
-      // pedirle a RD que siga generando desde la posición actual — MUCHO antes del
-      // teardown pesado (STALL_RECOVER_MS, 8-25s). pingSeek es un GET liviano: no toca
-      // Shaka ni el <video>, cero riesgo de romper lo que ya funciona. Cooldown para no
-      // martillar la API de RD en cada tick (cada 2s) mientras dura el bache.
-      if (tpipelineState && Date.now() - stallStuckSince >= NUDGE_AFTER_MS && Date.now() - lastNudgeAt >= NUDGE_COOLDOWN_MS) {
-        lastNudgeAt = Date.now();
-        const realPos = tpipelineOffset.value + video.currentTime;
-        console.warn(`[/t/] Empujón — pidiendo a RD que siga generando desde t=${realPos.toFixed(1)}s`);
-        void pingSeek(tpipelineState.resolved.mediaId, realPos).catch(() => {});
-      }
-
       // Tras un seek reciente, recuperar más rápido (es donde más se notaba el "pegado").
       // Backoff por cada recuperación previa: darle tiempo al transcoder a alcanzar el
       // tramo en vez de recargar (reiniciar) una y otra vez → menos caídas al iframe.
