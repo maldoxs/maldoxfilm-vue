@@ -82,14 +82,22 @@ export async function createAppServices(opts: CreateAppServicesOptions): Promise
   const torrentioClient = createTorrentioClient({ fetchImpl });
   const rdClient = createRealDebridClient({ rdToken, fetchImpl });
 
+  type ServerResult = {
+    dash: string | null;
+    liveMP4: string | null;
+    hls: string | null;
+    directUrl: string | null;
+    filename: string | null;
+    torrentId: string | null;
+  };
+
   /**
-   * serverResolve — llama a la Netlify Function `rd-stream` (server-side, ADR-004)
-   * para resolver contenido NO cacheado sin exponer el token ni pasar por Torrentio.
-   * Falla de forma segura (devuelve null) si la function no existe o no hay versión
-   * disponible — el reproductor entonces cae al respaldo iframe, como hoy.
+   * serverResolveLegacy — llamada ÚNICA al `rd-stream` monolítico (techo 9s). Se
+   * conserva como RED DE SEGURIDAD: si el flujo por fases (abajo) no da resultado
+   * o falla, se cae a esto → el comportamiento nunca queda PEOR que antes de la
+   * Fase 2. (ADR-004.)
    */
-  const serverResolve = async (infoHashes: string[]) => {
-    if (!infoHashes.length) return null;
+  const serverResolveLegacy = async (infoHashes: string[]): Promise<ServerResult | null> => {
     try {
       const res = await fetchImpl(`/.netlify/functions/rd-stream?infoHash=${infoHashes.join(',')}`);
       if (!res.ok) return null;
@@ -114,6 +122,83 @@ export async function createAppServices(opts: CreateAppServicesOptions): Promise
     } catch {
       return null;
     }
+  };
+
+  // ── FASE 2 (ADR-009): flujo server-side POR FASES ────────────────────────────
+  // El `rd-stream` monolítico se rendía a los 9s (techo de Netlify para funciones
+  // síncronas) → los títulos que RD tarda un poco más en preparar caían al link
+  // crudo de Torrentio SIN transcode → audio AC3 → mudo en desktop (no decodifica
+  // AC3). Acá encadenamos start → status (polling) → finish: el POLLING vive en el
+  // CLIENTE, sin techo de tiempo, así RD tiene margen para entregar un transcode
+  // en AAC (que sí suena en desktop). El estado es solo el `torrentId` (no hace
+  // falta almacén server-side).
+  const PHASED_CLIENT_BUDGET_MS = 90000; // cuánto esperamos a que RD marque 'downloaded'
+  const PHASED_POLL_MS = 2500;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  /**
+   * serverResolve — intenta el flujo por fases; si no llega a un transcode usable,
+   * cae al `rd-stream` monolítico (legacy). Devuelve la MISMA forma que consume
+   * `rdStream.ts`/`usePlayer.ts` — sin cambios aguas abajo.
+   */
+  const serverResolve = async (infoHashes: string[]): Promise<ServerResult | null> => {
+    if (!infoHashes.length) return null;
+    try {
+      const startRes = await fetchImpl(
+        `/.netlify/functions/rd-stream-start?infoHash=${infoHashes.join(',')}`
+      );
+      if (startRes.ok) {
+        const start = (await startRes.json()) as {
+          started?: boolean;
+          torrentId?: string;
+          status?: string;
+        };
+        if (start?.started && start.torrentId) {
+          const torrentId = start.torrentId;
+          let downloaded = start.status === 'downloaded';
+          const t0 = Date.now();
+          while (!downloaded && Date.now() - t0 < PHASED_CLIENT_BUDGET_MS) {
+            await sleep(PHASED_POLL_MS);
+            const st = await fetchImpl(
+              `/.netlify/functions/rd-stream-status?torrentId=${encodeURIComponent(torrentId)}`
+            )
+              .then((r) => (r.ok ? r.json() : null))
+              .catch(() => null);
+            if (!st) break;
+            if (st.dead) {
+              console.warn('[rd-stream/fases] torrent muerto:', st.status);
+              break;
+            }
+            console.warn(`[rd-stream/fases] ${st.status} · ${Math.round((st.progress || 0))}%`);
+            if (st.downloaded) downloaded = true;
+          }
+          if (downloaded) {
+            const fin = (await fetchImpl(
+              `/.netlify/functions/rd-stream-finish?torrentId=${encodeURIComponent(torrentId)}`
+            )
+              .then((r) => (r.ok ? r.json() : null))
+              .catch(() => null)) as
+              | (ServerResult & { ready?: boolean })
+              | null;
+            if (fin?.ready && (fin.dash || fin.liveMP4 || fin.hls || fin.directUrl)) {
+              console.warn('[rd-stream/fases] ✅ transcode listo (AAC) — audio compatible en todo dispositivo');
+              return {
+                dash: fin.dash ?? null,
+                liveMP4: fin.liveMP4 ?? null,
+                hls: fin.hls ?? null,
+                directUrl: fin.directUrl ?? null,
+                filename: fin.filename ?? null,
+                torrentId: fin.torrentId ?? torrentId,
+              };
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[rd-stream/fases] falló, cayendo a legacy:', (e as Error)?.message);
+    }
+    // Red de seguridad: nunca peor que antes de la Fase 2.
+    return serverResolveLegacy(infoHashes);
   };
 
   const rdStreamResolver = createRdStreamResolver({
