@@ -104,6 +104,31 @@ async function handleResolve(rdId, token) {
   return result;
 }
 
+/**
+ * handleResolveRaw — FASE 2/bis (ADR-009, caso "El Padrino"): dado el link CRUDO
+ * de Torrentio (que ya trae el token embebido), lo sigue server-side hasta la URL
+ * CDN de Real-Debrid y extrae el DOWNLOAD ID (`.../d/{ID}/...`). Con ese id, el
+ * cliente puede correr el pipeline `/t/` (AAC) aunque el archivo NO haya matcheado
+ * en /downloads (típico cuando el release está mal etiquetado y el nombre no
+ * coincide → nuestro match daba rdId null → nunca intentábamos /t/ → caía al crudo
+ * AC3 → mudo en desktop). Es exactamente lo que hace el reproductor oficial de RD.
+ * NO lee el body (no descarga el video); solo necesita la URL final tras redirects.
+ */
+async function handleResolveRaw(rawUrl) {
+  let finalUrl = '';
+  try {
+    const res = await fetch(rawUrl, { redirect: 'follow', signal: AbortSignal.timeout(12000) });
+    finalUrl = res.url || '';
+  } catch {
+    /* noop — sin id → el cliente sigue con su fallback */
+  }
+  const m = finalUrl.match(/\/d\/([A-Za-z0-9]+)\//) || finalUrl.match(/streaming-([A-Za-z0-9]+)/);
+  const rdId = m ? m[1] : null;
+  // Redactar el token del log/echo por seguridad.
+  const safeUrl = finalUrl.replace(/(auth_token|realdebrid)=[^&/]+/gi, '$1=***');
+  return { rdId, finalUrl: safeUrl };
+}
+
 async function handleSeek(mediaId, seconds, token) {
   const res = await authFetch(
     `${RD_APP_BASE}/streaming/ping/${mediaId}/${Math.floor(seconds)}`,
@@ -146,6 +171,13 @@ export const handler = async (event) => {
       const rdId = params.rdId;
       if (!rdId) throw new Error('Missing rdId');
       const result = await handleResolve(rdId, token);
+      return { statusCode: 200, headers: cors, body: JSON.stringify(result) };
+    }
+
+    if (action === 'resolveRaw') {
+      const url = params.url;
+      if (!url) throw new Error('Missing url');
+      const result = await handleResolveRaw(url);
       return { statusCode: 200, headers: cors, body: JSON.stringify(result) };
     }
 

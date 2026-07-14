@@ -49,6 +49,7 @@ import { pickHlsFallbackFromTranscode, pickDashUrlFromTranscode } from '../servi
 import { parseMediaInfos, pickSpanishAudioToken, hasNativeDecodableAudio } from '../services/mediaInfos';
 import {
   resolveTpipeline,
+  resolveRawToRdId,
   pingSeek,
   buildMpdUrl,
   waitForSegmentAt,
@@ -1530,6 +1531,38 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         /* sin mediaInfos → heurística por nombre, como siempre */
       }
       if (playerStore.isStale(myGen)) return;
+    }
+
+    // ── rdId NULL → derivar download id del link crudo y correr /t/ (AAC) ────────────
+    // Bug real "El Padrino" (confirmado con el reproductor OFICIAL de RD: Audio=aac,
+    // Format=mpd, streaming-{id}): el archivo SÍ está en RD y su /t/ da AAC, pero como
+    // el release está mal etiquetado (nombre interno distinto) no matchea en /downloads
+    // → rdId null → NUNCA se intentaba /t/ → caía al Direct Play del crudo AC3 → mudo en
+    // desktop. Acá, para rdId null, se sigue el link crudo server-side para obtener el
+    // download id (igual que hace RD) y se corre /t/. Si funciona → AAC en TODOS los
+    // dispositivos (consistente). Si no → sigue al Direct Play de siempre (fallback seguro).
+    if (!rdId && streamUrl) {
+      try {
+        loadingMessage.value = '🔍 Preparando streaming avanzado...';
+        const derivedId = await resolveRawToRdId(streamUrl);
+        if (playerStore.isStale(myGen)) return;
+        if (derivedId) {
+          console.warn('[/t/] rdId derivado del link crudo:', derivedId, '→ intentando /t/ (AAC)');
+          isTpipeline.value = false;
+          tpipelineState = null;
+          const ok = await tryTpipeline({ video, rdId: derivedId, myGen, selected, streamFn, startPositionSec: params.startPositionSec });
+          if (ok) {
+            isLoadingRd.value = false;
+            return;
+          }
+          if (playerStore.isStale(myGen)) return;
+          console.warn('[/t/] derivado no arrancó → sigue al flujo normal (Direct Play)');
+        } else {
+          console.warn('[/t/] sin download id derivable del link crudo → flujo normal');
+        }
+      } catch (e) {
+        console.warn('[/t/] resolveRaw falló → flujo normal:', e);
+      }
     }
 
     // ── PLAY DIRECTO (HTTP Range = seek instantáneo, sin transcode) ──────────────────

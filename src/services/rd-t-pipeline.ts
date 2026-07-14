@@ -41,6 +41,21 @@ export async function resolveTpipeline(rdId: string): Promise<TpipelineResolveRe
   return (await callFunction({ action: 'resolve', rdId })) as TpipelineResolveResult;
 }
 
+/**
+ * resolveRawToRdId — para títulos sin rdId (no matcheados en /downloads): sigue
+ * el link CRUDO de Torrentio server-side y devuelve el download id de RD (o null).
+ * Con ese id se puede correr el pipeline `/t/` (AAC), igual que el reproductor
+ * oficial de RD. Ver `handleResolveRaw` en netlify/functions/rd-tpipeline.js.
+ */
+export async function resolveRawToRdId(rawUrl: string): Promise<string | null> {
+  try {
+    const data = (await callFunction({ action: 'resolveRaw', url: rawUrl })) as { rdId?: string | null };
+    return data.rdId ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function pingSeek(mediaId: string, seconds: number): Promise<boolean> {
   const data = (await callFunction({
     action: 'seek',
