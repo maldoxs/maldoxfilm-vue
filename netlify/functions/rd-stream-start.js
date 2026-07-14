@@ -27,9 +27,15 @@
 const RD = 'https://api.real-debrid.com/rest/1.0';
 const VIDEO_RE = /\.(mkv|mp4|m4v|avi|mov|ts|webm)$/i;
 
-const MAX_TRIES = 4; // tope de candidatos (limita escrituras / rate-limit)
+// 4 → 10 (2026-07-13, caso El Padrino): las mejores versiones a menudo están
+// BLOQUEADAS por DMCA (addMagnet error 35, rechazo INSTANTÁNEO). Con solo 4
+// candidatos, si esos 4 estaban bloqueados devolvía `all_infringing` y no
+// transcodeaba nada. Como el rechazo por DMCA es inmediato, se pueden saltear
+// muchos bloqueados y aterrizar en el primero que RD SÍ acepte, dentro del
+// presupuesto. Los candidatos vienen en orden de score (cacheados [RD+] primero).
+const MAX_TRIES = 10; // tope de candidatos a probar (saltea DMCA hasta hallar uno válido)
 const START_BUDGET_MS = 8500; // presupuesto de ESTA función (bajo el techo Netlify ~10s)
-const FILES_WAIT_MS = 6000; // espera máx. a que el magnet convierta (aparezcan files)
+const FILES_WAIT_MS = 4500; // espera máx. a que el magnet convierta (un [RD+] cacheado aparece en 1-2s)
 const POLL_INTERVAL_MS = 1200;
 const DEAD_STATUSES = new Set(['magnet_error', 'error', 'dead', 'virus']);
 

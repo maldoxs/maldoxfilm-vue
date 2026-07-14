@@ -214,9 +214,13 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
       // listas (sin Torrentio, con Range, sin exponer el token). El camino cacheado
       // (`rdId` presente) NO entra aquí → intacto.
       if (!selected.rdId) {
+        // 5 → 12 (2026-07-13, caso El Padrino): las mejores versiones suelen estar
+        // bloqueadas por DMCA en RD (addMagnet error 35). Con más candidatos, el
+        // server-side puede SALTEAR los bloqueados y hallar uno que RD acepte
+        // transcodear a AAC (audio compatible en desktop). Van en orden de score.
         const hashes = Array.from(
           new Set(scored.map((sc) => extractInfoHash(sc.s)).filter((h) => /^[a-f0-9]{40}$/i.test(h)))
-        ).slice(0, 5);
+        ).slice(0, 12);
         if (hashes.length) {
           const sr = await serverResolve(hashes);
           if (sr && (sr.dash || sr.liveMP4 || sr.hls || sr.directUrl)) {
