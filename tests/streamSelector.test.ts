@@ -16,6 +16,7 @@ import {
   isJunkStream,
   isJunkMatch,
   MIN_VALID_FILE_BYTES,
+  audioLangRank,
 } from '../src/services/streamSelector';
 import type { TorrentioStream, RDDownload } from '../src/types';
 
@@ -401,5 +402,50 @@ describe('Idioma condicional a Direct Play — "mejor de los dos mundos" (caso E
     const { best } = selectBestStream([engMkvTranscode, latMkvTranscode]);
     expect(hasSpa(best!)).toBe(true);
     expect(best?.behaviorHints?.filename).toContain('Dual-Lat');
+  });
+});
+
+// ── Guard de idioma en "upgrade a fluido" (bug real "Parásitos" 2026-07-13) ──
+// La reproducción debe ser IDÉNTICA en todos los dispositivos. El upgrade a una
+// versión Direct Play NUNCA debe bajar el idioma del audio (latino → coreano).
+describe('"Parásitos" — el upgrade a fluido NO puede degradar el idioma (igual para todos)', () => {
+  const latinoBest = stream({
+    url: 'https://example.com/lat',
+    name: '[RD+] Torrentio',
+    title: 'Parásitos.2019.1080P-Dual-Lat 💾 2.2 GB',
+    behaviorHints: { filename: 'Parásitos.2019.1080P-Dual-Lat.mp4' },
+  });
+  const koreanDirect = stream({
+    url: 'https://example.com/kor',
+    name: '[RD+] Torrentio',
+    title: 'Parasite.2019.KOREAN.1080p.BluRay.H264.AAC 💾 2.5 GB',
+    behaviorHints: { filename: 'Parasite.2019.1080p.H264.AAC.mkv' },
+  });
+  const downloads: RDDownload[] = [
+    { id: 'rd-lat', download: 'https://real-debrid.com/d/lat', filename: 'Parásitos.2019.1080P-Dual-Lat.mp4', filesize: 2_314_269_376 },
+    { id: 'rd-kor', download: 'https://real-debrid.com/d/kor', filename: 'Parasite.2019.1080p.H264.AAC.mkv', filesize: 2_500_000_000 },
+  ];
+
+  test('el latino (no-Direct-Play) NO se cambia por la versión coreana Direct Play aunque esté cacheada', () => {
+    const { scored, pool } = rankStreams([latinoBest, koreanDirect]);
+    // El latino gana el scoring (+200 latino) → es el best.
+    expect(pool[0].s).toBe(latinoBest);
+    const result = resolveActiveStream(
+      latinoBest,
+      latinoBest.url!,
+      'Parásitos.2019.1080P-Dual-Lat.mp4',
+      pool,
+      scored,
+      downloads
+    );
+    // Debe QUEDARSE con el latino (rd-lat), NO hacer upgrade al coreano (rd-kor).
+    expect(result.rdId).toBe('rd-lat');
+    expect(result.activeFilename).toContain('Dual-Lat');
+  });
+
+  test('audioLangRank: latino=2 > castellano=1 > original=0', () => {
+    expect(audioLangRank(latinoBest)).toBe(2);
+    expect(audioLangRank(koreanDirect)).toBe(0);
+    expect(audioLangRank(stream({ title: 'Movie Castellano España 💾 2 GB' }))).toBe(1);
   });
 });

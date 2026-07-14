@@ -57,6 +57,19 @@ export const hasEng = (s: TorrentioStream): boolean =>
 // "latino", "lat", "Dual-Lat", banderas 🇲🇽/🇦🇷/🇨🇴, sitios LATAM (Cinecalidad).
 export const hasLatino = (s: TorrentioStream): boolean =>
   /\blatino\b|\blat\b|dual.?lat|\blatam\b|🇲🇽|🇦🇷|🇨🇴|cinecalidad/i.test(streamInfo(s));
+/**
+ * audioLangRank — jerarquía de idioma de audio para NUNCA degradarlo al buscar
+ * una versión "más fluida" (ver la ronda "upgrade a fluido" en resolveActiveStream).
+ * La reproducción debe ser IGUAL en todos los dispositivos: si el mejor elegido es
+ * latino, jamás se lo cambia por una versión coreana/inglesa solo porque esa sea
+ * Direct Play. 2 = latino (preferido) · 1 = español (castellano u otro es) · 0 = resto.
+ */
+export function audioLangRank(s: TorrentioStream): number {
+  if (hasLatino(s)) return 2;
+  if (hasSpa(s)) return 1;
+  return 0;
+}
+
 export const hasBadLang = (s: TorrentioStream): boolean => {
   const t = streamInfo(s);
   const bad =
@@ -388,9 +401,17 @@ export function resolveActiveStream(
   // Riesgo bajo: solo corre cuando ya hay match pero NO es fluido — si no aparece nada
   // mejor, el resultado es IDÉNTICO al actual (se queda con el match de Ronda 1).
   if (match && !isDirectPlayEligible(activeBest)) {
+    // GUARD DE IDIOMA (2026-07-13, bug real "Parásitos"): el upgrade a fluido NUNCA
+    // debe bajar el idioma del audio. Antes cambiaba un latino (no-Direct-Play) por
+    // una versión coreana/inglesa SOLO porque esa era Direct Play → el MISMO título
+    // sonaba en español en desktop y en coreano en TV, según qué versión cacheara
+    // Torrentio en cada request. Ahora solo se acepta un candidato con idioma IGUAL o
+    // MEJOR (audioLangRank) → la reproducción es idéntica en todos los dispositivos.
+    const bestLangRank = audioLangRank(activeBest);
     for (const cand of pool) {
       if (cand.s === activeBest) continue;
       if (!isDirectPlayEligible(cand.s)) continue;
+      if (audioLangRank(cand.s) < bestLangRank) continue; // no degradar el idioma por fluidez
       const candFn = extractFilename(cand.s);
       const candMatch = matchInDownloads(cand.s.url || '', cand.s.url || '', candFn, downloads);
       if (candMatch && !isJunkMatch(candMatch)) {
