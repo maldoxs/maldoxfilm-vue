@@ -143,16 +143,20 @@ export async function createAppServices(opts: CreateAppServicesOptions): Promise
    */
   const serverResolve = async (infoHashes: string[]): Promise<ServerResult | null> => {
     if (!infoHashes.length) return null;
+    console.warn('[rd-stream/fases] 🚀 iniciando con', infoHashes.length, 'infoHashes (rdId null)');
     try {
       const startRes = await fetchImpl(
         `/.netlify/functions/rd-stream-start?infoHash=${infoHashes.join(',')}`
       );
+      console.warn('[rd-stream/fases] start HTTP', startRes.status);
       if (startRes.ok) {
         const start = (await startRes.json()) as {
           started?: boolean;
           torrentId?: string;
           status?: string;
+          reason?: string;
         };
+        console.warn('[rd-stream/fases] start →', JSON.stringify(start));
         if (start?.started && start.torrentId) {
           const torrentId = start.torrentId;
           let downloaded = start.status === 'downloaded';
@@ -191,13 +195,19 @@ export async function createAppServices(opts: CreateAppServicesOptions): Promise
                 torrentId: fin.torrentId ?? torrentId,
               };
             }
+            console.warn('[rd-stream/fases] finish sin transcode usable →', JSON.stringify(fin));
+          } else {
+            console.warn('[rd-stream/fases] no llegó a "downloaded" en', PHASED_CLIENT_BUDGET_MS / 1000, 's');
           }
+        } else {
+          console.warn('[rd-stream/fases] start no devolvió torrent usable (reason:', start?.reason, ')');
         }
       }
     } catch (e) {
-      console.warn('[rd-stream/fases] falló, cayendo a legacy:', (e as Error)?.message);
+      console.warn('[rd-stream/fases] EXCEPCIÓN, cayendo a legacy:', (e as Error)?.message);
     }
     // Red de seguridad: nunca peor que antes de la Fase 2.
+    console.warn('[rd-stream/fases] ⤵️ cayendo al rd-stream monolítico (legacy)');
     return serverResolveLegacy(infoHashes);
   };
 
