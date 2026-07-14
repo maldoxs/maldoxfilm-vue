@@ -32,6 +32,7 @@ import { useNetflixControls, formatNfTime } from '../../composables/useNetflixCo
 import { useToast } from '../../composables/useToast';
 import { usePlayerStore } from '../../stores/player';
 import { useDeviceStore } from '../../stores/device';
+import { safeStorage } from '../../services/safeStorage';
 import type { RdStreamResolver } from '../../services/rdStream';
 import type { RealDebridClient } from '../../services/realdebrid';
 
@@ -155,6 +156,14 @@ const player: UsePlayerReturn = usePlayer({
   onStreamReady: ({ selected, hasNativeSpanish: nativeEs, spanishTrack: detectedTrack }) => {
     hasNativeSpanish.value = nativeEs;
     lastSelectedStream.value = { imdbId: selected.imdbId, streamFilename: selected.streamFilename, infoHash: selected.infoHash ?? null };
+    // Datos para el panel de diagnóstico en pantalla (leer en la TV sin consola).
+    debugSelected.value = {
+      rdId: selected.rdId ?? null,
+      filename: selected.streamFilename ?? null,
+      isX265: selected.isX265,
+      hasLatinoTag: !!selected.hasLatinoTag,
+      server: !!(selected.serverDashUrl || selected.serverHlsUrl || selected.serverLiveMp4Url || selected.serverDirectUrl),
+    };
     audioPanelReady.value = true;
     // `_subsEnabled = !hasSpanish` — preserva el estado inicial de `_spInit` (línea ~4265):
     // arranca ON salvo que el audio nativo ya sea español.
@@ -286,6 +295,33 @@ const isLoading = ref(true);
 // no-directos setean uno de esos; Direct Play deja los dos vacíos. Se usa para el aviso
 // "⚡ Reproducción directa" (solo en las pelis que cumplen el formato, a pedido).
 const isDirectPlay = computed(() => !player.isTpipeline.value && !player.dashBaseUrl.value);
+
+// ── Panel de diagnóstico EN PANTALLA (para leer info en la TV sin consola) ───
+// Muestra dispositivo · camino real de reproducción · rdId · audio · archivo.
+// Toggle con el botón 🐞 (clic con el puntero del control en la TV). Persistido.
+const showDebug = ref(safeStorage.getItem('sx_debug') === '1');
+function toggleDebug() {
+  showDebug.value = !showDebug.value;
+  try {
+    safeStorage.setItem('sx_debug', showDebug.value ? '1' : '0');
+  } catch {
+    /* no crítico */
+  }
+}
+const debugSelected = ref<{
+  rdId: string | null;
+  filename: string | null;
+  isX265: boolean;
+  hasLatinoTag: boolean;
+  server: boolean;
+} | null>(null);
+// Camino REAL de reproducción (el mismo criterio que se ve en pantalla).
+const debugPath = computed(() => {
+  if (player.isTpipeline.value) return '/t/ far-seek';
+  if (player.dashBaseUrl.value) return 'Transcode DASH';
+  return 'Direct Play';
+});
+const debugDevice = computed(() => (deviceStore.isTV ? 'TV' : deviceStore.isMobile ? 'Móvil' : 'Desktop'));
 
 // ── Auto-hide de controles (preserva `controls-hidden` del original) ────────
 const controlsHidden = ref(false);
@@ -665,6 +701,18 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="playerPageRef" class="video-player" :class="{ 'controls-hidden': controlsHidden }">
+    <!-- Panel de diagnóstico EN PANTALLA (leer info en la TV sin consola). El 🐞
+         se puede clickear con el puntero del control remoto. Toggle persistido. -->
+    <button class="debug-toggle" type="button" aria-label="Diagnóstico" @click.stop="toggleDebug">🐞</button>
+    <div v-if="showDebug" class="debug-panel">
+      <div><b>Dispositivo:</b> {{ debugDevice }}</div>
+      <div><b>Camino:</b> {{ debugPath }}</div>
+      <div><b>Audio:</b> {{ player.activeTrack.value }}<span v-if="player.spanishTrack.value"> · ES: {{ player.spanishTrack.value }}</span></div>
+      <div><b>rdId:</b> {{ debugSelected?.rdId ?? '—' }}</div>
+      <div><b>Latino:</b> {{ debugSelected?.hasLatinoTag ? 'sí' : 'no' }} · <b>x265:</b> {{ debugSelected?.isX265 ? 'sí' : 'no' }}<span v-if="debugSelected?.server"> · server</span></div>
+      <div class="debug-fn">{{ debugSelected?.filename ?? '—' }}</div>
+    </div>
+
     <!-- Overlay de carga — reemplaza #playerLoading (línea ~3740-3746).
          Mensaje ÚNICO "Cargando…" (a pedido): antes el texto iba cambiando
          (`loadingMessage`: "Conectando con el servidor..." → toast "Seek fluido" → etc.),
@@ -835,6 +883,51 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* ── Panel de diagnóstico en pantalla (leer info en la TV sin consola) ── */
+.debug-toggle {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 60;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.5;
+}
+.debug-toggle:hover,
+.debug-toggle:focus {
+  opacity: 1;
+}
+.debug-panel {
+  position: absolute;
+  top: 56px;
+  left: 8px;
+  z-index: 60;
+  max-width: min(90vw, 560px);
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.82);
+  color: #fff;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: clamp(13px, 1.4vw, 20px);
+  line-height: 1.5;
+  pointer-events: none;
+}
+.debug-panel b {
+  color: #7ec8ff;
+}
+.debug-fn {
+  margin-top: 4px;
+  color: #9be29b;
+  word-break: break-all;
+}
+
 /* Preservados de `.player-page`/`.player-loading`/`#nfControls`/`.nf-*` (líneas ~907-1120, ~1305-1313) */
 .video-player {
   position: relative;
