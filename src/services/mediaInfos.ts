@@ -86,6 +86,27 @@ export function parseMediaInfos(raw: unknown): MediaInfos {
   };
 }
 
+// ── ADR-009 fix 3 — audio REAL antes de decidir Direct Play ──────────────────
+// Códecs de audio que el <video> del navegador decodifica NATIVO (sin transcode).
+// AC3/EAC3/DTS/TrueHD NO están: dependen de decoder de HARDWARE (una TV los suena,
+// Chrome desktop queda MUDO — caso real "El Padrino": release "Dual Audio Español
+// Latino" sin códec en el nombre, audio real ac3 → hasBadAudio=false por nombre →
+// Direct Play mudo en desktop).
+const NATIVE_AUDIO_CODECS = /^(aac|mp3|mp4a|opus|vorbis)/i;
+
+/**
+ * hasNativeDecodableAudio — ¿alguna pista de audio del archivo es decodificable
+ * NATIVA por el navegador? Devuelve:
+ *   true  → hay al menos una pista AAC/MP3/Opus/Vorbis (Direct Play seguro en audio)
+ *   false → hay pistas y NINGUNA es nativa (AC3/DTS/... → mudo sin decoder HW)
+ *   null  → no se pudo determinar (sin pistas parseadas) → NO cambiar el
+ *           comportamiento actual (heurística por nombre de archivo).
+ */
+export function hasNativeDecodableAudio(info: MediaInfos): boolean | null {
+  if (!info.audio.length) return null;
+  return info.audio.some((t) => NATIVE_AUDIO_CODECS.test(t.codec));
+}
+
 const SPANISH_ISO = new Set(['spa', 'es', 'lat']);
 const isSpanishTrack = (t: { lang: string; langIso: string; token: string }): boolean =>
   SPANISH_ISO.has(t.langIso) ||

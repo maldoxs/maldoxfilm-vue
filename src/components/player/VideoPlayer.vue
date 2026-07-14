@@ -591,9 +591,20 @@ function syncNativeTrack() {
   // Limpiar cues previos (peli/offset anterior) y volcar los actuales (ms → seg).
   const existing = nativeTrack.cues ? Array.from(nativeTrack.cues) : [];
   for (const c of existing) nativeTrack.removeCue(c);
+  // BUG real (ADR-009, fix 1): los cues del .srt vienen en tiempo ABSOLUTO del
+  // archivo, pero en el pipeline /t/ el `currentTime` NATIVO del <video> es
+  // RELATIVO al MPD cargado (`full.mpd?t=X`) → el navegador matcheaba cues
+  // absolutos contra tiempo relativo y el subtítulo quedaba desfasado exactamente
+  // `tpipelineOffset` en el fullscreen nativo de iOS. El overlay DOM no sufre esto
+  // (usa `timeOverride`). Se resta el offset SOLO en /t/; los demás caminos
+  // (Direct Play/transcode) reproducen en tiempo absoluto y quedan igual (offset 0).
+  const tOffsetSec = player.isTpipeline.value ? player.tpipelineOffset.value : 0;
   for (const cue of subtitles.cues.value) {
+    const start = cue.s / 1000 - tOffsetSec;
+    const end = cue.e / 1000 - tOffsetSec;
+    if (end <= 0) continue; // cue anterior a la ventana del MPD actual
     try {
-      nativeTrack.addCue(new VTTCue(cue.s / 1000, cue.e / 1000, cue.text));
+      nativeTrack.addCue(new VTTCue(Math.max(0, start), end, cue.text));
     } catch {
       /* ignorar cue malformado */
     }
@@ -629,6 +640,10 @@ watch(videoRef, (video, prev) => {
 });
 watch(() => subtitles.cues.value, () => syncNativeTrack());
 watch(() => subtitles.enabled.value, () => applyNativeTrackMode());
+// ADR-009 fix 1: cada seek del pipeline /t/ recarga el MPD con otro offset → los
+// cues nativos (que se vuelcan relativos a ese offset) deben re-espejarse. Antes
+// solo se re-sincronizaba al cambiar `cues` (peli nueva), nunca tras un seek.
+watch(() => player.tpipelineOffset.value, () => syncNativeTrack());
 
 onBeforeUnmount(() => {
   if (hideTimer) clearTimeout(hideTimer);

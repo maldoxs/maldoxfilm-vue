@@ -35,6 +35,7 @@ import {
   numericImdbId,
   isSubtitleValid,
   MAX_DOWNLOAD_ATTEMPTS,
+  filterTrustworthySubtitles,
   type SubtitleCue,
 } from '../services/subtitles';
 import { safeStorage } from '../services/safeStorage';
@@ -276,7 +277,25 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
 
       const hints = deriveVideoHints(streamFilename);
       const vidDuration = opts.videoRef.value?.duration || 0;
-      const { best, fileId } = pickBestSubtitle(data.data, hints, vidDuration);
+      // ADR-009 fix 2: descartar subs de OTRA película (imdb mismatch) y subs no
+      // verificables con score bajo, ANTES de elegir. La misma lista filtrada
+      // alimenta el pick y el loop de reintentos de descarga (más abajo), así el
+      // reintento tampoco puede caer en un sub ajeno. Caso real: Maze Runner
+      // score 19 mientras se reproducía otro título.
+      const trust = filterTrustworthySubtitles(data.data, numId, hints, vidDuration);
+      if (trust.mismatches || trust.lowConfidence) {
+        console.warn(
+          '[SUB] Filtro de confianza — descartados:',
+          trust.mismatches, 'de otra película,',
+          trust.lowConfidence, 'sin verificar con score bajo |',
+          trust.kept.length, 'candidatos quedan'
+        );
+      }
+      if (!trust.kept.length) {
+        status.value = '❌ Sin subtítulos ES';
+        return;
+      }
+      const { best, fileId } = pickBestSubtitle(trust.kept, hints, vidDuration);
       if (!best || !fileId) {
         status.value = '❌ Sin file_id';
         return;
@@ -328,7 +347,7 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
         return;
       }
 
-      const ranked = rankSubtitles(data.data, hints, vidDuration);
+      const ranked = rankSubtitles(trust.kept, hints, vidDuration);
       let srt: string | null = null;
       for (let attempt = 0; attempt < Math.min(ranked.length, MAX_DOWNLOAD_ATTEMPTS); attempt++) {
         const candidate = ranked[attempt];

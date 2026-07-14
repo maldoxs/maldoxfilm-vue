@@ -204,6 +204,65 @@ export function scoreSubtitle(s: OpenSubtitle, hints: VideoHints, _vidDurationSe
 }
 
 /**
+ * ADR-009 fix 2 — piso de confianza + verificación de IMDB, para que nunca se
+ * elija un subtítulo de OTRA película (caso real: `Maze.Runner...srt` con
+ * score 19 reproduciendo otro título — `pickBestSubtitle` devolvía `ranked[0]`
+ * sin ningún piso, y la búsqueda por release con `imdb_id=` vacío puede traer
+ * cualquier cosa que matchee el texto).
+ *
+ * Reglas (diseñadas para NO romper el comportamiento documentado "si el único
+ * disponible es AI, igual se elige"):
+ *   1. Si el resultado declara `feature_details.imdb_id` y NO coincide con el
+ *      título en reproducción → DESCARTE duro (es de otra película), sin
+ *      importar el score.
+ *   2. Si coincide → se mantiene el comportamiento actual INTACTO (sin piso:
+ *      un AI-translated verificado sigue siendo elegible como último recurso).
+ *   3. Si no se puede verificar (sin `feature_details`, o sin IMDB nuestro) →
+ *      se exige un score mínimo (`MIN_SUBTITLE_CONFIDENCE`) para aceptarlo.
+ */
+export const MIN_SUBTITLE_CONFIDENCE = 5;
+
+/** Resultado de la verificación IMDB de UN candidato. */
+export type ImdbVerdict = 'match' | 'mismatch' | 'unverifiable';
+
+export function imdbVerdict(s: OpenSubtitle, numericId: string): ImdbVerdict {
+  const fd = s.attributes.feature_details;
+  if (!numericId || !fd) return 'unverifiable';
+  const own = Number(numericId);
+  if (!own) return 'unverifiable';
+  // Serie: el imdb del episodio difiere del de la serie → aceptar cualquiera de los dos.
+  if (fd.imdb_id === own || fd.parent_imdb_id === own) return 'match';
+  if (fd.imdb_id == null && fd.parent_imdb_id == null) return 'unverifiable';
+  return 'mismatch';
+}
+
+/**
+ * filterTrustworthySubtitles — aplica las reglas 1-3 sobre la lista completa.
+ * Devuelve también cuántos se descartaron por mismatch (para el log).
+ */
+export function filterTrustworthySubtitles(
+  subs: OpenSubtitle[],
+  numericId: string,
+  hints: VideoHints,
+  vidDurationSec = 0
+): { kept: OpenSubtitle[]; mismatches: number; lowConfidence: number } {
+  let mismatches = 0;
+  let lowConfidence = 0;
+  const kept = subs.filter((s) => {
+    const v = imdbVerdict(s, numericId);
+    if (v === 'mismatch') {
+      mismatches++;
+      return false;
+    }
+    if (v === 'match') return true;
+    if (scoreSubtitle(s, hints, vidDurationSec) >= MIN_SUBTITLE_CONFIDENCE) return true;
+    lowConfidence++;
+    return false;
+  });
+  return { kept, mismatches, lowConfidence };
+}
+
+/**
  * rankSubtitles — ordena candidatos de OpenSubtitles por puntaje descendente.
  * Preservado de `[...data.data].sort((a,b)=>score(b)-score(a))`.
  */

@@ -43,10 +43,11 @@ import {
   HLS_WATCHDOG_MS,
   HLS_CONFIG,
   isDashManifest,
+  evaluateAudioProbe,
   type MediaSourceLike,
 } from '../services/playback';
 import { pickHlsFallbackFromTranscode, pickDashUrlFromTranscode } from '../services/realdebrid';
-import { parseMediaInfos, pickSpanishAudioToken } from '../services/mediaInfos';
+import { parseMediaInfos, pickSpanishAudioToken, hasNativeDecodableAudio } from '../services/mediaInfos';
 import {
   resolveTpipeline,
   pingSeek,
@@ -589,6 +590,44 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       }
     }
     return { finalUrl: dashUrlBase, hasNativeSpanish: false, track: null };
+  }
+
+  // ── ADR-009 fix 4 — probe de audio post-arranque (Direct Play / link crudo) ──
+  // Ver nota completa en playback.ts (`evaluateAudioProbe`). Solo caminos DIRECTOS
+  // (los transcode/`/t/` re-encodean a AAC → nunca mudos por códec). Gate NO-TV:
+  // la TV decodifica AC3 por hardware y el contador de software daría falso positivo.
+  let audioProbeTimer: ReturnType<typeof setInterval> | null = null;
+  function clearAudioProbe() {
+    if (audioProbeTimer) {
+      clearInterval(audioProbeTimer);
+      audioProbeTimer = null;
+    }
+  }
+  function startAudioProbe(video: HTMLVideoElement, myGen: number, label: string) {
+    clearAudioProbe();
+    if (opts.isTv?.()) return; // TV: decoder de hardware → no confiable, no correr
+    let playedSec = 0;
+    let lastT = video.currentTime;
+    audioProbeTimer = setInterval(() => {
+      if (playerStore.isStale(myGen)) {
+        clearAudioProbe();
+        return;
+      }
+      const t = video.currentTime;
+      if (!video.paused && !video.seeking && t > lastT + 0.1) playedSec += Math.min(2, t - lastT);
+      lastT = t;
+      const decodedBytes = (video as unknown as { webkitAudioDecodedByteCount?: number })
+        .webkitAudioDecodedByteCount;
+      const verdict = evaluateAudioProbe({ decodedBytes, playedSec });
+      if (verdict === 'pending') return;
+      clearAudioProbe();
+      if (verdict === 'bad') {
+        console.warn(`[AUDIO-PROBE] ${label}: ${playedSec.toFixed(1)}s reproducidos con 0 bytes de audio decodificados → audio incompatible en este dispositivo`);
+        opts.onToast('🔇 Audio no compatible en este dispositivo — cambiando de reproductor');
+        opts.onFallbackToNextSource();
+      }
+      // 'ok' / 'unsupported' → no hacer nada (comportamiento actual intacto)
+    }, 1000);
   }
 
   // ── Monitor de stall a mitad de reproducción (TODOS los caminos: DASH/HLS/directo) ──
@@ -1159,6 +1198,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         video.play().catch(() => {});
         opts.onStarted();
         startStallMonitor(video, myGen, recoverReloadSrc(fallbackUrl));
+        startAudioProbe(video, myGen, 'x265-fallback-direct'); // ADR-009 fix 4
       },
       { once: true }
     );
@@ -1196,6 +1236,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         video.play().catch(() => {});
         opts.onStarted();
         startStallMonitor(video, myGen, recoverReloadSrc(streamUrl));
+        startAudioProbe(video, myGen, 'direct-play-raw'); // ADR-009 fix 4 (incluye link crudo)
       },
       { once: true }
     );
@@ -1388,6 +1429,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     if (!video) return;
 
     clearStallMonitor(); // cortar cualquier monitor DASH de una reproducción anterior
+    clearAudioProbe(); // cortar el probe de audio del título anterior (ADR-009 fix 4)
     cleanupServerTorrent(); // borrar en RD el torrent del título anterior (ADR-006)
     // Reset del estado /t/ AL INICIO: si la reproducción anterior usó pipeline /t/
     // (isTpipeline=true) y esta entra por Direct Play (que retorna antes del reset
@@ -1508,6 +1550,30 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     const hevcOk = detectHevcSupport(getMediaSource());
     const { hasBadAudio } = checkBadAudioForDirectPlay(streamFn, !!rdId);
 
+    // ── ADR-009 fix 3: audio REAL vía mediaInfos ANTES de decidir Direct Play ──
+    // La heurística por NOMBRE (`checkBadAudioForDirectPlay`) no ve un AC3 que el
+    // release no menciona (caso "El Padrino": Direct Play mudo en desktop, con
+    // audio en TV — mismo archivo, distinto decoder de hardware). Cuando hay rdId,
+    // RD ya sabe las pistas reales (`/streaming/mediaInfos/{rdId}` — la MISMA
+    // llamada que el camino transcode legacy hace más abajo): si NINGUNA pista es
+    // decodificable nativa, se salta el Direct Play y se va directo a /t/ (que
+    // re-encodea a AAC). ADITIVO: si la llamada falla o no hay pistas (null), el
+    // comportamiento queda EXACTAMENTE como antes. Sin rdId no hay metadata → el
+    // probe post-arranque (fix 4) cubre ese caso.
+    let realAudioNotDecodable = false;
+    if (rdId && !hasBadAudio) {
+      try {
+        const realAudio = hasNativeDecodableAudio(parseMediaInfos(await opts.rdClient.fetchMediaInfos(rdId)));
+        if (realAudio === false) {
+          realAudioNotDecodable = true;
+          console.warn('[RD] mediaInfos: ninguna pista de audio nativa (AC3/DTS real) → saltando Direct Play, va a /t/');
+        }
+      } catch {
+        /* sin mediaInfos → heurística por nombre, como siempre */
+      }
+      if (playerStore.isStale(myGen)) return;
+    }
+
     // ── PLAY DIRECTO (HTTP Range = seek instantáneo, sin transcode) ──────────────────
     // Se intenta para H264 (cualquier device) o HEVC con soporte real (desktop/iOS, NO TV).
     // ⚠️ NO se restringe a contenedor MP4: las versiones CACHEADAS de RD (incluidas MKV)
@@ -1515,13 +1581,14 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // que antes andaban (La Momia/Michael: su única versión cacheada es MKV). Si el directo
     // falla (p.ej. MKV no soportado), `tryHevcDirectPlay` devuelve false y cae al transcode.
     // El contenedor MP4 ya se prioriza en el SCORING (no hace falta bloquear acá).
-    const canTryDirect = (!streamIsX265 || hevcOk) && !hasBadAudio;
+    const canTryDirect = (!streamIsX265 || hevcOk) && !hasBadAudio && !realAudioNotDecodable;
     if (canTryDirect) {
       const played = await tryHevcDirectPlay(video, streamUrl, params.startPositionSec);
       if (played) {
         const hasSpaDirect = isDualLatFilename(streamFn);
         opts.onStreamReady?.({ selected, hasNativeSpanish: hasSpaDirect, spanishTrack: null });
         startStallMonitor(video, myGen, recoverReloadSrc(streamUrl));
+        startAudioProbe(video, myGen, 'direct-play'); // ADR-009 fix 4
         // Toast "Seek fluido" quitado (a pedido) — un solo mensaje "Cargando…", sin toasts.
         isLoadingRd.value = false;
         return;
@@ -1755,6 +1822,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     }
     clearMsgTimers();
     clearStallMonitor();
+    clearAudioProbe(); // ADR-009 fix 4
     cleanupServerTorrent(); // borrar en RD el torrent activo al cerrar (ADR-006)
     isTpipeline.value = false;
     tpipelineSeeking.value = false;

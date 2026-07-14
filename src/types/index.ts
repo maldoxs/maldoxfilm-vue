@@ -107,6 +107,16 @@ export interface OpenSubtitleAttributes {
   ratings?: number;
   download_count?: number;
   new_download_count?: number;
+  /**
+   * ADR-009 fix 2 — título REAL al que pertenece el subtítulo según
+   * OpenSubtitles. Opcional: no todos los resultados lo traen (y los mocks de
+   * tests existentes no lo definen). Para episodios de series, el IMDB de la
+   * SERIE viene en `parent_imdb_id` (el de `imdb_id` es el del episodio).
+   */
+  feature_details?: {
+    imdb_id?: number;
+    parent_imdb_id?: number;
+  };
 }
 
 export interface OpenSubtitle {

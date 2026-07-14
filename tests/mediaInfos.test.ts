@@ -78,3 +78,34 @@ describe('pickSpanishSubToken — subtítulo español embebido del propio archiv
     expect(pickSpanishSubToken(parseMediaInfos(momiaRaw))).toBeNull();
   });
 });
+
+// ── ADR-009 fix 3 — audio real antes de Direct Play ─────────────────────────
+import { hasNativeDecodableAudio } from '../src/services/mediaInfos';
+
+describe('hasNativeDecodableAudio — ¿el navegador puede decodificar el audio nativo?', () => {
+  const infoWith = (codecs: string[]) =>
+    parseMediaInfos({
+      details: {
+        audio: Object.fromEntries(codecs.map((c, i) => [`t${i}`, { lang: 'x', lang_iso: 'x', codec: c }])),
+      },
+    });
+
+  test('caso real "El Padrino": Latin(ac3) + English(ac3) → false (Direct Play sería mudo en desktop)', () => {
+    expect(hasNativeDecodableAudio(infoWith(['ac3', 'ac3']))).toBe(false);
+  });
+
+  test('al menos una pista AAC/MP3 → true (aunque acompañe un AC3)', () => {
+    expect(hasNativeDecodableAudio(infoWith(['ac3', 'aac']))).toBe(true);
+    expect(hasNativeDecodableAudio(infoWith(['mp3']))).toBe(true);
+    expect(hasNativeDecodableAudio(infoWith(['mp4a.40.2']))).toBe(true);
+  });
+
+  test('DTS/EAC3/TrueHD sin pista nativa → false', () => {
+    expect(hasNativeDecodableAudio(infoWith(['dts', 'eac3', 'truehd']))).toBe(false);
+  });
+
+  test('sin pistas parseadas → null (no cambiar el comportamiento por nombre)', () => {
+    expect(hasNativeDecodableAudio(parseMediaInfos(null))).toBeNull();
+    expect(hasNativeDecodableAudio(parseMediaInfos({ details: {} }))).toBeNull();
+  });
+});

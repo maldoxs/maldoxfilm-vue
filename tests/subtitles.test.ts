@@ -228,3 +228,55 @@ describe('Helpers de búsqueda (release name / IMDB numérico / validación de c
     expect(isSubtitleValid(many)).toBe(true);
   });
 });
+
+// ── ADR-009 fix 2 — piso de confianza + verificación IMDB ────────────────────
+import {
+  imdbVerdict,
+  filterTrustworthySubtitles,
+  MIN_SUBTITLE_CONFIDENCE,
+} from '../src/services/subtitles';
+
+describe('imdbVerdict / filterTrustworthySubtitles — nunca un sub de OTRA película', () => {
+  const hints = deriveVideoHints('The.Movie.2020.1080p.BluRay.x264-GROUP.mkv');
+
+  test('mismatch: feature_details con imdb distinto → descarte duro (aunque el score sea alto)', () => {
+    const ajeno = sub({
+      release: 'Maze.Runner.The.Death.Cure.2018.1080p.BluRay',
+      from_trusted: true,
+      download_count: 100000,
+      feature_details: { imdb_id: 4500922 },
+    });
+    expect(imdbVerdict(ajeno, '1234567')).toBe('mismatch');
+    const r = filterTrustworthySubtitles([ajeno], '1234567', hints);
+    expect(r.kept).toHaveLength(0);
+    expect(r.mismatches).toBe(1);
+  });
+
+  test('match por imdb_id o parent_imdb_id (series) → se conserva SIN piso (AI incluido)', () => {
+    const aiVerificado = sub({ ai_translated: true, feature_details: { imdb_id: 1234567 } });
+    const episodio = sub({ ai_translated: true, feature_details: { imdb_id: 999, parent_imdb_id: 1234567 } });
+    expect(imdbVerdict(aiVerificado, '1234567')).toBe('match');
+    expect(imdbVerdict(episodio, '1234567')).toBe('match');
+    // Comportamiento documentado preservado: el AI verificado sigue siendo elegible
+    // aunque su score sea negativo (-8 por AI).
+    const r = filterTrustworthySubtitles([aiVerificado, episodio], '1234567', hints);
+    expect(r.kept).toHaveLength(2);
+  });
+
+  test('unverifiable: sin feature_details o sin imdb nuestro → exige el piso de score', () => {
+    const bueno = sub({ release: 'The.Movie.2020.1080p.BluRay.x264-GROUP', from_trusted: true, download_count: 20000 });
+    const dudoso = sub({ ai_translated: true, fps: 25 }); // score muy bajo, no verificable
+    expect(imdbVerdict(bueno, '')).toBe('unverifiable');
+    expect(imdbVerdict(dudoso, '1234567')).toBe('unverifiable');
+    expect(scoreSubtitle(bueno, hints)).toBeGreaterThanOrEqual(MIN_SUBTITLE_CONFIDENCE);
+    expect(scoreSubtitle(dudoso, hints)).toBeLessThan(MIN_SUBTITLE_CONFIDENCE);
+    const r = filterTrustworthySubtitles([bueno, dudoso], '1234567', hints);
+    expect(r.kept).toHaveLength(1);
+    expect(r.lowConfidence).toBe(1);
+  });
+
+  test('feature_details vacío (sin ids) cuenta como unverifiable, no como mismatch', () => {
+    const s = sub({ from_trusted: true, download_count: 20000, feature_details: {} });
+    expect(imdbVerdict(s, '1234567')).toBe('unverifiable');
+  });
+});

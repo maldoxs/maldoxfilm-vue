@@ -168,3 +168,27 @@ describe('isDashManifest — distingue DASH (Shaka) de HLS (hls.js)', () => {
     expect(isDashManifest('https://x.com/t/full.m3u8')).toBe(false);
   });
 });
+
+// ── ADR-009 fix 4 — probe de audio post-arranque ─────────────────────────────
+import { evaluateAudioProbe, AUDIO_PROBE_MIN_PLAYED_SEC } from '../src/services/playback';
+
+describe('evaluateAudioProbe — ¿el dispositivo está decodificando audio?', () => {
+  test('navegador sin el contador (Safari/Firefox) → unsupported (no actuar nunca)', () => {
+    expect(evaluateAudioProbe({ decodedBytes: undefined, playedSec: 60 })).toBe('unsupported');
+  });
+
+  test('bytes de audio > 0 → ok (termina el probe, sin importar cuánto se reprodujo)', () => {
+    expect(evaluateAudioProbe({ decodedBytes: 1, playedSec: 0.5 })).toBe('ok');
+    expect(evaluateAudioProbe({ decodedBytes: 500000, playedSec: 20 })).toBe('ok');
+  });
+
+  test('0 bytes pero aún no pasó el mínimo de reproducción → pending (seguir esperando)', () => {
+    expect(evaluateAudioProbe({ decodedBytes: 0, playedSec: AUDIO_PROBE_MIN_PLAYED_SEC - 1 })).toBe('pending');
+    expect(evaluateAudioProbe({ decodedBytes: 0, playedSec: 0 })).toBe('pending');
+  });
+
+  test('caso real "El Padrino" desktop: video avanza, 0 bytes de audio tras el mínimo → bad', () => {
+    expect(evaluateAudioProbe({ decodedBytes: 0, playedSec: AUDIO_PROBE_MIN_PLAYED_SEC })).toBe('bad');
+    expect(evaluateAudioProbe({ decodedBytes: 0, playedSec: 30 })).toBe('bad');
+  });
+});

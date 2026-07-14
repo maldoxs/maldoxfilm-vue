@@ -235,3 +235,41 @@ export const HLS_CONFIG = {
  * `hlsUrl.includes('.mpd')` (línea ~7967).
  */
 export const isDashManifest = (url: string): boolean => url.includes('.mpd');
+
+// ── ADR-009 fix 4 — probe de audio POST-arranque en Direct Play / link crudo ──
+// Para candidatos SIN rdId no existe metadata de pistas (mediaInfos requiere un
+// downloadId) → la única verificación posible es DESPUÉS de arrancar: Chrome
+// expone `video.webkitAudioDecodedByteCount` (bytes de audio decodificados por
+// SOFTWARE). Si el video lleva varios segundos avanzando y ese contador sigue en
+// 0, el audio existe pero este dispositivo no lo decodifica (caso real "El
+// Padrino": AC3 no declarado en el nombre → Direct Play mudo en desktop Chrome).
+//
+// ⚠️ El PROBE NO corre en TV (gate en usePlayer): la TV decodifica AC3 por
+// HARDWARE y el contador de software podría quedar en 0 con audio audible →
+// falso positivo que rompería el caso que hoy SÍ funciona en TV.
+
+/** Segundos de reproducción real requeridos antes de dictaminar "mudo". */
+export const AUDIO_PROBE_MIN_PLAYED_SEC = 6;
+
+export type AudioProbeVerdict = 'pending' | 'ok' | 'bad' | 'unsupported';
+
+/**
+ * evaluateAudioProbe — decisión PURA del probe (testeable sin DOM):
+ *   unsupported → el navegador no expone el contador (Safari/Firefox) → no actuar
+ *   ok          → ya se decodificaron bytes de audio → todo bien, probe termina
+ *   pending     → aún no pasó el mínimo de reproducción → seguir esperando
+ *   bad         → pasó el mínimo avanzando y CERO bytes de audio → mudo confirmado
+ */
+export function evaluateAudioProbe(params: {
+  /** `video.webkitAudioDecodedByteCount` (undefined si el navegador no lo expone). */
+  decodedBytes: number | undefined;
+  /** Segundos acumulados de reproducción REAL (avanzando, sin pausa) desde el arranque. */
+  playedSec: number;
+  minPlayedSec?: number;
+}): AudioProbeVerdict {
+  const { decodedBytes, playedSec, minPlayedSec = AUDIO_PROBE_MIN_PLAYED_SEC } = params;
+  if (typeof decodedBytes !== 'number') return 'unsupported';
+  if (decodedBytes > 0) return 'ok';
+  if (playedSec < minPlayedSec) return 'pending';
+  return 'bad';
+}
