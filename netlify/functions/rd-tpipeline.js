@@ -13,6 +13,7 @@
  */
 
 const RD_APP_BASE = 'https://app.real-debrid.com/rest/1.0';
+const RD_API_BASE = 'https://api.real-debrid.com/rest/1.0';
 
 async function authFetch(url, token, timeoutMs = 15000) {
   return fetch(url, {
@@ -114,19 +115,47 @@ async function handleResolve(rdId, token) {
  * AC3 → mudo en desktop). Es exactamente lo que hace el reproductor oficial de RD.
  * NO lee el body (no descarga el video); solo necesita la URL final tras redirects.
  */
-async function handleResolveRaw(rawUrl) {
+async function handleResolveRaw(rawUrl, token) {
+  // 1. Seguir el link crudo hasta la URL final. NO leemos el body (no descargamos
+  //    el video): solo necesitamos `res.url` (la URL tras los redirects).
   let finalUrl = '';
   try {
     const res = await fetch(rawUrl, { redirect: 'follow', signal: AbortSignal.timeout(12000) });
     finalUrl = res.url || '';
+    try {
+      await res.body?.cancel();
+    } catch {
+      /* noop */
+    }
   } catch {
-    /* noop — sin id → el cliente sigue con su fallback */
+    /* noop — sin URL → el cliente sigue con su fallback */
   }
-  const m = finalUrl.match(/\/d\/([A-Za-z0-9]+)\//) || finalUrl.match(/streaming-([A-Za-z0-9]+)/);
-  const rdId = m ? m[1] : null;
-  // Redactar el token del log/echo por seguridad.
-  const safeUrl = finalUrl.replace(/(auth_token|realdebrid)=[^&/]+/gi, '$1=***');
-  return { rdId, finalUrl: safeUrl };
+  if (!finalUrl) return { rdId: null, finalUrl: '' };
+
+  // Caso A: por si el redirect fuera directo a la página de streaming, el id
+  // (RYDUFD5OWPH...) ya viene en la URL y ES el que usa /streaming-{id}.
+  const streamMatch = finalUrl.match(/streaming-([A-Za-z0-9]+)/);
+  if (streamMatch) return { rdId: streamMatch[1], via: 'streaming-url' };
+
+  // Caso B (lo normal): redirige al CDN `.../d/{token}/...`. OJO: ese {token} NO
+  // es el `id` que necesita /streaming-{id} (son distintos campos en RD). El id
+  // correcto es el `id` de la entrada de /downloads cuyo `download` == esta URL.
+  const norm = (u) => (u || '').toLowerCase().split('?')[0];
+  try {
+    const dlRes = await authFetch(`${RD_API_BASE}/downloads?limit=500`, token);
+    if (dlRes.ok) {
+      const downloads = await dlRes.json();
+      if (Array.isArray(downloads)) {
+        const match = downloads.find((d) => d.download && norm(d.download) === norm(finalUrl));
+        if (match && match.id) return { rdId: match.id, via: 'downloads-match' };
+      }
+    }
+  } catch {
+    /* noop */
+  }
+
+  // Sin id → devolver la URL (token redactado) para diagnóstico; el cliente cae al fallback.
+  return { rdId: null, finalUrl: finalUrl.replace(/(auth_token|realdebrid)=[^&/]+/gi, '$1=***') };
 }
 
 async function handleSeek(mediaId, seconds, token) {
@@ -177,7 +206,7 @@ export const handler = async (event) => {
     if (action === 'resolveRaw') {
       const url = params.url;
       if (!url) throw new Error('Missing url');
-      const result = await handleResolveRaw(url);
+      const result = await handleResolveRaw(url, token);
       return { statusCode: 200, headers: cors, body: JSON.stringify(result) };
     }
 
