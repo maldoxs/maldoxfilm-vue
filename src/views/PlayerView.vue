@@ -74,6 +74,8 @@ const props = defineProps<{
   id: string | number;
   season?: number;
   episode?: number;
+  /** "Ver desde el inicio" (DetailView): ignora la posición guardada para esta carga. */
+  fromStart?: boolean;
 }>();
 
 const router = useRouter();
@@ -444,8 +446,9 @@ function onRdStarted() {
   if (playerStore.current.type === 'tv') {
     setTimeout(() => scheduleAutoNext(), 2000);
   }
-  // Restaurar posición guardada ("Continuar viendo")
-  if (playerStore.current.id) {
+  // Restaurar posición guardada ("Continuar viendo") — se salta si el usuario
+  // eligió "Ver desde el inicio" (props.fromStart), igual que en loadActiveSource.
+  if (playerStore.current.id && !props.fromStart) {
     const prog = progressStore.get(playerStore.current.id, playerStore.current.type);
     if (prog?.positionSec && prog.positionSec > 30) {
       setTimeout(() => {
@@ -923,9 +926,14 @@ function loadActiveSource() {
     if (currentId != null) {
       // "Continuar viendo": leemos la posición guardada ANTES de cargar para que el
       // pipeline /t/ arranque el MPD directo en esa posición (no desde el minuto 0).
+      // "Ver desde el inicio" (props.fromStart, ?start=1 de DetailView): el usuario
+      // eligió arrancar de cero explícitamente → se ignora la posición guardada para
+      // ESTA carga (no se borra el progreso: si sigue viendo, se sobreescribe solo).
       const savedProg = progressStore.get(currentId, playerStore.current.type);
       const startPositionSec =
-        savedProg?.positionSec && savedProg.positionSec > 30 ? savedProg.positionSec : undefined;
+        !props.fromStart && savedProg?.positionSec && savedProg.positionSec > 30
+          ? savedProg.positionSec
+          : undefined;
       void videoPlayerRef.value?.loadRdSource({
         id: currentId,
         type: playerStore.current.type,

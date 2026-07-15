@@ -82,6 +82,9 @@ const routes: RouteRecordRaw[] = [
       id: route.params.id,
       season: route.query.s ? Number(route.query.s) : undefined,
       episode: route.query.e ? Number(route.query.e) : undefined,
+      // ?start=1 — "Ver desde el inicio" (DetailView): ignora la posición guardada
+      // de "Continuar viendo" para ESTA carga, sin borrar el progreso persistido.
+      fromStart: route.query.start === '1',
     }),
   },
   {

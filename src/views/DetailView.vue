@@ -279,6 +279,24 @@ function playMain() {
 }
 
 /**
+ * playFromStart — "Ver desde el inicio" (a pedido, estilo Netflix): mismo destino
+ * que `playMain` (misma temporada/episodio guardados para series), pero con
+ * `?start=1` para que `PlayerView` ignore la posición guardada de "Continuar
+ * viendo" en ESTA carga. El progreso NO se borra: si el usuario sigue viendo,
+ * el tracking normal lo va a sobreescribir solo.
+ */
+function playFromStart() {
+  presetAnimeDetection();
+  if (isTV.value) {
+    const s = prog.value?.season || 1;
+    const e = prog.value?.episode || 1;
+    router.push({ path: `/ver/tv/${props.id}`, query: { s: String(s), e: String(e), start: '1' } });
+  } else {
+    router.push({ path: `/ver/movie/${props.id}`, query: { start: '1' } });
+  }
+}
+
+/**
  * playEpisode — preserva `openPlayer({id:tvId,type:'tv',...,startS:n,startE:ep.episode_number,...})`
  * de cada tarjeta de episodio (línea ~9021).
  */
@@ -400,6 +418,10 @@ onBeforeUnmount(() => {
           <div class="dp-overview">{{ overview }}</div>
           <div class="dp-actions">
             <button class="dp-play-btn" @click="playMain">{{ playLabel }}</button>
+            <!-- "Ver desde el inicio" — solo tiene sentido si hay "Continuar viendo" guardado
+                 (si no, `playMain` YA arranca del minuto 0). Navega con ?start=1, que PlayerView
+                 usa para ignorar la posición guardada en ESA carga (sin borrar el progreso). -->
+            <button v-if="prog" class="dp-sec-btn" @click="playFromStart">↺ Ver desde el inicio</button>
             <button class="dp-sec-btn" :class="{ added: inList }" @click="toggleList">{{ listBtnLabel }}</button>
             <button class="dp-sec-btn" @click="goBack">← Volver</button>
           </div>
