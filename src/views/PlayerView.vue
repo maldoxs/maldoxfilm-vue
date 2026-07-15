@@ -1208,6 +1208,18 @@ onBeforeUnmount(() => {
         <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
       </svg>
     </button>
+    <!-- "Ver desde el inicio" JUNTO a la flecha "Volver" (a pedido, misma posición que la
+         referencia de RD) — además del botón que ya vive en la barra de controles inferior. -->
+    <button
+      v-if="isRdSource"
+      class="player-back player-restart"
+      aria-label="Ver desde el inicio"
+      @click="videoPlayerRef?.restartFromZero()"
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path d="M12 5V2L8 6l4 4V7a7 7 0 1 1-6.93 8H3.05A9 9 0 1 0 12 5z" />
+      </svg>
+    </button>
 
     <div class="player-topbar">
       <div class="player-title">{{ title }}</div>
@@ -1418,6 +1430,11 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.18);
   border-color: rgba(255, 255, 255, 0.5);
   outline: none;
+}
+/* "Ver desde el inicio" — mismo estilo que .player-back (comparte esa clase,
+   incluido el ocultamiento en controls-hidden), corrido a la derecha. */
+.player-restart {
+  left: 86px;
 }
 /* La flecha Volver se oculta junto con el resto al inactivarse (en RD e iframe).
    ⚠️ Nota: sobre un iframe (UnlimPlay/vidlink) el `mousemove` no burbujea al
@@ -2008,6 +2025,11 @@ html.tv-mode .source-btn:focus {
   height: 60px;
   top: 64px;
   left: 20px;
+}
+/* El botón "Ver desde el inicio" comparte .player-back (mismo tamaño/top en TV) pero
+   necesita su propio `left` para no superponerse con la flecha "Volver". */
+:global(html.tv-mode) .player-restart {
+  left: 96px;
 }
 :global(html.tv-mode) .player-back svg {
   width: 32px;

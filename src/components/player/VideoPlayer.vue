@@ -446,6 +446,8 @@ defineExpose({
   isTpipeline: player.isTpipeline,
   tpipelineOffset: player.tpipelineOffset,
   tpipelineSeekTo: player.tpipelineSeekTo,
+  /** restartFromZero — "Ver desde el inicio" invocado desde PlayerView (botón junto a la flecha "Volver"). */
+  restartFromZero,
   /**
    * isLoading (expuesto) — permite mostrar el spinner puntualmente desde PlayerView
    * durante el seek nativo de "continuar viendo" en Direct Play (ver PlayerView.vue,
