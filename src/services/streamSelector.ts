@@ -70,6 +70,61 @@ export function audioLangRank(s: TorrentioStream): number {
   return 0;
 }
 
+/**
+ * extractTitleYear — extrae "Título" + "Año" del formato típico de Torrentio
+ * ("Título (YYYY) ..."). Usado para el RESCATE POR TÍTULO (ver
+ * `findCachedByTitleYear`) — caso real "El Padrino": el archivo YA estaba
+ * cacheado en la cuenta (agregado manualmente vía "Torrents to Direct Download"
+ * de RD, filename "The Godfather (1972) 1080p.mkv") con un hash que Torrentio
+ * NUNCA ofrece como stream candidato — el matching por infoHash de las rondas
+ * anteriores (incluido `resolveActiveStream`) jamás lo iba a encontrar.
+ */
+export function extractTitleYear(s: TorrentioStream): { title: string; year: string } | null {
+  const t = s.title || '';
+  const m = t.match(/^(.+?)\s*\((\d{4})\)/);
+  if (!m) return null;
+  return { title: m[1].trim(), year: m[2] };
+}
+
+const SEQUEL_MARKER_RE = /\b(2|3|4|5|ii|iii|iv|v)\b/i;
+
+/**
+ * findCachedByTitleYear — RESCATE DE ÚLTIMO RECURSO: busca en TODOS los
+ * downloads de la cuenta (no solo los candidatos de Torrentio) una entrada
+ * que coincida por TÍTULO + AÑO. Requiere que el AÑO aparezca literal en el
+ * filename (ancla fuerte: "1972" no aparece por azar) y que las palabras
+ * significativas del título también estén. Evita confundir con una secuela
+ * (ej. "El Padrino 3") salvo que el título buscado también la tenga. Solo se
+ * usa cuando NINGUNA ronda anterior por infoHash encontró nada — no cambia
+ * el comportamiento en ningún caso donde ya había match.
+ */
+export function findCachedByTitleYear(
+  streams: TorrentioStream[],
+  downloads: RDDownload[]
+): RDDownload | undefined {
+  let ty: { title: string; year: string } | null = null;
+  for (const s of streams) {
+    ty = extractTitleYear(s);
+    if (ty) break;
+  }
+  if (!ty) return undefined;
+  const titleWords = ty.title
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 3); // descarta "the"/"and"/"of" — deja palabras con peso real
+  if (!titleWords.length) return undefined;
+  const targetHasSequelMarker = SEQUEL_MARKER_RE.test(ty.title);
+  return downloads.find((d) => {
+    if (!d.filename || isJunkMatch(d)) return false;
+    const fn = d.filename.toLowerCase();
+    if (!fn.includes(ty!.year)) return false; // ancla fuerte: el año debe estar
+    if (!titleWords.every((w) => fn.includes(w))) return false;
+    const fnWithoutYear = fn.replace(ty!.year, '');
+    if (!targetHasSequelMarker && SEQUEL_MARKER_RE.test(fnWithoutYear)) return false; // ej. "...3"
+    return true;
+  });
+}
+
 export const hasBadLang = (s: TorrentioStream): boolean => {
   const t = streamInfo(s);
   const bad =
@@ -464,6 +519,23 @@ export function resolveActiveStream(
           console.warn('[RD] Versión cacheada encontrada pos', i, '| score:', scored[i].pts, '| filename:', altFn); // línea ~4894
           break;
         }
+      }
+    }
+    // RESCATE POR TÍTULO+AÑO (2026-07-13, caso real "El Padrino"): las rondas de
+    // arriba solo buscan entre los CANDIDATOS que trajo Torrentio. Pero el archivo
+    // puede estar cacheado en la cuenta bajo un torrent AGREGADO MANUALMENTE (vía
+    // "Torrents to Direct Download" de RD) — un hash/nombre que Torrentio NUNCA
+    // ofrece como stream, así que ninguna ronda anterior lo iba a encontrar. Único
+    // recurso: revisar TODOS los downloads de la cuenta por título+año. No importa
+    // qué códec de audio tenga ese archivo — el pipeline /t/ (aguas abajo, en
+    // usePlayer) transcodea CUALQUIER audio a AAC, así que alcanza con el rdId.
+    if (!rdId) {
+      const titleMatch = findCachedByTitleYear([best, ...pool.map((p) => p.s)], downloads);
+      if (titleMatch) {
+        rdId = titleMatch.id;
+        rdDownloadUrl = titleMatch.download || null;
+        rdFilesize = titleMatch.filesize || 0;
+        console.warn('[RD] Rescate por título+año → id:', rdId, '| filename:', titleMatch.filename);
       }
     }
     // `unavailableInRd` (toast del llamador) se mantiene EXACTO como el original:

@@ -17,6 +17,8 @@ import {
   isJunkMatch,
   MIN_VALID_FILE_BYTES,
   audioLangRank,
+  extractTitleYear,
+  findCachedByTitleYear,
 } from '../src/services/streamSelector';
 import type { TorrentioStream, RDDownload } from '../src/types';
 
@@ -447,5 +449,83 @@ describe('"Parásitos" — el upgrade a fluido NO puede degradar el idioma (igua
     expect(audioLangRank(latinoBest)).toBe(2);
     expect(audioLangRank(koreanDirect)).toBe(0);
     expect(audioLangRank(stream({ title: 'Movie Castellano España 💾 2 GB' }))).toBe(1);
+  });
+});
+
+// ── Rescate por título+año (caso real "El Padrino") ──────────────────────────
+// El archivo cacheado en la cuenta puede venir de un torrent AGREGADO
+// MANUALMENTE (vía "Torrents to Direct Download" de RD) — hash/nombre que
+// Torrentio NUNCA ofrece como stream candidato. Único recurso: revisar TODOS
+// los downloads por título+año (no por infoHash).
+describe('extractTitleYear / findCachedByTitleYear — rescate cuando el cacheado no viene de Torrentio', () => {
+  const godfatherCandidates = [
+    stream({
+      url: 'https://example.com/godfather-dual-lat',
+      title: 'The Godfather (1972) 1080p Dual Audio Español Latino Ing',
+      behaviorHints: { filename: null as unknown as string },
+    }),
+  ];
+
+  test('extractTitleYear parsea "Título (Año) ..." como trae Torrentio', () => {
+    expect(extractTitleYear(godfatherCandidates[0])).toEqual({ title: 'The Godfather', year: '1972' });
+    expect(extractTitleYear(stream({ title: 'Sin formato de año' }))).toBeNull();
+  });
+
+  test('caso real: encuentra el download "The Godfather (1972) 1080p.mkv" agregado manualmente (no matchea por hash)', () => {
+    const downloads: RDDownload[] = [
+      {
+        id: 'MINLTIQGPTFGK76A',
+        download: 'https://real-debrid.com/d/MINLTIQGPTFGK76A',
+        filename: 'The Godfather (1972) 1080p.mkv',
+        filesize: 3_000_000_000,
+      },
+    ];
+    const found = findCachedByTitleYear(godfatherCandidates, downloads);
+    expect(found?.id).toBe('MINLTIQGPTFGK76A');
+  });
+
+  test('NO confunde con una secuela del mismo franchise ("El Padrino 3" sin año 1972)', () => {
+    const downloads: RDDownload[] = [
+      { id: 'wrong-1', download: 'x', filename: 'El Padrino 3 - 720p.mkv', filesize: 2_000_000_000 },
+    ];
+    expect(findCachedByTitleYear(godfatherCandidates, downloads)).toBeUndefined();
+  });
+
+  test('si el título buscado SÍ es una secuela, no descarta downloads con marcador de secuela', () => {
+    const partIII = [stream({ title: 'The Godfather Part III (1990) 1080p' })];
+    const downloads: RDDownload[] = [
+      { id: 'part3', download: 'x', filename: 'The.Godfather.Part.III.1990.1080p.mkv', filesize: 2_000_000_000 },
+    ];
+    expect(findCachedByTitleYear(partIII, downloads)?.id).toBe('part3');
+  });
+
+  test('no matchea basura ni un año distinto', () => {
+    const downloads: RDDownload[] = [
+      { id: 'junk', download: 'x', filename: 'The Godfather 1972 - Sample.mkv', filesize: 10_000_000 },
+      { id: 'wrong-year', download: 'x', filename: 'The Godfather 1990 remake.mkv', filesize: 2_000_000_000 },
+    ];
+    expect(findCachedByTitleYear(godfatherCandidates, downloads)).toBeUndefined();
+  });
+
+  test('resolveActiveStream integra el rescate: sin match por hash, encuentra por título+año', () => {
+    const downloads: RDDownload[] = [
+      {
+        id: 'MINLTIQGPTFGK76A',
+        download: 'https://real-debrid.com/d/MINLTIQGPTFGK76A',
+        filename: 'The Godfather (1972) 1080p.mkv',
+        filesize: 3_000_000_000,
+      },
+    ];
+    const { scored, pool } = rankStreams(godfatherCandidates);
+    const result = resolveActiveStream(
+      godfatherCandidates[0],
+      godfatherCandidates[0].url!,
+      'The Godfather (1972) 1080p Dual Audio Español Latino Ing',
+      pool,
+      scored,
+      downloads
+    );
+    expect(result.rdId).toBe('MINLTIQGPTFGK76A');
+    expect(result.unavailableInRd).toBe(false);
   });
 });
