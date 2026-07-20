@@ -137,11 +137,26 @@ export function createRealDebridClient(opts: RealDebridClientOptions): RealDebri
 
   async function resolveProxyUrl(originalUrl: string): Promise<string> {
     if (!isTorrentioProxyUrl(originalUrl)) return originalUrl;
+    // ⚠️ Timeout (2026-07-14, a pedido — caso real "La Odisea 2026"): SIN esto,
+    // este fetch no tenía límite de tiempo. Para un título NO cacheado, el propio
+    // endpoint de resolve de Torrentio puede tardar mucho (o colgarse) intentando
+    // resolverlo por su cuenta — y esta llamada corre ANTES de toda la cascada de
+    // rescates (resolveActiveStream) que determina "nada cacheado en RD" → el aviso
+    // en pantalla se demoraba igual, aunque esa cascada ya sea instantánea. 8s de
+    // margen: de sobra para el camino feliz (contenido cacheado resuelve casi al
+    // toque); si se cuelga, cae al catch existente (misma URL original) en vez de
+    // esperar sin límite. AbortController + setTimeout (NO `AbortSignal.timeout`:
+    // no existe en webOS viejo — ver `waitForSegmentAt` en rd-t-pipeline.ts, ya
+    // rompió el resolve de /t/ una vez con ese error exacto).
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 8000);
     try {
-      const res = await fetchImpl(originalUrl, { redirect: 'follow' });
+      const res = await fetchImpl(originalUrl, { redirect: 'follow', signal: ctrl.signal });
       if (shouldAdoptResolvedUrl(res.url, originalUrl)) return res.url;
     } catch {
       /* silenciar — igual que el try/catch vacío del original */
+    } finally {
+      clearTimeout(tid);
     }
     return originalUrl;
   }
