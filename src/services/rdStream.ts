@@ -213,7 +213,15 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
       // addMagnet→selectFiles→unrestrict→transcode y devuelve URLs DASH/liveMP4/HLS
       // listas (sin Torrentio, con Range, sin exponer el token). El camino cacheado
       // (`rdId` presente) NO entra aquí → intacto.
-      if (!selected.rdId) {
+      //
+      // GATE `unavailableInRd` (2026-07-14, a pedido — caso real "La Odisea 2026"):
+      // si `resolveActiveStream` ya determinó que NINGÚN candidato está cacheado
+      // ([RD+]) en RD, la Fase 2 (start→polling 90s→legacy 9s) no tiene chance real
+      // de éxito (requeriría una descarga desde cero, sin garantía de tiempo). Se
+      // saltea la llamada por completo → cae directo al fallback de iframe en
+      // usePlayer.ts (ver `selected.unavailableInRd` ahí), evitando minutos de
+      // espera sin sentido.
+      if (!selected.rdId && !selected.unavailableInRd) {
         // 5 → 12 (2026-07-13, caso El Padrino): las mejores versiones suelen estar
         // bloqueadas por DMCA en RD (addMagnet error 35). Con más candidatos, el
         // server-side puede SALTEAR los bloqueados y hallar uno que RD acepte

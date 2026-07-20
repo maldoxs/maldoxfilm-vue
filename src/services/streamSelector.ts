@@ -538,11 +538,28 @@ export function resolveActiveStream(
         console.warn('[RD] Rescate por título+año → id:', rdId, '| filename:', titleMatch.filename);
       }
     }
-    // `unavailableInRd` (toast del llamador) se mantiene EXACTO como el original:
-    // solo cuando el audio era incompatible y no hubo alternativa. Sin toasts nuevos.
-    if (!rdId && badAudio) {
-      console.warn('[RD] Sin alternativa disponible — película no cacheada en RD'); // líneas ~4899-4900
-      unavailableInRd = true;
+    // `unavailableInRd` (toast del llamador) dispara el fallback INMEDIATO a iframe,
+    // SIN pasar por la Fase 2/server-side. Dos casos:
+    //   1. (original) audio incompatible por nombre y sin alternativa reproducible.
+    //   2. (2026-07-14, a pedido — caso real "La Odisea 2026"): NINGÚN candidato del
+    //      pool está cacheado en RD ([RD+]) — todos son [RD download]. La distinción
+    //      importa: [RD+] = ya cacheado en ALGÚN LADO de RD → agregarlo a la cuenta es
+    //      casi instantáneo (la Fase 2 vale la pena, tiene chance real). [RD download]
+    //      = RD tendría que descargarlo DE VERDAD, sin garantía de tiempo ni de éxito
+    //      (caso real: 1 solo candidato, 0 seeders, ~5 min de espera total — Fase 2
+    //      90s + legacy 9s + intentos de reproducción directa — antes de caer al
+    //      iframe de todas formas). Sin nada [RD+] en el pool, ir directo: rdStream.ts
+    //      saltea la llamada a `serverResolve` cuando ve esta señal.
+    if (!rdId) {
+      const noneCachedAnywhere = !pool.some((p) => isCachedStream(p.s));
+      if (badAudio || noneCachedAnywhere) {
+        console.warn(
+          noneCachedAnywhere
+            ? '[RD] Ningún candidato cacheado [RD+] — sin chance real de Fase 2, saltando a iframe'
+            : '[RD] Sin alternativa disponible — película no cacheada en RD' // líneas ~4899-4900
+        );
+        unavailableInRd = true;
+      }
     }
   }
 

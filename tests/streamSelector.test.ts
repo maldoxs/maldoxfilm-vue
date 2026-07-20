@@ -529,3 +529,64 @@ describe('extractTitleYear / findCachedByTitleYear — rescate cuando el cachead
     expect(result.unavailableInRd).toBe(false);
   });
 });
+
+// ── unavailableInRd — salto INMEDIATO a iframe (caso real "La Odisea 2026") ──
+// Si NINGÚN candidato del pool está cacheado ([RD+]), la Fase 2 no tiene chance
+// real (requeriría descarga desde cero) → se salta directo, sin esperar minutos.
+describe('unavailableInRd — sin candidatos [RD+] en el pool, saltar directo (sin Fase 2)', () => {
+  test('1 solo candidato [RD download], sin match, sin rescate por título+año → unavailableInRd=true', () => {
+    const onlyDownload = stream({
+      url: 'https://example.com/odisea',
+      name: '[RD download] Torrentio',
+      title: 'La Odisea (2026) HdTScr Lat 💾 1.65 GB',
+      behaviorHints: { filename: null as unknown as string },
+    });
+    const { scored, pool } = rankStreams([onlyDownload]);
+    const result = resolveActiveStream(
+      onlyDownload,
+      onlyDownload.url!,
+      'La Odisea (2026) HdTScr Lat',
+      pool,
+      scored,
+      [] // downloads vacío: nada cacheado en la cuenta tampoco
+    );
+    expect(result.rdId).toBeNull();
+    expect(result.unavailableInRd).toBe(true);
+  });
+
+  test('si HAY al menos un [RD+] en el pool (aunque el top no matchee), NO se salta — Fase 2 sigue teniendo chance', () => {
+    const topDownload = stream({
+      url: 'https://example.com/top',
+      name: '[RD download] Torrentio',
+      title: 'Weapons 2026 4K HDR AAC 💾 30 GB',
+      behaviorHints: { filename: 'Weapons.2026.4K.mkv' },
+    });
+    const altCached = stream({
+      url: 'https://example.com/alt',
+      name: '[RD+] Torrentio',
+      title: 'Weapons 2026 720p AAC 💾 2 GB',
+      behaviorHints: { filename: 'Weapons.2026.720p.mkv' },
+    });
+    // El download SIN match; el cacheado tampoco matchea en downloads (cuenta
+    // vacía) — pero como HAY un [RD+] en el pool, la Fase 2 vale la pena.
+    const { scored, pool } = rankStreams([topDownload, altCached]);
+    const result = resolveActiveStream(topDownload, topDownload.url!, 'Weapons.2026.4K.mkv', pool, scored, []);
+    expect(result.rdId).toBeNull();
+    expect(result.unavailableInRd).toBe(false);
+  });
+
+  test('el caso original (badAudio sin alternativa) sigue disparando unavailableInRd, con o sin [RD+] en el pool', () => {
+    const ac3NoMatch = stream({
+      url: 'https://example.com/ac3',
+      name: '[RD+] Torrentio', // SÍ está cacheado en algún lado (no dispara la señal nueva)...
+      title: 'Some Movie 2020 1080p AC3 5.1 💾 5 GB',
+      behaviorHints: { filename: 'Some.Movie.2020.AC3.mkv' },
+    });
+    const { scored, pool } = rankStreams([ac3NoMatch]);
+    // ...pero sigue sin match en /downloads Y el audio es incompatible → el
+    // comportamiento ORIGINAL (badAudio) sigue disparando unavailableInRd.
+    const result = resolveActiveStream(ac3NoMatch, ac3NoMatch.url!, 'Some.Movie.2020.AC3.mkv', pool, scored, []);
+    expect(result.rdId).toBeNull();
+    expect(result.unavailableInRd).toBe(true);
+  });
+});
