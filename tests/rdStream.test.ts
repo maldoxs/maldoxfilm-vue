@@ -175,3 +175,135 @@ describe('rdStream — orquestación completa de rdGetStream', () => {
     expect(torrentioCall?.[0]).toContain('/stream/series/tt7654321:2:5.json');
   });
 });
+
+// ── RE-FETCH del pool si la elegida NO es fluida (caso real "Ghost Rider", 2026-07-14) ──
+// Evidencia del bug: Torrentio entregó un pool pobre (19 streams) sin ninguna versión
+// Direct Play cacheada → el player cayó a /t/ sobre un archivo que RD generaba a ~0.4x
+// → pausas inevitables. El fix: segunda consulta a Torrentio (el pool VARÍA entre
+// requests) y re-selección — si aparece una H264+AAC cacheada, esa reproduce fluida.
+describe('rdStream — re-fetch del pool cuando la versión elegida va a transcodear', () => {
+  // Stream tipo Ghost Rider: cacheado y con match, pero AC3+MKV → NO es Direct Play.
+  const AC3_STREAM = {
+    name: '[RD+] Torrentio 720p',
+    title: 'Ghost.Movie.2007.720p.AC3.5.1.x264 💾 4.4 GB',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/TEST_TOKEN/cccccccccccccccccccccccccccccccccccccccc/null/0/Ghost.Movie.2007.720p.AC3.5.1.x264.mkv',
+    infoHash: 'cccccccccccccccccccccccccccccccccccccccc',
+    behaviorHints: { filename: 'Ghost.Movie.2007.720p.AC3.5.1.x264.mkv' },
+  };
+  // La versión FLUIDA (H264+AAC+MP4) que solo aparece en el SEGUNDO fetch.
+  const FLUID_STREAM = {
+    name: '[RD+] Torrentio 1080p',
+    title: 'Ghost.Movie.2007.1080p.x264.AAC 💾 2.1 GB',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/TEST_TOKEN/dddddddddddddddddddddddddddddddddddddddd/null/0/Ghost.Movie.2007.1080p.x264.AAC.mp4',
+    infoHash: 'dddddddddddddddddddddddddddddddddddddddd',
+    behaviorHints: { filename: 'Ghost.Movie.2007.1080p.x264.AAC.mp4' },
+  };
+  const DOWNLOADS = [
+    {
+      id: 'RD_AC3',
+      download: 'https://x1.stream.real-debrid.com/d/AC3/Ghost.Movie.2007.720p.AC3.5.1.x264.mkv',
+      filename: 'Ghost.Movie.2007.720p.AC3.5.1.x264.mkv',
+      filesize: 4400000000,
+    },
+    {
+      id: 'RD_FLUID',
+      download: 'https://x2.stream.real-debrid.com/d/FLUID/Ghost.Movie.2007.1080p.x264.AAC.mp4',
+      filename: 'Ghost.Movie.2007.1080p.x264.AAC.mp4',
+      filesize: 2100000000,
+    },
+  ];
+
+  /** Router con Torrentio STATEFUL: 1er fetch → pool pobre; 2do fetch → pool con la fluida. */
+  function makeRefetchRouter(secondPool: unknown[]) {
+    let torrentioCalls = 0;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const respond = (json: unknown, finalUrl?: string) =>
+        ({
+          ok: true,
+          status: 200,
+          url: finalUrl ?? url,
+          json: async () => json,
+          text: async () => JSON.stringify(json),
+        }) as unknown as Response;
+      if (/external_ids/.test(url)) return respond({ imdb_id: 'tt0259324' });
+      if (/torrentio\.strem\.fun\/realdebrid=/.test(url)) {
+        torrentioCalls += 1;
+        return respond({ streams: torrentioCalls === 1 ? [AC3_STREAM] : secondPool });
+      }
+      if (/resolve\/realdebrid\/TEST_TOKEN\/cccc/.test(url))
+        return respond({}, DOWNLOADS[0].download);
+      if (/\/downloads\?limit=500/.test(url)) return respond(DOWNLOADS);
+      throw new Error('Sin ruta mockeada para: ' + url);
+    });
+    return { fetchImpl, torrentioCallCount: () => torrentioCalls };
+  }
+
+  test('la 2da consulta trae una H264+AAC cacheada → el resolver la elige (adiós /t/ lento)', async () => {
+    const { fetchImpl, torrentioCallCount } = makeRefetchRouter([AC3_STREAM, FLUID_STREAM]);
+    const resolver = buildResolver(fetchImpl as unknown as typeof fetch);
+    const result = await resolver.getStream(1071, 'movie');
+
+    expect(torrentioCallCount()).toBe(2); // el gate disparó el re-fetch
+    expect(result.rdId).toBe('RD_FLUID'); // upgrade a la versión fluida cacheada
+    expect(result.streamFilename).toBe('Ghost.Movie.2007.1080p.x264.AAC.mp4');
+    expect(result.hasAAC).toBe(true);
+    expect(result.isX265).toBe(false);
+  });
+
+  test('la 2da consulta no trae nada nuevo → la selección original queda IDÉNTICA', async () => {
+    const { fetchImpl, torrentioCallCount } = makeRefetchRouter([AC3_STREAM]);
+    const resolver = buildResolver(fetchImpl as unknown as typeof fetch);
+    const result = await resolver.getStream(1071, 'movie');
+
+    expect(torrentioCallCount()).toBe(2);
+    expect(result.rdId).toBe('RD_AC3'); // sin candidatos nuevos → sin cambios
+    expect(result.streamFilename).toBe('Ghost.Movie.2007.720p.AC3.5.1.x264.mkv');
+  });
+
+  test('si el re-fetch FALLA (red), la selección original sobrevive intacta', async () => {
+    let torrentioCalls = 0;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const respond = (json: unknown, finalUrl?: string) =>
+        ({ ok: true, status: 200, url: finalUrl ?? url, json: async () => json, text: async () => JSON.stringify(json) }) as unknown as Response;
+      if (/external_ids/.test(url)) return respond({ imdb_id: 'tt0259324' });
+      if (/torrentio\.strem\.fun\/realdebrid=/.test(url)) {
+        torrentioCalls += 1;
+        if (torrentioCalls > 1) throw new Error('Torrentio caído');
+        return respond({ streams: [AC3_STREAM] });
+      }
+      if (/resolve\/realdebrid\/TEST_TOKEN\/cccc/.test(url)) return respond({}, DOWNLOADS[0].download);
+      if (/\/downloads\?limit=500/.test(url)) return respond(DOWNLOADS);
+      throw new Error('Sin ruta mockeada para: ' + url);
+    });
+    const resolver = buildResolver(fetchImpl as unknown as typeof fetch);
+    const result = await resolver.getStream(1071, 'movie');
+
+    expect(result.rdId).toBe('RD_AC3'); // el fallo del re-fetch nunca rompe lo ya resuelto
+  });
+
+  test('si la elegida YA es fluida (Direct Play), NO se dispara segunda consulta', async () => {
+    const { fetchImpl, torrentioCallCount } = makeRefetchRouter([]);
+    // Reusar el router pero con un primer pool cuyo top ya es H264+AAC+MP4 con match:
+    const fluidFirst = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const respond = (json: unknown, finalUrl?: string) =>
+        ({ ok: true, status: 200, url: finalUrl ?? url, json: async () => json, text: async () => JSON.stringify(json) }) as unknown as Response;
+      if (/external_ids/.test(url)) return respond({ imdb_id: 'tt0259324' });
+      if (/torrentio\.strem\.fun\/realdebrid=/.test(url)) return respond({ streams: [FLUID_STREAM] });
+      if (/resolve\/realdebrid\/TEST_TOKEN\/dddd/.test(url)) return respond({}, DOWNLOADS[1].download);
+      if (/\/downloads\?limit=500/.test(url)) return respond(DOWNLOADS);
+      throw new Error('Sin ruta mockeada para: ' + url);
+    });
+    const resolver = buildResolver(fluidFirst as unknown as typeof fetch);
+    const result = await resolver.getStream(1071, 'movie');
+
+    expect(result.rdId).toBe('RD_FLUID');
+    const torrentioHits = (fluidFirst.mock.calls as unknown as [string][]).filter(([u]) =>
+      u.includes('torrentio.strem.fun/realdebrid=')
+    ).length;
+    expect(torrentioHits).toBe(1); // fluida de entrada → cero requests extra
+    expect(torrentioCallCount()).toBe(0); // (el otro router quedó sin usar)
+  });
+});

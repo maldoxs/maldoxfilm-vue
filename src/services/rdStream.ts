@@ -36,6 +36,7 @@ import {
   buildSelectedStream,
   extractFilename,
   extractInfoHash,
+  isDirectPlayEligible,
 } from './streamSelector';
 
 /**
@@ -186,7 +187,7 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
       const active = resolveActiveStream(best, resolvedUrl, streamFilename, pool, scored, downloads);
 
       // ── Ensamblado final (líneas ~4907-4917) — función pura ya testeada ──
-      const selected = buildSelectedStream({
+      let selected = buildSelectedStream({
         best,
         withUrl,
         resolvedUrl,
@@ -195,6 +196,57 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
         imdbId,
         active,
       });
+
+      // ── RE-FETCH del pool si la elegida NO es fluida (2026-07-14, caso real "Ghost Rider") ──
+      // Evidencia (log del usuario): Torrentio devolvió un pool de 19 streams SIN ninguna
+      // versión Direct Play cacheada → tocó /t/ sobre un archivo que RD generaba a ~0.4x
+      // (latidos: contenido total 36.0s → 36.0s → 41.0s en 12s de reproducción) → pausas
+      // matemáticamente inevitables. Como el pool de Torrentio VARÍA entre requests (ver
+      // nota de "Preferencia latino" más abajo), una SEGUNDA consulta puede traer la versión
+      // H264+AAC cacheada que reproduce por Direct Play (HTTP Range, cero transcode, cero
+      // pausas). Solo corre en el caso malo (hay rdId pero la versión va a transcodear);
+      // la ronda "upgrade a fluido" dentro de resolveActiveStream aplica su guard de idioma
+      // (nunca degrada el audio). Si el re-fetch no aporta una fluida con match, el
+      // resultado queda IDÉNTICO al de arriba — y si la red falla, también (try/catch).
+      if (selected.rdId && !isDirectPlayEligible(active.activeBest)) {
+        try {
+          const streams2: TorrentioStream[] = await torrentioClient.fetchStreams({
+            rdToken,
+            imdbId,
+            type,
+            season,
+            episode,
+          });
+          const known = new Set(streams.map((s) => s.url).filter(Boolean));
+          const nuevos = (streams2 || []).filter((s) => s.url && !known.has(s.url));
+          if (nuevos.length) {
+            console.warn('[RD] Pool sin versión fluida — re-fetch trajo', nuevos.length, 'streams nuevos');
+            const merged = selectBestStream([...streams, ...nuevos], isTv);
+            const active2 = resolveActiveStream(
+              best,
+              resolvedUrl,
+              streamFilename,
+              merged.pool,
+              merged.scored,
+              downloads
+            );
+            if (active2.rdId && isDirectPlayEligible(active2.activeBest)) {
+              console.warn('[RD] Re-fetch encontró versión FLUIDA cacheada:', active2.activeFilename);
+              selected = buildSelectedStream({
+                best,
+                withUrl: merged.withUrl,
+                resolvedUrl,
+                streamFilename,
+                infoHash,
+                imdbId,
+                active: active2,
+              });
+            }
+          }
+        } catch (e) {
+          console.warn('[RD] Re-fetch del pool falló (se mantiene la selección original):', e);
+        }
+      }
 
       // ── Preferencia latino DESHABILITADA (uniformidad + seek fluido) ──────────────
       // Antes: si el match cacheado NO tenía latino pero había un Latino en el pool, se
