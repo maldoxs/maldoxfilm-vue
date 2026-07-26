@@ -610,6 +610,11 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   let seekStuckSince = 0; // desde cuándo un seek está trabado SIN buffer (far-seek a tramo no generado)
   let lastBufferAhead = 0; // buffer por delante en el tick anterior — detecta si la descarga PROGRESA aunque currentTime aún no arranque
   let lastNudgeAt = 0; // cuándo se mandó el último "empujón" (pingSeek sin reload) — cooldown
+  // Plan B /t/ (2026-07-14, caso "Ghost Rider"): copias cacheadas alternativas del MISMO
+  // título. Si la copia en reproducción resulta lenta de generar en RD (2 recuperaciones
+  // de stall fallidas), se cambia a la siguiente de esta lista desde la misma posición —
+  // insistir con una copia que genera a <1x no tiene ninguna chance de destrabarse sola.
+  let tpipelineAlts: { rdId: string; filename: string }[] = [];
 
   // ── Instrumentación (#3) — log compacto de los eventos críticos del <video> con
   // tiempo, buffer por delante, readyState/networkState. Sirve para capturar EXACTO
@@ -1350,10 +1355,41 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       opts.onStreamReady?.({ selected, hasNativeSpanish, spanishTrack: isSpanish ? audio : null });
       opts.onStarted();
 
+      // Plan B: precargar la lista de copias alternativas cacheadas (armada en rdStream).
+      tpipelineAlts = (selected.altCachedCandidates ?? []).filter((a) => a.rdId !== rdId);
+
       startStallMonitor(video, myGen, async (v) => {
         if (!tpipelineState) throw new Error('sin /t/ state');
         const pos = Math.max(v.currentTime, lastPlayingPos);
         const t = tpipelineOffset.value + pos;
+        // ── PLAN B (2026-07-14, caso real "Ghost Rider"): a la 2da recuperación sobre la
+        // MISMA copia, la lentitud está confirmada (RD la genera a <1x — ej. 0.42x medido
+        // en los latidos) → recargarla de nuevo no tiene chance. Cambiar a la siguiente
+        // copia cacheada desde la misma posición: es un archivo DISTINTO en RD, su
+        // velocidad de generación es independiente. Si el cambio falla, se cae al reload
+        // clásico de la copia actual (comportamiento previo intacto).
+        if (stallRecoveries >= 2 && tpipelineAlts.length) {
+          const alt = tpipelineAlts.shift()!;
+          try {
+            console.warn('[/t/] Copia lenta confirmada — Plan B: cambiando a otra copia cacheada:', alt.filename);
+            opts.onToast('🔄 Esta copia viene lenta — probando otra versión...');
+            const resolved2 = await resolveTpipeline(alt.rdId);
+            if (playerStore.isStale(myGen)) return;
+            const audio2 = pickBestAudio(resolved2.audioTracks);
+            tpipelineState = { resolved: resolved2, audio: audio2, myGen };
+            tpipelineDuration.value = resolved2.duration;
+            activeTrack.value = audio2;
+            if (/lat|spa|es/i.test(audio2)) spanishTrack.value = audio2;
+            dashBaseUrl.value = `https://${resolved2.cdn}/t/${resolved2.fullPathId}/`;
+            await tpipelineReloadMpd(v, t > 3 ? t : 1);
+            // Copia nueva arrancando: darle presupuesto fresco de recuperaciones.
+            stallRecoveries = 0;
+            console.warn(`[/t/] ✅ Plan B activo — ${resolved2.filename} | audio: ${audio2} | CDN: ${resolved2.cdn}`);
+            return;
+          } catch (e) {
+            console.warn('[/t/] Plan B falló — se sigue con la copia actual:', e);
+          }
+        }
         await tpipelineReloadMpd(v, t > 3 ? t : 1);
       });
 
@@ -1398,6 +1434,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     tpipelineState = null;
     tpipelineOffset.value = 0;
     tpipelineSeeking.value = false;
+    tpipelineAlts = []; // Plan B: lista fresca por título (no arrastrar copias de otro)
     // Reset también dashBaseUrl: solo lo setean los caminos DASH (/t/ y transcode legacy).
     // Así `!isTpipeline && !dashBaseUrl` identifica de forma FIABLE el Direct Play (formato
     // correcto, fluido) — sin arrastrar un valor viejo de un título anterior que era /t/.
@@ -1817,6 +1854,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     tpipelineSeeking.value = false;
     tpipelineState = null;
     tpipelineOffset.value = 0;
+    tpipelineAlts = [];
     if (_tSeekTimer) { clearTimeout(_tSeekTimer); _tSeekTimer = null; }
     _tReloading = false;
     _shakaDestroy();

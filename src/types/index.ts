@@ -75,6 +75,16 @@ export interface SelectedStream {
    */
   serverTorrentId?: string | null;
   /**
+   * altCachedCandidates — OTRAS copias del título que también están cacheadas en la
+   * cuenta RD (rdId propio), ordenadas por score y con idioma igual o mejor que la
+   * elegida. Plan B del pipeline /t/ (caso real "Ghost Rider", 2026-07-14): si la
+   * copia elegida resulta LENTA de generar en el servidor de RD (dos recuperaciones
+   * de stall fallidas), el player cambia a la siguiente de esta lista desde la misma
+   * posición, en vez de insistir con la lenta hasta caer al iframe. Cada copia es un
+   * archivo distinto en RD — la velocidad de generación varía entre copias.
+   */
+  altCachedCandidates?: { rdId: string; filename: string }[];
+  /**
    * hasLatinoTag — el título/nombre del torrent elegido menciona audio latino/español
    * (ver `hasLatino` en streamSelector.ts). Bug real encontrado (2026-07-13): el camino
    * server-side (`rd-stream`, ADR-004) hardcodeaba `hasNativeSpanish: false` SIEMPRE, sin

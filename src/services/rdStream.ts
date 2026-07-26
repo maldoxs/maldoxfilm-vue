@@ -37,6 +37,9 @@ import {
   extractFilename,
   extractInfoHash,
   isDirectPlayEligible,
+  matchInDownloads,
+  isJunkMatch,
+  audioLangRank,
 } from './streamSelector';
 
 /**
@@ -208,6 +211,11 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
       // la ronda "upgrade a fluido" dentro de resolveActiveStream aplica su guard de idioma
       // (nunca degrada el audio). Si el re-fetch no aporta una fluida con match, el
       // resultado queda IDÉNTICO al de arriba — y si la red falla, también (try/catch).
+      // finalPool/finalActive rastrean la selección VIGENTE (el re-fetch de abajo
+      // puede reemplazarlos) — los usa el armado de alternativas /t/ más abajo.
+      let finalPool = pool;
+      let finalActive = active;
+
       if (selected.rdId && !isDirectPlayEligible(active.activeBest)) {
         try {
           const streams2: TorrentioStream[] = await torrentioClient.fetchStreams({
@@ -230,8 +238,12 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
               merged.scored,
               downloads
             );
+            // El pool AMPLIADO sirve para las alternativas /t/ aunque no haya
+            // aparecido una fluida (más copias cacheadas donde elegir el Plan B).
+            finalPool = merged.pool;
             if (active2.rdId && isDirectPlayEligible(active2.activeBest)) {
               console.warn('[RD] Re-fetch encontró versión FLUIDA cacheada:', active2.activeFilename);
+              finalActive = active2;
               selected = buildSelectedStream({
                 best,
                 withUrl: merged.withUrl,
@@ -245,6 +257,31 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
           }
         } catch (e) {
           console.warn('[RD] Re-fetch del pool falló (se mantiene la selección original):', e);
+        }
+      }
+
+      // ── Alternativas cacheadas para el Plan B de /t/ (2026-07-14, caso "Ghost Rider") ──
+      // Si la copia elegida va a /t/ y resulta LENTA en el servidor de RD (cada copia es
+      // un archivo distinto — la velocidad de generación varía entre copias), el player
+      // necesita a quién cambiarse SIN re-consultar nada. Se listan acá las otras copias
+      // que TAMBIÉN tienen rdId propio (cacheadas en la cuenta), en orden de score, con
+      // idioma igual o mejor que la elegida (mismo guard que el "upgrade a fluido").
+      if (selected.rdId && !isDirectPlayEligible(finalActive.activeBest)) {
+        const chosenRank = audioLangRank(finalActive.activeBest);
+        const alts: { rdId: string; filename: string }[] = [];
+        for (const cand of finalPool) {
+          if (alts.length >= 3) break;
+          if (cand.s === finalActive.activeBest) continue;
+          if (audioLangRank(cand.s) < chosenRank) continue; // nunca degradar el idioma
+          const candFn = extractFilename(cand.s);
+          const m = matchInDownloads(cand.s.url || '', cand.s.url || '', candFn, downloads);
+          if (m && !isJunkMatch(m) && m.id !== selected.rdId && !alts.some((a) => a.rdId === m.id)) {
+            alts.push({ rdId: m.id, filename: m.filename || candFn });
+          }
+        }
+        if (alts.length) {
+          selected.altCachedCandidates = alts;
+          console.warn('[RD] Plan B /t/ — copias cacheadas alternativas:', alts.map((a) => a.filename));
         }
       }
 

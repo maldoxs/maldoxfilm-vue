@@ -307,3 +307,65 @@ describe('rdStream — re-fetch del pool cuando la versión elegida va a transco
     expect(torrentioCallCount()).toBe(0); // (el otro router quedó sin usar)
   });
 });
+
+// ── Plan B /t/: alternativas cacheadas para cambiar de copia si la elegida es lenta ──
+describe('rdStream — altCachedCandidates (Plan B del pipeline /t/)', () => {
+  const AC3_A = {
+    name: '[RD+] Torrentio 720p',
+    title: 'Slow.Movie.2007.720p.AC3.x264 💾 4.4 GB',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/TEST_TOKEN/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/null/0/Slow.Movie.2007.720p.AC3.x264.mkv',
+    infoHash: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+    behaviorHints: { filename: 'Slow.Movie.2007.720p.AC3.x264.mkv' },
+  };
+  const AC3_B = {
+    name: '[RD+] Torrentio 1080p',
+    title: 'Slow.Movie.2007.1080p.DTS.x264 💾 8.0 GB',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/TEST_TOKEN/ffffffffffffffffffffffffffffffffffffffff/null/0/Slow.Movie.2007.1080p.DTS.x264.mkv',
+    infoHash: 'ffffffffffffffffffffffffffffffffffffffff',
+    behaviorHints: { filename: 'Slow.Movie.2007.1080p.DTS.x264.mkv' },
+  };
+  const DL = [
+    {
+      id: 'RD_A',
+      download: 'https://y1.stream.real-debrid.com/d/A/Slow.Movie.2007.720p.AC3.x264.mkv',
+      filename: 'Slow.Movie.2007.720p.AC3.x264.mkv',
+      filesize: 4400000000,
+    },
+    {
+      id: 'RD_B',
+      download: 'https://y2.stream.real-debrid.com/d/B/Slow.Movie.2007.1080p.DTS.x264.mkv',
+      filename: 'Slow.Movie.2007.1080p.DTS.x264.mkv',
+      filesize: 8000000000,
+    },
+  ];
+
+  test('cuando la elegida va a /t/, las OTRAS copias cacheadas quedan listadas como Plan B', async () => {
+    const fetchImpl = makeRouter([
+      { match: /external_ids/, json: { imdb_id: 'tt0000001' } },
+      { match: /torrentio\.strem\.fun\/realdebrid=/, json: { streams: [AC3_A, AC3_B] } },
+      { match: /resolve\/realdebrid\/TEST_TOKEN\/eeee/, json: {}, url: DL[0].download },
+      { match: /\/downloads\?limit=500/, json: DL },
+    ]);
+    const resolver = buildResolver(fetchImpl as unknown as typeof fetch);
+    const result = await resolver.getStream(42, 'movie');
+
+    expect(result.rdId).toBe('RD_A'); // la elegida (score más alto: 720p AC3 vs DTS penalizado)
+    expect(result.altCachedCandidates).toEqual([
+      { rdId: 'RD_B', filename: 'Slow.Movie.2007.1080p.DTS.x264.mkv' },
+    ]); // la otra copia cacheada, sin duplicar la elegida
+  });
+
+  test('sin otras copias cacheadas → sin lista (el Plan B simplemente no aplica)', async () => {
+    const fetchImpl = makeRouter([
+      { match: /external_ids/, json: { imdb_id: 'tt0000001' } },
+      { match: /torrentio\.strem\.fun\/realdebrid=/, json: { streams: [AC3_A, AC3_B] } },
+      { match: /resolve\/realdebrid\/TEST_TOKEN\/eeee/, json: {}, url: DL[0].download },
+      { match: /\/downloads\?limit=500/, json: [DL[0]] }, // solo la elegida está cacheada
+    ]);
+    const resolver = buildResolver(fetchImpl as unknown as typeof fetch);
+    const result = await resolver.getStream(42, 'movie');
+
+    expect(result.rdId).toBe('RD_A');
+    expect(result.altCachedCandidates).toBeUndefined();
+  });
+});
