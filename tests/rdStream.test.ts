@@ -499,37 +499,39 @@ describe('rdStream — gate de idioma original (caso real "Kraken", noruega)', (
     return createRdStreamResolver({ rdToken: 'TEST_TOKEN', tmdbClient, torrentioClient, rdClient });
   }
 
-  test('idioma original noruego + NINGÚN candidato confirma ENG/SPA/Latino → noConfirmedLanguageMatch', async () => {
+  test('idioma original noruego + NINGÚN candidato confirma ENG/SPA/Latino → reproduce igual + foreignAudioLanguage', async () => {
+    // Cambio de diseño (2026-07-14): ya NO bloquea — se reproduce el audio
+    // original y se marca el idioma para que usePlayer muestre el toast.
     const resolver = buildResolverWithLang([NORWEGIAN_UNTAGGED], 'no');
     const result = await resolver.getStream(1110034, 'movie');
-    expect(result.noConfirmedLanguageMatch).toBe(true);
-    expect(result.rdId).toBeNull();
+    expect(result.foreignAudioLanguage).toBe('no');
+    expect(result.rdId).toBe('RD_NO');
   });
 
-  test('idioma original noruego + SÍ hay un candidato con ENG confirmado → lo elige, sin gate', async () => {
+  test('idioma original noruego + SÍ hay un candidato con ENG confirmado → lo elige, sin aviso', async () => {
     const resolver = buildResolverWithLang([NORWEGIAN_UNTAGGED, ENGLISH_CONFIRMED], 'no');
     const result = await resolver.getStream(1110034, 'movie');
-    expect(result.noConfirmedLanguageMatch).toBeUndefined();
+    expect(result.foreignAudioLanguage).toBeUndefined();
     expect(result.rdId).toBe('RD_EN');
   });
 
-  test('idioma original inglés ("en") → el gate NO se activa aunque nadie declare idioma (Hollywood normal)', async () => {
+  test('idioma original inglés ("en") → nunca activa el aviso aunque nadie declare idioma (Hollywood normal)', async () => {
     const resolver = buildResolverWithLang([NORWEGIAN_UNTAGGED], 'en');
     const result = await resolver.getStream(1110034, 'movie');
-    expect(result.noConfirmedLanguageMatch).toBeUndefined();
-    expect(result.rdId).toBe('RD_NO'); // se elige igual, comportamiento normal sin gate
+    expect(result.foreignAudioLanguage).toBeUndefined();
+    expect(result.rdId).toBe('RD_NO'); // se elige igual, comportamiento normal sin aviso
   });
 
-  test('idioma original español ("es") tampoco activa el gate', async () => {
+  test('idioma original español ("es") tampoco activa el aviso', async () => {
     const resolver = buildResolverWithLang([NORWEGIAN_UNTAGGED], 'es');
     const result = await resolver.getStream(1110034, 'movie');
-    expect(result.noConfirmedLanguageMatch).toBeUndefined();
+    expect(result.foreignAudioLanguage).toBeUndefined();
   });
 
-  test('si TMDB no devuelve idioma original (null/error), el gate no rompe nada', async () => {
+  test('si TMDB no devuelve idioma original (null/error), no rompe nada', async () => {
     const resolver = buildResolverWithLang([NORWEGIAN_UNTAGGED], null);
     const result = await resolver.getStream(1110034, 'movie');
-    expect(result.noConfirmedLanguageMatch).toBeUndefined();
+    expect(result.foreignAudioLanguage).toBeUndefined();
     expect(result.rdId).toBe('RD_NO');
   });
 });

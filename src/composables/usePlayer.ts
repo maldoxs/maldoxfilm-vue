@@ -61,6 +61,20 @@ import type { RdStreamResolver } from '../services/rdStream';
 import { usePlayerStore } from '../stores/player';
 import type { SelectedStream } from '../types';
 
+/**
+ * languageDisplayName — nombre legible en español de un código ISO-639-1 (ej.
+ * "no" → "noruego"). Usa `Intl.DisplayNames` (soportado en todos los
+ * navegadores modernos, incluidas Smart TV recientes); si falla o no está
+ * disponible, cae al código tal cual en vez de romper el toast.
+ */
+export function languageDisplayName(code: string): string {
+  try {
+    return new Intl.DisplayNames(['es'], { type: 'language' }).of(code) || code;
+  } catch {
+    return code;
+  }
+}
+
 // Watchdog del cambio de pista de audio del panel ⚙️ — preserva el `90000`
 // literal de `spSwitchAudio` (línea ~4378): si el transcode en frío de la
 // nueva pista no arranca en 90s, revierte a la anterior.
@@ -1548,14 +1562,13 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       return;
     }
 
-    // ── Idioma original no confirmado — saltar a otro reproductor (2026-07-14, caso
-    // real "Kraken", noruega): ninguna copia declaraba idioma Y el idioma original
-    // (TMDB) no es inglés/español → ver `noConfirmedLanguageMatch` en types/index.ts.
-    if (selected.noConfirmedLanguageMatch) {
-      opts.onToast('⚠️ No hay audio en español/inglés confirmado — cambiando de reproductor');
-      opts.onFallbackToNextSource();
-      isLoadingRd.value = false;
-      return;
+    // ── Audio en idioma extranjero — AVISO, no bloqueo (2026-07-14, caso real
+    // "Kraken", noruega). Ver `foreignAudioLanguage` en types/index.ts: se
+    // reproduce igual (audio original) y se avisa qué idioma es, porque ver
+    // cine extranjero con subtítulo en español es una experiencia válida — el
+    // subtítulo se busca por IMDB ID, sin depender de en qué idioma esté el audio.
+    if (selected.foreignAudioLanguage) {
+      opts.onToast(`🌐 Audio en ${languageDisplayName(selected.foreignAudioLanguage)} — subtítulos en español disponibles`);
     }
 
     // ── Toast x265 (línea ~7860) ──

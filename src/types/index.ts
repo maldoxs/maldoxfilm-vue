@@ -85,13 +85,17 @@ export interface SelectedStream {
    */
   altCachedCandidates?: { rdId: string; filename: string }[];
   /**
-   * noConfirmedLanguageMatch — el idioma ORIGINAL de la película (TMDB) NO es
-   * inglés ni español, y NINGÚN candidato del catálogo confirma audio en
-   * inglés/español/latino (caso real "Kraken", 2026: película noruega, ninguna
-   * copia cacheada declaraba idioma → resultó ser la versión noruega sin marcar).
-   * `usePlayer` debe saltar a otro reproductor — igual que `noTrustworthyCachedVersion`.
+   * foreignAudioLanguage — código ISO-639-1 del audio real (ej. "no" noruego,
+   * "ko" coreano) cuando el idioma ORIGINAL de la película (TMDB) NO es inglés
+   * ni español y NINGÚN candidato del catálogo confirma audio ENG/SPA/Latino
+   * (caso real "Kraken", 2026: noruega). Cambio de diseño: esto YA NO bloquea
+   * la reproducción — el título se reproduce igual (en su audio original,
+   * ya filtrado de subs quemados/origen dudoso por los otros gates) y
+   * `usePlayer` solo muestra un toast informativo con el idioma detectado,
+   * porque ver cine extranjero en su audio + subtítulo en español (que se
+   * busca por IMDB ID, sin depender del audio) es una experiencia válida.
    */
-  noConfirmedLanguageMatch?: boolean;
+  foreignAudioLanguage?: string | null;
   /**
    * noTrustworthyCachedVersion — ninguna copia cacheada [RD+] de esta película está
    * libre de sospecha (subtítulo extranjero declarado O origen de cine — DCPRip/

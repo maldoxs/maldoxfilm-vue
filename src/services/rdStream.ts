@@ -165,6 +165,17 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
       // latino) solo cuando el idioma original lo amerita.
       let streams = streamsAll;
       let originalLanguage: string | null = null;
+      // foreignAudioLanguage — se informa al usuario (toast), NO bloquea la
+      // reproducción. Cambio de diseño (2026-07-14, caso real "Kraken"): antes
+      // esto saltaba directo a otro reproductor cuando ningún candidato
+      // confirmaba audio ENG/SPA/Latino. Pero ver una película extranjera en su
+      // audio ORIGINAL + subtítulo en español (que se busca por IMDB ID, SIN
+      // depender del idioma del audio) es una experiencia normal y válida — no
+      // un defecto. Ahora se PREFIERE un candidato con audio confirmado si
+      // existe (igual que antes); si no existe ninguno, se reproduce la mejor
+      // copia igual (ya filtrada de subs quemados/origen de cine por los otros
+      // fixes) y se avisa qué idioma trae, en vez de negarse a reproducirla.
+      let foreignAudioLanguage: string | null = null;
       try {
         originalLanguage = await tmdbClient.getOriginalLanguage(tmdbId, type);
       } catch {
@@ -172,17 +183,18 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
       }
       if (originalLanguage && originalLanguage !== 'en' && originalLanguage !== 'es') {
         const confirmed = streamsAll.filter((s) => hasEng(s) || hasSpa(s) || hasLatino(s));
-        if (!confirmed.length) {
+        if (confirmed.length) {
           console.warn(
-            `[RD] Idioma original "${originalLanguage}" (no inglés/español) y NINGÚN candidato confirma audio en inglés/español/latino — sin streams confiables`
+            `[RD] Idioma original "${originalLanguage}" — filtrando a candidatos con audio confirmado:`,
+            confirmed.length, 'de', streamsAll.length
           );
-          return { ...emptySelectedStream(), noConfirmedLanguageMatch: true };
+          streams = confirmed;
+        } else {
+          console.warn(
+            `[RD] Idioma original "${originalLanguage}" y ningún candidato confirma audio ENG/SPA/Latino — se reproduce igual (audio original) con aviso`
+          );
+          foreignAudioLanguage = originalLanguage;
         }
-        console.warn(
-          `[RD] Idioma original "${originalLanguage}" — filtrando a candidatos con audio confirmado:`,
-          confirmed.length, 'de', streamsAll.length
-        );
-        streams = confirmed;
       }
 
       // Línea ~4725 — log de diagnóstico (preservado 1:1)
@@ -391,6 +403,8 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
           }
         }
       }
+
+      if (foreignAudioLanguage) selected.foreignAudioLanguage = foreignAudioLanguage;
 
       return selected;
     } catch {
