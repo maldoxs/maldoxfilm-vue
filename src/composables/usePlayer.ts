@@ -1390,15 +1390,29 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
             const resolved2 = await resolveTpipeline(alt.rdId);
             if (playerStore.isStale(myGen)) return;
             const audio2 = pickBestAudio(resolved2.audioTracks);
+            const isSpanish2 = /lat|spa|es/i.test(audio2);
             tpipelineState = { resolved: resolved2, audio: audio2, myGen };
             tpipelineDuration.value = resolved2.duration;
             activeTrack.value = audio2;
-            if (/lat|spa|es/i.test(audio2)) spanishTrack.value = audio2;
+            if (isSpanish2) spanishTrack.value = audio2;
             dashBaseUrl.value = `https://${resolved2.cdn}/t/${resolved2.fullPathId}/`;
             await tpipelineReloadMpd(v, t > 3 ? t : 1);
             // Copia nueva arrancando: darle presupuesto fresco de recuperaciones.
             stallRecoveries = 0;
             console.warn(`[/t/] ✅ Plan B activo — ${resolved2.filename} | audio: ${audio2} | CDN: ${resolved2.cdn}`);
+            // BUG real encontrado (2026-07-14, a pedido del usuario: "a veces se
+            // atrasa, a veces se adelanta"): el Plan B cambia el VIDEO a otra copia
+            // (corte/intro potencialmente distinto) pero nunca avisaba al sistema
+            // de subtítulos — el .srt seguía siendo el buscado/ajustado para la
+            // copia ORIGINAL. Re-disparar `onStreamReady` con el filename de la
+            // copia NUEVA fuerza una re-búsqueda (y pasa de nuevo por la
+            // verificación de duración agregada hoy) contra el archivo que
+            // realmente se está reproduciendo ahora.
+            opts.onStreamReady?.({
+              selected: { ...selected, streamFilename: alt.filename, infoHash: undefined },
+              hasNativeSpanish: isSpanish2,
+              spanishTrack: isSpanish2 ? audio2 : null,
+            });
             return;
           } catch (e) {
             console.warn('[/t/] Plan B falló — se sigue con la copia actual:', e);
