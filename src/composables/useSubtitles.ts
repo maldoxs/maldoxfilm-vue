@@ -36,6 +36,8 @@ import {
   isSubtitleValid,
   MAX_DOWNLOAD_ATTEMPTS,
   filterTrustworthySubtitles,
+  subtitleDurationSec,
+  durationLooksMismatched,
   type SubtitleCue,
 } from '../services/subtitles';
 import { safeStorage } from '../services/safeStorage';
@@ -349,6 +351,10 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
 
       const ranked = rankSubtitles(trust.kept, hints, vidDuration);
       let srt: string | null = null;
+      // Fallback si NINGÚN candidato calza en duración: mejor un subtítulo
+      // posiblemente de otro corte que ninguno (el usuario ya tiene el ajuste
+      // manual de sincronización para ese caso puntual).
+      let fallback: { raw: string; candidateId: number; release: string; cues: number } | null = null;
       for (let attempt = 0; attempt < Math.min(ranked.length, MAX_DOWNLOAD_ATTEMPTS); attempt++) {
         const candidate = ranked[attempt];
         const candidateId = candidate.attributes.files[0]?.file_id;
@@ -360,6 +366,21 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
         const raw = await fetchImpl(dl.link, { signal }).then((r) => r.text());
         const parsedCues = parseSrt(raw, 0);
         if (isSubtitleValid(parsedCues)) {
+          // Verificación de DURACIÓN (2026-07-14, caso real "La muerte de Robin
+          // Hood"): el subtítulo era de la película correcta (pasó el piso de
+          // confianza/IMDB) pero de un CORTE distinto al video (WEB-DL vs rip de
+          // cine) → desfasado igual. Si la duración implícita del .srt se aleja
+          // demasiado de `video.duration`, es señal de corte distinto — seguir
+          // probando el siguiente candidato antes de conformarse con este.
+          const subDur = subtitleDurationSec(parsedCues);
+          if (durationLooksMismatched(subDur, vidDuration)) {
+            console.warn(
+              '[SUB] Duración no coincide (posible corte distinto) — sigue buscando:',
+              candidate.attributes.release, '| sub:', subDur.toFixed(0) + 's', '| video:', vidDuration.toFixed(0) + 's'
+            );
+            if (!fallback) fallback = { raw, candidateId, release: candidate.attributes.release, cues: parsedCues.length };
+            continue;
+          }
           srt = raw;
           // Log de diagnóstico — preserva índex.html línea 5345 (1:1).
           if (attempt > 0)
@@ -369,6 +390,11 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
         }
         // Log de diagnóstico — preserva índex.html línea 5349 (1:1).
         console.warn('[SUB] Descartado (solo', parsedCues.length, 'cues):', candidate.attributes.release);
+      }
+      if (!srt && fallback) {
+        console.warn('[SUB] Ningún candidato calzó en duración — se usa el mejor disponible igual:', fallback.release);
+        srt = fallback.raw;
+        subFileId = fallback.candidateId;
       }
       if (!srt) {
         status.value = '❌ Sin subtítulo válido';

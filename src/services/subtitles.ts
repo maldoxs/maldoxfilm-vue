@@ -299,6 +299,41 @@ export function isSubtitleValid(cues: SubtitleCue[]): boolean {
 }
 
 /**
+ * subtitleDurationSec — duración implícita del subtítulo: el fin del cue más
+ * tardío (en segundos). Sirve como proxy barato de "¿es el mismo corte del
+ * video?" sin necesitar analizar el archivo de video en sí.
+ */
+export function subtitleDurationSec(cues: SubtitleCue[]): number {
+  return cues.reduce((max, c) => Math.max(max, c.e), 0) / 1000;
+}
+
+/**
+ * DURATION_MISMATCH_TOLERANCE_SEC — margen antes de sospechar "corte distinto"
+ * (caso real 2026-07-14, "La muerte de Robin Hood": subtítulo de la versión
+ * WEB-DL sobre un video que es un rip de cine — verificado por IMDB [misma
+ * peli] pero con score suficiente para pasar el piso de confianza igual).
+ * 10 minutos cubre bien la diferencia real entre un theatrical cut y un
+ * extended/director's cut (que sí cambian la duración TOTAL) sin generar
+ * falsos positivos por variaciones menores de logos/créditos entre releases
+ * del MISMO corte (esas no mueven la duración total, solo corren el offset
+ * — para eso ya existe el ajuste manual de sincronización).
+ */
+export const DURATION_MISMATCH_TOLERANCE_SEC = 600;
+
+/**
+ * durationLooksMismatched — ¿la duración del subtítulo se aleja demasiado de
+ * la duración real del video? Sin duración de video conocida (`vidDurationSec
+ * <= 0`, común en /t/ antes de que Shaka la reporte) o sin cues útiles, no se
+ * puede verificar → se devuelve `false` (no bloquea, mismo espíritu que
+ * `imdbVerdict` devolviendo `'unverifiable'` en vez de descartar a ciegas).
+ */
+export function durationLooksMismatched(subDurationSec: number, vidDurationSec: number): boolean {
+  if (!vidDurationSec || vidDurationSec <= 0) return false;
+  if (!subDurationSec || subDurationSec <= 0) return false;
+  return Math.abs(subDurationSec - vidDurationSec) > DURATION_MISMATCH_TOLERANCE_SEC;
+}
+
+/**
  * buildReleaseName — nombre de release usado para la búsqueda 1 en
  * OpenSubtitles (sin extensión). Preservado de la línea ~5239.
  */

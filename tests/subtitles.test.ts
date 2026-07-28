@@ -13,6 +13,9 @@ import {
   isSubtitleValid,
   buildReleaseName,
   numericImdbId,
+  subtitleDurationSec,
+  durationLooksMismatched,
+  DURATION_MISMATCH_TOLERANCE_SEC,
 } from '../src/services/subtitles';
 import type { OpenSubtitle } from '../src/types';
 
@@ -278,5 +281,49 @@ describe('imdbVerdict / filterTrustworthySubtitles — nunca un sub de OTRA pel�
   test('feature_details vacío (sin ids) cuenta como unverifiable, no como mismatch', () => {
     const s = sub({ from_trusted: true, download_count: 20000, feature_details: {} });
     expect(imdbVerdict(s, '1234567')).toBe('unverifiable');
+  });
+});
+
+// ── Verificación de DURACIÓN (caso real "La muerte de Robin Hood", 2026-07-14) ──
+// El subtítulo elegido era de la película correcta (pasaba imdbVerdict/piso de
+// confianza) pero de un CORTE distinto al video (WEB-DL vs rip de cine) →
+// desfasado igual. subtitleDurationSec/durationLooksMismatched agregan una
+// señal más: si el .srt "termina" muy lejos de cuánto dura el video real, es
+// sospechoso de ser de otro corte.
+describe('subtitleDurationSec / durationLooksMismatched — detectar corte distinto por duración', () => {
+  const cuesUpTo = (endMs: number) => [
+    { s: 0, e: 1000, text: 'x' },
+    { s: endMs - 500, e: endMs, text: 'último cue' },
+  ];
+
+  test('subtitleDurationSec devuelve el fin del cue más tardío, en segundos', () => {
+    expect(subtitleDurationSec(cuesUpTo(120000))).toBe(120); // 2 min
+    expect(subtitleDurationSec([])).toBe(0);
+  });
+
+  test('durationLooksMismatched: false si están dentro del margen (mismo corte)', () => {
+    // Película de ~110 min (6600s), subtítulo termina a los 6580s — diferencia mínima.
+    expect(durationLooksMismatched(6580, 6600)).toBe(false);
+  });
+
+  test('durationLooksMismatched: true cuando la diferencia supera el margen (corte distinto)', () => {
+    // Caso real conceptual: video de cine (6300s) vs subtítulo de un WEB-DL
+    // con 20 min extra de escenas (7500s) — diferencia de 1200s > margen.
+    expect(durationLooksMismatched(7500, 6300)).toBe(true);
+    expect(DURATION_MISMATCH_TOLERANCE_SEC).toBe(600);
+  });
+
+  test('sin duración de video conocida (vidDuration<=0), no se puede verificar → false', () => {
+    expect(durationLooksMismatched(6600, 0)).toBe(false);
+    expect(durationLooksMismatched(6600, NaN)).toBe(false);
+  });
+
+  test('sin cues útiles (subDuration<=0), no se puede verificar → false', () => {
+    expect(durationLooksMismatched(0, 6600)).toBe(false);
+  });
+
+  test('justo en el borde del margen (600s) → NO se marca (estrictamente mayor)', () => {
+    expect(durationLooksMismatched(6000, 6600)).toBe(false); // diff exacta = 600
+    expect(durationLooksMismatched(5999, 6600)).toBe(true); // diff = 601
   });
 });
