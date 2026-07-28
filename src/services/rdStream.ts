@@ -43,6 +43,9 @@ import {
   isCachedStream,
   hasHardcodedSubs,
   isCinemaLeakSource,
+  hasEng,
+  hasSpa,
+  hasLatino,
 } from './streamSelector';
 
 /**
@@ -139,17 +142,49 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
       if (!imdbId) return emptySelectedStream();
 
       // ── 2. Streams desde Torrentio (líneas ~4718-4724) ──
-      const streams: TorrentioStream[] = await torrentioClient.fetchStreams({
+      const streamsAll: TorrentioStream[] = await torrentioClient.fetchStreams({
         rdToken,
         imdbId,
         type,
         season,
         episode,
       });
-      if (!streams.length) {
+      if (!streamsAll.length) {
         console.warn('[RD] Sin streams en Torrentio'); // línea ~4724
         return emptySelectedStream();
       }
+
+      // ── GATE de idioma original (2026-07-14, caso real "Kraken") ────────────────
+      // Ninguna copia cacheada de Kraken (2026) declaraba idioma en el nombre ("⚠️
+      // otro") — resultó ser la versión NORUEGA original sin marcar (el idioma
+      // original de la película, confirmado en TMDB, es noruego). Cuando el título
+      // NO es originalmente inglés ni español, un release SIN etiqueta de idioma es
+      // sospechoso de ser esa versión original — a diferencia de Hollywood, donde
+      // "sin etiqueta" casi siempre significa inglés por defecto (asunción segura
+      // que NO se toca para esos casos). Se exige audio CONFIRMADO (inglés/español/
+      // latino) solo cuando el idioma original lo amerita.
+      let streams = streamsAll;
+      let originalLanguage: string | null = null;
+      try {
+        originalLanguage = await tmdbClient.getOriginalLanguage(tmdbId, type);
+      } catch {
+        originalLanguage = null; // no debe romper la resolución si este dato falla
+      }
+      if (originalLanguage && originalLanguage !== 'en' && originalLanguage !== 'es') {
+        const confirmed = streamsAll.filter((s) => hasEng(s) || hasSpa(s) || hasLatino(s));
+        if (!confirmed.length) {
+          console.warn(
+            `[RD] Idioma original "${originalLanguage}" (no inglés/español) y NINGÚN candidato confirma audio en inglés/español/latino — sin streams confiables`
+          );
+          return { ...emptySelectedStream(), noConfirmedLanguageMatch: true };
+        }
+        console.warn(
+          `[RD] Idioma original "${originalLanguage}" — filtrando a candidatos con audio confirmado:`,
+          confirmed.length, 'de', streamsAll.length
+        );
+        streams = confirmed;
+      }
+
       // Línea ~4725 — log de diagnóstico (preservado 1:1)
       console.warn(
         '[RD] Streams encontrados:',

@@ -1548,6 +1548,16 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       return;
     }
 
+    // ── Idioma original no confirmado — saltar a otro reproductor (2026-07-14, caso
+    // real "Kraken", noruega): ninguna copia declaraba idioma Y el idioma original
+    // (TMDB) no es inglés/español → ver `noConfirmedLanguageMatch` en types/index.ts.
+    if (selected.noConfirmedLanguageMatch) {
+      opts.onToast('⚠️ No hay audio en español/inglés confirmado — cambiando de reproductor');
+      opts.onFallbackToNextSource();
+      isLoadingRd.value = false;
+      return;
+    }
+
     // ── Toast x265 (línea ~7860) ──
     if (streamIsX265) opts.onToast('🔄 Optimizando video para tu navegador...');
 

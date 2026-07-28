@@ -453,3 +453,83 @@ describe('rdStream — noTrustworthyCachedVersion (todas las copias cacheadas so
     expect(result.noTrustworthyCachedVersion).toBeUndefined();
   });
 });
+
+// ── Gate de idioma original vía TMDB (caso real "Kraken", 2026-07-14) ──
+// Kraken (2026) es una película NORUEGA (confirmado en TMDB/Wikipedia). Ninguna
+// copia cacheada declaraba idioma ("⚠️ otro") — la elegida era el noruego sin
+// marcar. El gate exige audio confirmado (ENG/SPA/Latino) cuando el idioma
+// original no es inglés ni español.
+describe('rdStream — gate de idioma original (caso real "Kraken", noruega)', () => {
+  const NORWEGIAN_UNTAGGED = {
+    name: '[RD+] Torrentio\n720p',
+    title: 'Kraken 2026 720p BluRay x264-GeneMige 💾 3.56 GB',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/TEST_TOKEN/7777777777777777777777777777777777777a/null/0/kraken-no.mkv',
+    infoHash: '7777777777777777777777777777777777777a',
+    behaviorHints: { filename: 'Kraken 2026 720p BluRay x264-GeneMige.mkv' },
+  };
+  const ENGLISH_CONFIRMED = {
+    name: '[RD+] Torrentio\n1080p',
+    title: 'Kraken 2026 1080p BluRay ENG AAC 💾 4 GB',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/TEST_TOKEN/8888888888888888888888888888888888888b/null/0/kraken-en.mkv',
+    infoHash: '8888888888888888888888888888888888888b',
+    behaviorHints: { filename: 'Kraken.2026.1080p.BluRay.ENG.AAC.mkv' },
+  };
+  const DOWNLOADS = [
+    { id: 'RD_NO', download: 'https://k1.stream.real-debrid.com/d/NO/kraken-no.mkv', filename: 'Kraken 2026 720p BluRay x264-GeneMige.mkv', filesize: 3_560_000_000 },
+    { id: 'RD_EN', download: 'https://k2.stream.real-debrid.com/d/EN/kraken-en.mkv', filename: 'Kraken.2026.1080p.BluRay.ENG.AAC.mkv', filesize: 4_000_000_000 },
+  ];
+
+  function buildResolverWithLang(streams: unknown[], originalLanguage: string | null) {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const respond = (json: unknown, finalUrl?: string) =>
+        ({ ok: true, status: 200, url: finalUrl ?? url, json: async () => json, text: async () => JSON.stringify(json) }) as unknown as Response;
+      if (/external_ids/.test(url)) return respond({ imdb_id: 'tt9999999' });
+      // Endpoint de detalle (para original_language) — NO matchea /external_ids.
+      if (/\/movie\/\d+\?/.test(url)) return respond({ original_language: originalLanguage });
+      if (/torrentio\.strem\.fun\/realdebrid=/.test(url)) return respond({ streams });
+      if (/resolve\/realdebrid\/TEST_TOKEN\/7777/.test(url)) return respond({}, DOWNLOADS[0].download);
+      if (/resolve\/realdebrid\/TEST_TOKEN\/8888/.test(url)) return respond({}, DOWNLOADS[1].download);
+      if (/\/downloads\?limit=500/.test(url)) return respond(DOWNLOADS);
+      throw new Error('Sin ruta mockeada para: ' + url);
+    });
+    const tmdbClient = createTmdbClient({ apiKey: 'TMDB_KEY', fetchImpl: fetchImpl as unknown as typeof fetch });
+    const torrentioClient = createTorrentioClient({ fetchImpl: fetchImpl as unknown as typeof fetch });
+    const rdClient = createRealDebridClient({ rdToken: 'TEST_TOKEN', fetchImpl: fetchImpl as unknown as typeof fetch });
+    return createRdStreamResolver({ rdToken: 'TEST_TOKEN', tmdbClient, torrentioClient, rdClient });
+  }
+
+  test('idioma original noruego + NINGÚN candidato confirma ENG/SPA/Latino → noConfirmedLanguageMatch', async () => {
+    const resolver = buildResolverWithLang([NORWEGIAN_UNTAGGED], 'no');
+    const result = await resolver.getStream(1110034, 'movie');
+    expect(result.noConfirmedLanguageMatch).toBe(true);
+    expect(result.rdId).toBeNull();
+  });
+
+  test('idioma original noruego + SÍ hay un candidato con ENG confirmado → lo elige, sin gate', async () => {
+    const resolver = buildResolverWithLang([NORWEGIAN_UNTAGGED, ENGLISH_CONFIRMED], 'no');
+    const result = await resolver.getStream(1110034, 'movie');
+    expect(result.noConfirmedLanguageMatch).toBeUndefined();
+    expect(result.rdId).toBe('RD_EN');
+  });
+
+  test('idioma original inglés ("en") → el gate NO se activa aunque nadie declare idioma (Hollywood normal)', async () => {
+    const resolver = buildResolverWithLang([NORWEGIAN_UNTAGGED], 'en');
+    const result = await resolver.getStream(1110034, 'movie');
+    expect(result.noConfirmedLanguageMatch).toBeUndefined();
+    expect(result.rdId).toBe('RD_NO'); // se elige igual, comportamiento normal sin gate
+  });
+
+  test('idioma original español ("es") tampoco activa el gate', async () => {
+    const resolver = buildResolverWithLang([NORWEGIAN_UNTAGGED], 'es');
+    const result = await resolver.getStream(1110034, 'movie');
+    expect(result.noConfirmedLanguageMatch).toBeUndefined();
+  });
+
+  test('si TMDB no devuelve idioma original (null/error), el gate no rompe nada', async () => {
+    const resolver = buildResolverWithLang([NORWEGIAN_UNTAGGED], null);
+    const result = await resolver.getStream(1110034, 'movie');
+    expect(result.noConfirmedLanguageMatch).toBeUndefined();
+    expect(result.rdId).toBe('RD_NO');
+  });
+});

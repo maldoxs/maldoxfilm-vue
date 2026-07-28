@@ -39,6 +39,17 @@ export interface TmdbClient {
   get<T = unknown>(endpoint: string): Promise<T>;
   /** Equivalente al paso 1 de `rdGetStream`: obtiene el IMDB ID desde TMDB. */
   getImdbId(tmdbId: string | number, type: 'movie' | 'tv'): Promise<string | null>;
+  /**
+   * getOriginalLanguage — código ISO-639-1 del idioma ORIGINAL del título (ej.
+   * "no" para Kraken 2026, noruega; "en" para la mayoría de Hollywood). Caso real
+   * (2026-07-14, "Kraken"): ninguna copia cacheada declaraba idioma en el nombre
+   * ("⚠️ otro"), y resultó ser la versión noruega original sin marcar — nada en
+   * el nombre del archivo lo delataba. Se usa en `rdStream.ts` para exigir audio
+   * confirmado (inglés/español/latino) SOLO cuando el idioma original NO es
+   * inglés ni español — no afecta películas de Hollywood (sin este gate, cualquier
+   * release sin tag de idioma se asume aceptable por defecto, que es correcto ahí).
+   */
+  getOriginalLanguage(tmdbId: string | number, type: 'movie' | 'tv'): Promise<string | null>;
 }
 
 /**
@@ -69,5 +80,17 @@ export function createTmdbClient(opts: TmdbClientOptions): TmdbClient {
     return data.imdb_id ?? null;
   }
 
-  return { cache, get, getImdbId };
+  async function getOriginalLanguage(tmdbId: string | number, type: 'movie' | 'tv'): Promise<string | null> {
+    const tmdbType = type === 'tv' ? 'tv' : 'movie';
+    try {
+      const data = await get<{ original_language?: string | null }>(`/${tmdbType}/${tmdbId}`);
+      return data.original_language ?? null;
+    } catch {
+      // No debe romper la resolución de streams si este dato puntual falla —
+      // sin idioma original conocido, el gate de audio simplemente no se activa.
+      return null;
+    }
+  }
+
+  return { cache, get, getImdbId, getOriginalLanguage };
 }

@@ -85,6 +85,14 @@ export interface SelectedStream {
    */
   altCachedCandidates?: { rdId: string; filename: string }[];
   /**
+   * noConfirmedLanguageMatch — el idioma ORIGINAL de la película (TMDB) NO es
+   * inglés ni español, y NINGÚN candidato del catálogo confirma audio en
+   * inglés/español/latino (caso real "Kraken", 2026: película noruega, ninguna
+   * copia cacheada declaraba idioma → resultó ser la versión noruega sin marcar).
+   * `usePlayer` debe saltar a otro reproductor — igual que `noTrustworthyCachedVersion`.
+   */
+  noConfirmedLanguageMatch?: boolean;
+  /**
    * noTrustworthyCachedVersion — ninguna copia cacheada [RD+] de esta película está
    * libre de sospecha (subtítulo extranjero declarado O origen de cine — DCPRip/
    * Theater Rip/CAM). Caso real (2026-07-14): se probaron 3 copias distintas y las
