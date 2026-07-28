@@ -135,12 +135,22 @@ export function findCachedByTitleYear(
   });
 }
 
+// Detecta ESCRITURA no-latina en el título (cirílico/griego/CJK/hangul/árabe/hebreo).
+// Bug real encontrado (2026-07-14, caso "La muerte de Robin Hood", 5ta vuelta): el
+// release traía título ruso en CIRÍLICO ("Смерть Робин Гуда...🇷🇺") — `hasBadLang`
+// buscaba la PALABRA "rus"/"russian" en letras latinas y nunca iba a matchear un
+// título escrito directamente en otro alfabeto. La copia se coló 4 veces seguidas
+// por este hueco puntual, no por falta de reglas — el candidato SIEMPRE debió
+// descartarse como idioma incompatible, igual que "Alien ITA only".
+const NON_LATIN_SCRIPT_RE = /[Ѐ-ӿͰ-Ͽ぀-ヿ一-鿿가-힯؀-ۿ֐-׿]/;
+export const hasNonLatinTitle = (s: TorrentioStream): boolean => NON_LATIN_SCRIPT_RE.test(s.title || '');
+
 export const hasBadLang = (s: TorrentioStream): boolean => {
   const t = streamInfo(s);
   const bad =
     /\bita\b|\bitalian\b|\bkor\b|\bkorean\b|\brus\b|\brussian\b|\bukr\b|\bfra\b|\bfrench\b|\bvff\b|\bpor\b|\bportuguese\b/.test(
       t
-    );
+    ) || hasNonLatinTitle(s);
   return bad && !hasEng(s) && !hasSpa(s); // solo descarta si NO acompaña ENG o SPA
 };
 

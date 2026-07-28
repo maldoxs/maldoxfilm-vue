@@ -21,6 +21,7 @@ import {
   findCachedByTitleYear,
   hasHardcodedSubs,
   isCinemaLeakSource,
+  hasNonLatinTitle,
 } from '../src/services/streamSelector';
 import type { TorrentioStream, RDDownload } from '../src/types';
 
@@ -783,5 +784,49 @@ describe('streamSelector — isCinemaLeakSource (origen de cine, riesgo de subs 
     expect(isCinemaLeakSource({ title: 'x 1080p WEB-DL DD5.1 H264' })).toBe(false);
     expect(isCinemaLeakSource({ title: 'x 1080p BluRay x264 AAC' })).toBe(false);
     expect(isCinemaLeakSource({ title: 'x 1080p WEBRip x264' })).toBe(false);
+  });
+});
+
+// ── hasBadLang debe detectar título en escritura NO LATINA (no solo palabras en latín) ──
+// 5ta vuelta del caso "La muerte de Robin Hood": la misma copia (infoHash
+// 66a2f794242dea9c5fe0178a0683c8068cf4cc45, id UT3KNP27TQQ6Y) se re-eligió 2 VECES
+// SEGUIDAS pese a los 4 fixes anteriores — porque el título viene en CIRÍLICO
+// ("Смерть Робин Гуда...") y hasBadLang solo buscaba la palabra "rus"/"russian" en
+// letras latinas. Esta prueba usa el título EXACTO del log real.
+describe('streamSelector — hasBadLang detecta escritura no-latina (bug real 5ta vuelta)', () => {
+  const CYRILLIC_STREAM = stream({
+    name: '[RD+] Torrentio\n1080p',
+    title: 'Смерть Робин Гуда / The Death of Robin Hood (2026) WEBRip 1080p | Р\n👤 920 💾 2.77 GB ⚙️ Rutor\n🇷🇺',
+    behaviorHints: { filename: 'The Death of Robin Hood (2026).mkv' },
+  });
+
+  test('hasNonLatinTitle detecta cirílico/griego/CJK/hangul/árabe/hebreo', () => {
+    expect(hasNonLatinTitle(CYRILLIC_STREAM)).toBe(true);
+    expect(hasNonLatinTitle(stream({ title: 'Some Movie 2020 1080p Русский' }))).toBe(true);
+    expect(hasNonLatinTitle(stream({ title: '映画 2020 1080p' }))).toBe(true); // japonés/CJK
+    expect(hasNonLatinTitle(stream({ title: '영화 2020 1080p' }))).toBe(true); // coreano
+  });
+
+  test('NO marca títulos normales en inglés/español (sin falsos positivos)', () => {
+    expect(hasNonLatinTitle(stream({ title: 'The Death Of Robin Hood 2026 1080p WEB-DL H264' }))).toBe(false);
+    expect(hasNonLatinTitle(stream({ title: 'El Padrino (1972) 1080p BluRay Español Latino' }))).toBe(false);
+  });
+
+  test('hasBadLang descarta el candidato real (título ruso en cirílico, sin ENG/SPA acompañando)', () => {
+    expect(hasBadLang(CYRILLIC_STREAM)).toBe(true);
+  });
+
+  test('scoreStream lo descarta con -10000 (ya no puede ganar nunca, sin importar el cacheado +400)', () => {
+    expect(scoreStream(CYRILLIC_STREAM)).toBe(-10000);
+  });
+
+  test('selectBestStream nunca lo elige si hay CUALQUIER alternativa en inglés/español', () => {
+    const cleanEnglish = stream({
+      name: '[RD+] Torrentio',
+      title: 'The Death Of Robin Hood 2026 1080p WEB-DL H264 💾 5 GB',
+      behaviorHints: { filename: 'The.Death.Of.Robin.Hood.2026.1080p.WEB-DL.H264.mkv' },
+    });
+    const { best } = selectBestStream([CYRILLIC_STREAM, cleanEnglish]);
+    expect(best?.behaviorHints?.filename).not.toContain('(2026).mkv'); // no es el cirílico
   });
 });
