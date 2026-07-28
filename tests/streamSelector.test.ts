@@ -644,3 +644,41 @@ describe('streamSelector — penalización de subtítulos quemados (HC)', () => 
     expect(scoreStream(HC_CACHED)).toBeGreaterThan(-5000);
   });
 });
+
+// ── 2ª pasada del mismo bug: subtítulo POLACO quemado (tag PLSUBBED, no HC) ──
+// Tras penalizar `HC`, el scoring eligió el .avi polaco (479 pts) y el usuario vio
+// "Rozczarowanie" quemado en pantalla. Datos EXACTOS del segundo log.
+describe('streamSelector — subtítulos extranjeros quemados con otras etiquetas', () => {
+  const PLSUBBED_CACHED = {
+    name: '[RD+] Torrentio\n1080p',
+    title: 'The.Death.of.Robin.Hood.2026.PLSUBBED.AI.1080p.DCRip.XviD.AC3-MAXX.avi\n👤 42 💾 3.53 GB ⚙️ BestTorrents\n🇵🇱',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/T/7c46afe48f5681fcc4a4e088561356d17edd6039/null/0/pl.avi',
+    behaviorHints: { filename: 'The.Death.of.Robin.Hood.2026.PLSUBBED.AI.1080p.DCRip.XviD.AC3-MAXX.avi' },
+  };
+  const CLEAN_CACHED = {
+    name: '[RD+] Torrentio\n1080p',
+    title: 'The Death Of Robin Hood 2026 1080p DCPRIP h264-LiNEUP\n👤 581 💾 8.47 GB ⚙️ ThePirateBay',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/T/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/null/0/clean.mkv',
+    behaviorHints: { filename: 'The Death Of Robin Hood 2026 1080p DCPRIP h264-LiNEUP.mkv' },
+  };
+
+  test('detecta PLSUBBED/DKsubs/SWESUB/PLSUB como subtítulo extranjero quemado', () => {
+    expect(hasHardcodedSubs(PLSUBBED_CACHED)).toBe(true);
+    expect(hasHardcodedSubs({ title: 'Movie 2026 Retail DKsubs 1080p WEB-DL' })).toBe(true);
+    expect(hasHardcodedSubs({ title: 'Movie.2026.SWESUB.1080p.WEBRip' })).toBe(true);
+    expect(hasHardcodedSubs({ title: 'Movie.2026.PLSUB.AI.1080p.WEB-DL.H264' })).toBe(true);
+  });
+
+  test('NO penaliza subtítulos en inglés/español (esos SÍ sirven al usuario)', () => {
+    expect(hasHardcodedSubs({ title: 'Movie.2026.ENGSUBS.1080p.WEB-DL' })).toBe(false);
+    expect(hasHardcodedSubs({ title: 'Movie.2026.SPASUB.1080p.WEB-DL' })).toBe(false);
+    expect(hasHardcodedSubs(CLEAN_CACHED)).toBe(false);
+  });
+
+  test('la copia LIMPIA le gana a la PLSUBBED (bug del segundo log)', () => {
+    // Antes: PLSUBBED=479 > limpia=395 → se elegía el .avi con subs polacos quemados.
+    expect(scoreStream(PLSUBBED_CACHED)).toBeLessThan(scoreStream(CLEAN_CACHED));
+    const { best } = selectBestStream([PLSUBBED_CACHED, CLEAN_CACHED]);
+    expect(best?.behaviorHints?.filename).toBe('The Death Of Robin Hood 2026 1080p DCPRIP h264-LiNEUP.mkv');
+  });
+});

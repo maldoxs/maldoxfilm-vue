@@ -214,7 +214,20 @@ export function isJunkMatch(d: RDDownload): boolean {
 // Es un defecto de calidad real para un usuario hispanohablante → se penaliza para
 // preferir una copia limpia. NO es descarte total (-10000): si la única versión
 // disponible es HC, sigue siendo mejor reproducir eso que nada.
-export const HARDCODED_SUBS_RE = /\bhc\b|\bhardcoded\b|\bhardsubs?\b|\bhardsubbed\b|\bkorsub\b/i;
+// 2º pasada (mismo día): tras penalizar `HC`, el scoring eligió
+// "...PLSUBBED.AI.1080p.DCRip.XviD.AC3-MAXX.avi" (479 pts) — MISMO defecto, otra
+// etiqueta: `PLSUBBED` = subtítulo POLACO quemado ("Rozczarowanie" en pantalla). Por
+// eso la detección cubre ahora las variantes `<idioma>SUB/SUBS/SUBBED`.
+// Códigos de idioma que aparecen pegados a "sub"/"subs"/"subbed" en los nombres de
+// release para indicar subtítulo EXTRANJERO incrustado: PLSUBBED (polaco), DKsubs
+// (danés), SWESUB (sueco), KORSUB (coreano)... Se listan explícitamente (en vez de un
+// comodín `\w+sub`) para NO penalizar ENGSUBS/SPASUBS, que sí serían útiles acá.
+const FOREIGN_SUB_LANGS =
+  'pl|dk|dan|swe|sve|nor|fin|ger|deu|ita|fre|fra|kor|chs|cht|chi|vie|tha|ind|ara|tur|rus|ukr|hun|cze|rom|rum|gre|heb|hin|jpn|bul|srp|hrv';
+export const HARDCODED_SUBS_RE = new RegExp(
+  `\\bhc\\b|\\bhardcoded\\b|\\bhardsub(?:s|bed)?\\b|\\b(?:${FOREIGN_SUB_LANGS})\\.?sub(?:s|bed)?\\b`,
+  'i'
+);
 export const hasHardcodedSubs = (s: TorrentioStream): boolean => HARDCODED_SUBS_RE.test(streamInfo(s));
 
 /**
