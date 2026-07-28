@@ -31,7 +31,6 @@ import { createTmdbClient, type TmdbClient } from './tmdb';
 import { createTorrentioClient, type TorrentioClient } from './torrentio';
 import { createRealDebridClient, type RealDebridClient } from './realdebrid';
 import { createRdStreamResolver, type RdStreamResolver } from './rdStream';
-import { isHashBlacklisted } from './streamBlacklist';
 
 /** TMDB_API_KEY — preservada EXACTA de la línea ~4481. Las API keys de TMDB son públicas por diseño (rate-limit por key, no secretas) — a diferencia del RD_TOKEN, no representan un riesgo de seguridad si viajan al cliente. */
 export const TMDB_API_KEY = 'd95e6a7e2ead40e949fcdb81f1f26f0b';
@@ -218,7 +217,6 @@ export async function createAppServices(opts: CreateAppServicesOptions): Promise
     torrentioClient,
     rdClient,
     serverResolve,
-    isHashBlacklisted,
   });
 
   return { tmdbClient, torrentioClient, rdClient, rdStreamResolver, rdToken };
