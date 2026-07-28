@@ -240,6 +240,20 @@ export const HARDCODED_SUBS_RE = new RegExp(
 );
 export const hasHardcodedSubs = (s: TorrentioStream): boolean => HARDCODED_SUBS_RE.test(streamInfo(s));
 
+// ── Origen "filtración de cine" (2026-07-14, 3ª vuelta del caso "La muerte de Robin
+// Hood") ──────────────────────────────────────────────────────────────────────────
+// Evidencia: se probaron 3 copias cacheadas DISTINTAS de la misma película — una
+// declaraba `HC`, otra `PLSUBBED`, la tercera no declaraba NADA — y las TRES traían
+// el MISMO subtítulo lituano quemado. Conclusión: para un estreno reciente, TODAS las
+// copias que circulan provienen de la MISMA filtración de cine (screener/DCP), así que
+// el nombre del archivo no es confiable como señal — hay que mirar el ORIGEN. Un
+// candidato de origen cine (DCPRip/Theater Rip/CAM/TS/HDCAM) es sospechoso de traer
+// subtítulo regional quemado AUNQUE no lo declare.
+// [\s.]* (no solo \s*) porque los release names separan palabras con punto, NO
+// espacio: "Theater.Rip.Lite" — un \s* solo hubiera fallado con ese separador real.
+export const CINEMA_LEAK_RE = /\bdcp[\s.]*-?rip\b|\bthe?at(?:er|re)[\s.]*rip\b|\bhdcam\b|\bhdts\b|\bhd-?cam\b|\bcamrip\b/i;
+export const isCinemaLeakSource = (s: TorrentioStream): boolean => CINEMA_LEAK_RE.test(streamInfo(s));
+
 /**
  * scoreStream — puntaje orientado a FLUIDEZ/ESTABILIDAD (que NUNCA se congele),
  * no a máxima calidad. Tiers por prioridad (rangos no solapados → respetan el orden):

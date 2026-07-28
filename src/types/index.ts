@@ -85,6 +85,15 @@ export interface SelectedStream {
    */
   altCachedCandidates?: { rdId: string; filename: string }[];
   /**
+   * noTrustworthyCachedVersion — ninguna copia cacheada [RD+] de esta película está
+   * libre de sospecha (subtítulo extranjero declarado O origen de cine — DCPRip/
+   * Theater Rip/CAM). Caso real (2026-07-14): se probaron 3 copias distintas y las
+   * TRES traían el MISMO subtítulo lituano quemado — para estrenos muy recientes,
+   * todo lo cacheado suele venir de la misma filtración de cine. `usePlayer` debe
+   * saltar directo a otro reproductor en vez de seguir adivinando entre contaminadas.
+   */
+  noTrustworthyCachedVersion?: boolean;
+  /**
    * hasLatinoTag — el título/nombre del torrent elegido menciona audio latino/español
    * (ver `hasLatino` en streamSelector.ts). Bug real encontrado (2026-07-13): el camino
    * server-side (`rd-stream`, ADR-004) hardcodeaba `hasNativeSpanish: false` SIEMPRE, sin

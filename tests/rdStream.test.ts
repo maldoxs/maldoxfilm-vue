@@ -369,3 +369,87 @@ describe('rdStream — altCachedCandidates (Plan B del pipeline /t/)', () => {
     expect(result.altCachedCandidates).toBeUndefined();
   });
 });
+
+// ── noTrustworthyCachedVersion: TODAS las copias cacheadas son de origen cine/con subs ──
+// Caso real "La muerte de Robin Hood" (2026-07-14, 3ª vuelta): 3 copias DISTINTAS
+// probadas en producción (HC, PLSUBBED, sin etiqueta) — las 3 traían el MISMO
+// subtítulo lituano quemado. Ninguna era realmente confiable.
+describe('rdStream — noTrustworthyCachedVersion (todas las copias cacheadas son sospechosas)', () => {
+  const HC_A = {
+    name: '[RD+] Torrentio\n1080p',
+    title: 'The.Death.Of.Robin.hood.2026.1080p.HC.DCPRip.AAC5.1-NeoNoir\n💾 1.78 GB',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/TEST_TOKEN/1111111111111111111111111111111111111a/null/0/hc.mkv',
+    infoHash: '1111111111111111111111111111111111111a',
+    behaviorHints: { filename: 'The.Death.Of.Robin.hood.2026.1080p.HC.DCPRip.AAC5.1-NeoNoir.mkv' },
+  };
+  const PLSUBBED_B = {
+    name: '[RD+] Torrentio\n1080p',
+    title: 'The.Death.of.Robin.Hood.2026.PLSUBBED.AI.1080p.DCRip.XviD.AC3-MAXX\n💾 3.53 GB',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/TEST_TOKEN/2222222222222222222222222222222222222b/null/0/pl.avi',
+    infoHash: '2222222222222222222222222222222222222b',
+    behaviorHints: { filename: 'The.Death.of.Robin.Hood.2026.PLSUBBED.AI.1080p.DCRip.XviD.AC3-MAXX.avi' },
+  };
+  // NOTA IMPORTANTE (honestidad sobre el alcance real de este fix): en producción
+  // hubo una TERCERA copia sin ninguna etiqueta sospechosa en el nombre que TAMBIÉN
+  // traía el subtítulo quemado — esa NO puede detectarse por texto (no hay ninguna
+  // palabra que la delate) y por eso NO se modela aquí como "detectable". Este test
+  // cubre lo que el fix SÍ puede garantizar: cuando TODOS los candidatos cacheados
+  // declaran su riesgo (HC/PLSUBBED/origen cine), se activa la bandera. El caso
+  // "ninguna etiqueta pero igual quemado" queda documentado como límite conocido en
+  // sessions/2026-07-14.md — requeriría inspección real del video (OCR), no texto.
+  const THEATER_C = {
+    name: '[RD+] Torrentio',
+    title: 'The.Death.Of.Robin.hood.V2.2026.2K.Theater.Rip.Lite.FLAC.5.1-BOOB\n💾 12.91 GB',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/TEST_TOKEN/3333333333333333333333333333333333333c/null/0/theater.mkv',
+    infoHash: '3333333333333333333333333333333333333c',
+    behaviorHints: { filename: 'The.Death.Of.Robin.hood.V2.2026.2K.Theater.Rip.Lite.FLAC.5.1-BOOB.mkv' },
+  };
+  const DOWNLOADS = [
+    { id: 'RD_HC', download: 'https://x1.stream.real-debrid.com/d/HC/hc.mkv', filename: 'The.Death.Of.Robin.hood.2026.1080p.HC.DCPRip.AAC5.1-NeoNoir.mkv', filesize: 1_780_000_000 },
+    // THEATER_C ya estaba en el historial de descargas de la cuenta — gana Ronda 1
+    // directo, sin pasar por el rescate.
+    {
+      id: 'RD_THEATER',
+      download: 'https://x3.stream.real-debrid.com/d/THEATER/theater.mkv',
+      filename: 'The.Death.Of.Robin.hood.V2.2026.2K.Theater.Rip.Lite.FLAC.5.1-BOOB.mkv',
+      filesize: 12_910_000_000,
+    },
+  ];
+
+  function makeRouter3(streams: unknown[]) {
+    return vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const respond = (json: unknown, finalUrl?: string) =>
+        ({ ok: true, status: 200, url: finalUrl ?? url, json: async () => json, text: async () => JSON.stringify(json) }) as unknown as Response;
+      if (/external_ids/.test(url)) return respond({ imdb_id: 'tt0000002' });
+      if (/torrentio\.strem\.fun\/realdebrid=/.test(url)) return respond({ streams });
+      if (/resolve\/realdebrid\/TEST_TOKEN\/1111/.test(url)) return respond({}, DOWNLOADS[0].download);
+      if (/resolve\/realdebrid\/TEST_TOKEN\/3333/.test(url)) return respond({}, DOWNLOADS[1].download);
+      if (/\/downloads\?limit=500/.test(url)) return respond(DOWNLOADS);
+      throw new Error('Sin ruta mockeada para: ' + url);
+    });
+  }
+
+  test('las 3 copias cacheadas contaminadas → noTrustworthyCachedVersion true', async () => {
+    const fetchImpl = makeRouter3([HC_A, PLSUBBED_B, THEATER_C]);
+    const resolver = buildResolver(fetchImpl as unknown as typeof fetch);
+    const result = await resolver.getStream(999, 'movie');
+
+    expect(result.noTrustworthyCachedVersion).toBe(true);
+  });
+
+  test('si aparece UNA copia cacheada limpia (WEB-DL sin HC/región), no se activa la bandera', async () => {
+    const CLEAN_D = {
+      name: '[RD+] Torrentio\n1080p',
+      title: 'The Death Of Robin Hood 2026 1080p WEB-DL H264 DDP5.1\n💾 5 GB',
+      url: 'https://torrentio.strem.fun/resolve/realdebrid/TEST_TOKEN/4444444444444444444444444444444444444d/null/0/clean.mkv',
+      infoHash: '4444444444444444444444444444444444444d',
+      behaviorHints: { filename: 'The.Death.Of.Robin.Hood.2026.1080p.WEB-DL.H264.DDP5.1.mkv' },
+    };
+    const fetchImpl = makeRouter3([HC_A, PLSUBBED_B, THEATER_C, CLEAN_D]);
+    const resolver = buildResolver(fetchImpl as unknown as typeof fetch);
+    const result = await resolver.getStream(999, 'movie');
+
+    expect(result.noTrustworthyCachedVersion).toBeUndefined();
+  });
+});

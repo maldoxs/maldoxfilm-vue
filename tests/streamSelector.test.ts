@@ -20,6 +20,7 @@ import {
   extractTitleYear,
   findCachedByTitleYear,
   hasHardcodedSubs,
+  isCinemaLeakSource,
 } from '../src/services/streamSelector';
 import type { TorrentioStream, RDDownload } from '../src/types';
 
@@ -766,5 +767,21 @@ describe('streamSelector — el rescate prefiere copias sin subtítulos quemados
     const conFlag = findCachedByTitleYear([conParentesis], soloHcEnDownloads, true);
     expect(sinFlag?.id).toBe('RD_HC'); // sin la bandera, comportamiento previo intacto
     expect(conFlag).toBeUndefined(); // con la bandera, la quemada se descarta
+  });
+});
+
+// ── Detección de origen "filtración de cine" (DCPRip/Theater Rip/CAM) ──
+describe('streamSelector — isCinemaLeakSource (origen de cine, riesgo de subs regionales)', () => {
+  test('detecta DCPRip/DCPRIP/Theater Rip/HDCAM/HDTS', () => {
+    expect(isCinemaLeakSource({ title: 'x 1080p DCPRip x264' })).toBe(true);
+    expect(isCinemaLeakSource({ title: 'x 1080p DCPRIP h264-LiNEUP' })).toBe(true);
+    expect(isCinemaLeakSource({ title: 'x 2K Theater Rip Lite FLAC' })).toBe(true);
+    expect(isCinemaLeakSource({ title: 'x 1080p HDCAM x264' })).toBe(true);
+    expect(isCinemaLeakSource({ title: 'x 720p HDTS AAC' })).toBe(true);
+  });
+  test('NO marca WEB-DL/BluRay/WEBRip limpios', () => {
+    expect(isCinemaLeakSource({ title: 'x 1080p WEB-DL DD5.1 H264' })).toBe(false);
+    expect(isCinemaLeakSource({ title: 'x 1080p BluRay x264 AAC' })).toBe(false);
+    expect(isCinemaLeakSource({ title: 'x 1080p WEBRip x264' })).toBe(false);
   });
 });

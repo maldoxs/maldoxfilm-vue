@@ -1536,6 +1536,18 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       return;
     }
 
+    // ── Ninguna copia cacheada confiable — saltar a otro reproductor (2026-07-14) ──
+    // Ver `noTrustworthyCachedVersion` en types/index.ts: probado 3 veces con el
+    // mismo título, las 3 copias cacheadas distintas traían el mismo subtítulo
+    // extranjero quemado. Insistir con una 4ta adivinanza no tiene sentido — se
+    // avisa honesto y se cambia de fuente antes de reproducir algo ya sospechoso.
+    if (selected.noTrustworthyCachedVersion) {
+      opts.onToast('⚠️ Copias disponibles poco confiables (posible subtítulo ajeno) — cambiando de reproductor');
+      opts.onFallbackToNextSource();
+      isLoadingRd.value = false;
+      return;
+    }
+
     // ── Toast x265 (línea ~7860) ──
     if (streamIsX265) opts.onToast('🔄 Optimizando video para tu navegador...');
 

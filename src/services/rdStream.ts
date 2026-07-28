@@ -40,6 +40,9 @@ import {
   matchInDownloads,
   isJunkMatch,
   audioLangRank,
+  isCachedStream,
+  hasHardcodedSubs,
+  isCinemaLeakSource,
 } from './streamSelector';
 
 /**
@@ -282,6 +285,24 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
         if (alts.length) {
           selected.altCachedCandidates = alts;
           console.warn('[RD] Plan B /t/ — copias cacheadas alternativas:', alts.map((a) => a.filename));
+        }
+
+        // ── SIN copia confiable — saltar directo a otro reproductor (2026-07-14, 3ª
+        // vuelta caso "La muerte de Robin Hood") ────────────────────────────────────
+        // Evidencia: se probaron 3 copias cacheadas DISTINTAS (una HC, otra PLSUBBED,
+        // otra sin ninguna etiqueta) y las TRES traían el MISMO subtítulo lituano
+        // quemado — todas vienen de la misma filtración de cine. El nombre del archivo
+        // dejó de ser una señal confiable para esta película: no hay ninguna copia
+        // "limpia" que rescatar, existe o no. Si NINGÚN candidato cacheado [RD+] del
+        // pool está libre de sospecha (ni subs declarados NI origen de cine), no tiene
+        // sentido seguir adivinando entre copias contaminadas — se avisa y se cambia
+        // de reproductor en vez de reproducir con un defecto ya confirmado 3 veces.
+        const hayAlgunaConfiable = finalPool.some(
+          (p) => isCachedStream(p.s) && !hasHardcodedSubs(p.s) && !isCinemaLeakSource(p.s)
+        );
+        if (!hayAlgunaConfiable) {
+          console.warn('[RD] Ninguna copia cacheada confiable (todas HC/subs regionales/origen cine) — sin rdId');
+          selected.noTrustworthyCachedVersion = true;
         }
       }
 
