@@ -205,6 +205,18 @@ export function isJunkMatch(d: RDDownload): boolean {
   return tooSmall || isJunkFilename(d.filename);
 }
 
+// ── Subtítulos QUEMADOS en la imagen (hardcoded) ─────────────────────────────
+// Caso real "La muerte de Robin Hood" (2026-07-14): se eligió
+// "...1080p.HC.DCPRip.AAC5.1-NeoNoir.mkv" — el tag `HC` (hardcoded) significa que
+// el video trae subtítulos INCRUSTADOS en la imagen, en este caso en lituano. Como
+// nuestra app además inyecta su propio subtítulo en español, la pantalla mostraba
+// DOS subtítulos superpuestos, y el quemado no se puede quitar (es parte del video).
+// Es un defecto de calidad real para un usuario hispanohablante → se penaliza para
+// preferir una copia limpia. NO es descarte total (-10000): si la única versión
+// disponible es HC, sigue siendo mejor reproducir eso que nada.
+export const HARDCODED_SUBS_RE = /\bhc\b|\bhardcoded\b|\bhardsubs?\b|\bhardsubbed\b|\bkorsub\b/i;
+export const hasHardcodedSubs = (s: TorrentioStream): boolean => HARDCODED_SUBS_RE.test(streamInfo(s));
+
 /**
  * scoreStream — puntaje orientado a FLUIDEZ/ESTABILIDAD (que NUNCA se congele),
  * no a máxima calidad. Tiers por prioridad (rangos no solapados → respetan el orden):
@@ -281,6 +293,16 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
   // ── P7 — Contenedor (BONUS MENOR; jamás criterio principal) ──
   if (isMp4(s)) pts += 8;
   else if (isMkv(s)) pts -= 5;
+
+  // ── P8 — Subtítulos QUEMADOS en la imagen (ver `hasHardcodedSubs`) ──
+  // Caso real "La muerte de Robin Hood": el elegido era HC con subs lituanos
+  // incrustados + el nuestro en español encima = dos subtítulos superpuestos.
+  // -150 está calibrado con los puntajes REALES de ese log: la copia HC cacheada
+  // sacaba 490 y la copia LIMPIA (también cacheada) 395 → con la penalización la
+  // limpia gana (340 vs 395). Deliberadamente MENOR que el +400 de cacheado: una
+  // copia HC cacheada sigue ganándole a cualquier no-cacheada (regla innegociable
+  // de fluidez). Si HC es la única opción, se reproduce igual (no es descarte).
+  if (hasHardcodedSubs(s)) pts -= 150;
 
   return pts;
 }

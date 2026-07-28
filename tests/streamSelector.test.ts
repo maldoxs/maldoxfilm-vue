@@ -19,6 +19,7 @@ import {
   audioLangRank,
   extractTitleYear,
   findCachedByTitleYear,
+  hasHardcodedSubs,
 } from '../src/services/streamSelector';
 import type { TorrentioStream, RDDownload } from '../src/types';
 
@@ -588,5 +589,58 @@ describe('unavailableInRd — sin candidatos [RD+] en el pool, saltar directo (s
     const result = resolveActiveStream(ac3NoMatch, ac3NoMatch.url!, 'Some.Movie.2020.AC3.mkv', pool, scored, []);
     expect(result.rdId).toBeNull();
     expect(result.unavailableInRd).toBe(true);
+  });
+});
+
+// ── Subtítulos QUEMADOS (HC) — caso real "La muerte de Robin Hood" (2026-07-14) ──
+// El usuario vio DOS subtítulos superpuestos: uno lituano quemado en la imagen (tag
+// `HC` = hardcoded) + el nuestro en español. Datos EXACTOS del log de esa sesión.
+describe('streamSelector — penalización de subtítulos quemados (HC)', () => {
+  const HC_CACHED = {
+    name: '[RD+] Torrentio\n1080p',
+    title: 'The.Death.Of.Robin.hood.2026.1080p.HC.DCPRip.AAC5.1-NeoNoir\n👤 168 💾 1.78 GB ⚙️ ThePirateBay',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/T/5651e9066f938d24a9de70c3b854f0bcc128cdd7/null/0/hc.mkv',
+    behaviorHints: { filename: 'The.Death.Of.Robin.hood.2026.1080p.HC.DCPRip.AAC5.1-NeoNoir.mkv' },
+  };
+  const CLEAN_CACHED = {
+    name: '[RD+] Torrentio\n1080p',
+    title: 'The Death Of Robin Hood 2026 1080p DCPRIP h264-LiNEUP\n👤 581 💾 8.47 GB ⚙️ ThePirateBay',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/T/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/null/0/clean.mkv',
+    behaviorHints: { filename: 'The Death Of Robin Hood 2026 1080p DCPRIP h264-LiNEUP.mkv' },
+  };
+  const CLEAN_UNCACHED = {
+    name: '[RD download] Torrentio\n1080p',
+    title: 'The.Death.Of.Robin.Hood.2026.1080p.WEB-DL.DDP5.1.H264.MP4-BTM\n👤 254 💾 9.4 GB ⚙️ ThePirateBay',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/T/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/null/0/webdl.mp4',
+    behaviorHints: { filename: 'The.Death.Of.Robin.Hood.2026.1080p.WEB-DL[Ben The Men].mp4' },
+  };
+
+  test('detecta el tag HC (y variantes) sin marcar copias limpias', () => {
+    expect(hasHardcodedSubs(HC_CACHED)).toBe(true);
+    expect(hasHardcodedSubs(CLEAN_CACHED)).toBe(false);
+    expect(hasHardcodedSubs(CLEAN_UNCACHED)).toBe(false);
+    expect(hasHardcodedSubs({ title: 'Movie 1080p HARDCODED subs' })).toBe(true);
+    expect(hasHardcodedSubs({ title: 'Movie 1080p KORSUB WEBRip' })).toBe(true);
+  });
+
+  test('la copia LIMPIA cacheada ahora le gana a la HC cacheada (el bug del usuario)', () => {
+    // Antes del fix: HC=490 > limpia=395 → se elegía la de subs quemados.
+    expect(scoreStream(HC_CACHED)).toBeLessThan(scoreStream(CLEAN_CACHED));
+    const { best } = selectBestStream([HC_CACHED, CLEAN_CACHED]);
+    expect(best?.behaviorHints?.filename).toBe('The Death Of Robin Hood 2026 1080p DCPRIP h264-LiNEUP.mkv');
+  });
+
+  test('la penalización NO rompe la regla innegociable "cacheado gana a no-cacheado"', () => {
+    // Aun penalizada, la HC cacheada (/t/ fluido) debe ganarle a una limpia NO cacheada
+    // (server-side lento) — la fluidez sigue mandando sobre la estética del subtítulo.
+    expect(scoreStream(HC_CACHED)).toBeGreaterThan(scoreStream(CLEAN_UNCACHED));
+    const { best } = selectBestStream([HC_CACHED, CLEAN_UNCACHED]);
+    expect(best?.behaviorHints?.filename).toContain('NeoNoir');
+  });
+
+  test('si la HC es la ÚNICA opción, se sigue eligiendo (no es descarte)', () => {
+    const { best } = selectBestStream([HC_CACHED]);
+    expect(best).toBeTruthy();
+    expect(scoreStream(HC_CACHED)).toBeGreaterThan(-5000);
   });
 });
