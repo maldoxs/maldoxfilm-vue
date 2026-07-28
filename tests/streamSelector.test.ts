@@ -682,3 +682,89 @@ describe('streamSelector — subtítulos extranjeros quemados con otras etiqueta
     expect(best?.behaviorHints?.filename).toBe('The Death Of Robin Hood 2026 1080p DCPRIP h264-LiNEUP.mkv');
   });
 });
+
+// ── 3ª pasada: el RESCATE también re-elegía la copia con subs quemados ──
+// Log del usuario: "[RD] Versión cacheada encontrada pos 2 | score: 340 | ...HC.DCPRip..."
+// La penalización de scoreStream SÍ se aplicó (340 vs 490 original), pero el rescate
+// filtra por "está en mis downloads", no por puntaje — y en esa cuenta las únicas
+// copias descargadas de esa película eran las DOS con subs quemados.
+describe('streamSelector — el rescate prefiere copias sin subtítulos quemados', () => {
+  const hcStream = stream({
+    name: '[RD+] Torrentio\n1080p',
+    url: 'https://example.com/hc',
+    title: 'The.Death.Of.Robin.hood.2026.1080p.HC.DCPRip.AAC5.1-NeoNoir 💾 1.78 GB',
+    behaviorHints: { filename: 'The.Death.Of.Robin.hood.2026.1080p.HC.DCPRip.AAC5.1-NeoNoir.mkv' },
+  });
+  const cleanStream = stream({
+    name: '[RD+] Torrentio\n1080p',
+    url: 'https://example.com/clean',
+    title: 'The Death Of Robin Hood 2026 1080p DCPRIP h264-LiNEUP 💾 8.47 GB',
+    behaviorHints: { filename: 'The Death Of Robin Hood 2026 1080p DCPRIP h264-LiNEUP.mkv' },
+  });
+  // El top del ranking no tiene match en downloads (dispara el rescate).
+  const topSinMatch = stream({
+    name: '[RD+] Torrentio\n1080p',
+    url: 'https://example.com/top',
+    title: 'The Death Of Robin Hood 2026 1080p WEBRip AAC 💾 2.8 GB',
+    behaviorHints: { filename: 'The.Death.Of.Robin.Hood.2026.1080p.WEBRip.AAC.mkv' },
+  });
+  // La cuenta SOLO tiene descargada la copia con subs quemados.
+  const soloHcEnDownloads: RDDownload[] = [
+    {
+      id: 'RD_HC',
+      download: 'https://real-debrid.com/d/HC',
+      filename: 'The.Death.Of.Robin.hood.2026.1080p.HC.DCPRip.AAC5.1-NeoNoir.mkv',
+      filesize: 1_906_036_828,
+    },
+  ];
+
+  test('con una copia LIMPIA [RD+] disponible, el rescate NO adopta la quemada', () => {
+    const { scored, pool } = rankStreams([topSinMatch, cleanStream, hcStream]);
+    const r = resolveActiveStream(
+      topSinMatch,
+      topSinMatch.url!,
+      'The.Death.Of.Robin.Hood.2026.1080p.WEBRip.AAC.mkv',
+      pool,
+      scored,
+      soloHcEnDownloads
+    );
+    // rdId queda null a propósito → usePlayer derivará el id del link crudo y correrá
+    // /t/ con la copia limpia, en vez de reproducir la de subtítulos quemados.
+    expect(r.rdId).toBeNull();
+    expect(r.activeFilename).not.toContain('NeoNoir');
+  });
+
+  test('si NO hay ninguna copia limpia, la quemada se acepta igual (mejor eso que nada)', () => {
+    const { scored, pool } = rankStreams([topSinMatch, hcStream]);
+    // topSinMatch pasa a ser "quemado" también para simular que TODO el pool lo es
+    const soloQuemados = [
+      { ...topSinMatch, title: 'The Death Of Robin Hood 2026 1080p HC WEBRip AAC 💾 2.8 GB' },
+      hcStream,
+    ];
+    const rk = rankStreams(soloQuemados);
+    const r = resolveActiveStream(
+      soloQuemados[0],
+      soloQuemados[0].url!,
+      'top.mkv',
+      rk.pool,
+      rk.scored,
+      soloHcEnDownloads
+    );
+    expect(r.rdId).toBe('RD_HC'); // sin alternativa limpia → se reproduce igual
+    void scored;
+    void pool;
+  });
+
+  test('findCachedByTitleYear con skipHardcoded descarta la copia quemada del historial', () => {
+    // `extractTitleYear` exige el formato "Título (AÑO)" con paréntesis.
+    const conParentesis = stream({
+      name: '[RD+] Torrentio',
+      title: 'The Death Of Robin Hood (2026) 1080p DCPRIP h264-LiNEUP 💾 8.47 GB',
+      behaviorHints: { filename: 'The Death Of Robin Hood 2026 1080p DCPRIP h264-LiNEUP.mkv' },
+    });
+    const sinFlag = findCachedByTitleYear([conParentesis], soloHcEnDownloads, false);
+    const conFlag = findCachedByTitleYear([conParentesis], soloHcEnDownloads, true);
+    expect(sinFlag?.id).toBe('RD_HC'); // sin la bandera, comportamiento previo intacto
+    expect(conFlag).toBeUndefined(); // con la bandera, la quemada se descarta
+  });
+});

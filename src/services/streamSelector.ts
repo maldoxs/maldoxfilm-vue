@@ -100,7 +100,16 @@ const SEQUEL_MARKER_RE = /\b(2|3|4|5|ii|iii|iv|v)\b/i;
  */
 export function findCachedByTitleYear(
   streams: TorrentioStream[],
-  downloads: RDDownload[]
+  downloads: RDDownload[],
+  /**
+   * skipHardcoded — descarta los downloads cuyo NOMBRE delata subtítulos quemados
+   * (`HC`, `PLSUBBED`, `DKsubs`...). Se activa cuando el pool ofrece una copia limpia
+   * cacheada: preferimos dejar `rdId` null (y que `usePlayer` derive el id del link
+   * crudo para correr /t/ con la limpia) antes que reproducir una con subs quemados
+   * solo porque ya estaba en el historial de la cuenta. Ver el guard equivalente en
+   * `resolveActiveStream`. Default false → comportamiento previo intacto.
+   */
+  skipHardcoded = false
 ): RDDownload | undefined {
   let ty: { title: string; year: string } | null = null;
   for (const s of streams) {
@@ -116,6 +125,7 @@ export function findCachedByTitleYear(
   const targetHasSequelMarker = SEQUEL_MARKER_RE.test(ty.title);
   return downloads.find((d) => {
     if (!d.filename || isJunkMatch(d)) return false;
+    if (skipHardcoded && HARDCODED_SUBS_RE.test(d.filename)) return false;
     const fn = d.filename.toLowerCase();
     if (!fn.includes(ty!.year)) return false; // ancla fuerte: el año debe estar
     if (!titleWords.every((w) => fn.includes(w))) return false;
@@ -538,10 +548,26 @@ export function resolveActiveStream(
     // para quedarse con la mejor versión que SÍ tenga rdId (cacheada), igual que el
     // reproductor de RD. Riesgo bajo: solo corre donde hoy ya da `rdId null`; si no
     // hay ninguna cacheada, el resultado es idéntico al actual.
+    // GUARD DE SUBS QUEMADOS EN EL RESCATE (2026-07-14, caso real "La muerte de Robin
+    // Hood", 3ª pasada): el rescate se queda con la PRIMERA copia que esté en los
+    // `downloads` de la cuenta. Si ahí solo hay copias con subtítulo extranjero QUEMADO
+    // (porque el usuario ya las reprodujo antes), se elige una de esas aunque el pool
+    // ofrezca una copia LIMPIA cacheada globalmente ([RD+]) — la penalización de
+    // `scoreStream` no alcanza acá, porque este bucle filtra por "tiene rdId", no por
+    // puntaje. Solución: si existe una copia limpia [RD+] en el pool, se SALTAN las
+    // quemadas y se deja `rdId` null a propósito → aguas abajo `usePlayer` deriva el
+    // download id del link crudo (`resolveRawToRdId`) y corre /t/ con la copia limpia,
+    // igual de fluido. Solo si NO hay ninguna alternativa limpia se acepta la quemada
+    // (mejor reproducir con subs quemados que no reproducir nada).
+    const hayLimpiaCacheada = pool.some((p) => isCachedStream(p.s) && !hasHardcodedSubs(p.s));
     if (scored.length > 1) {
       console.warn('[RD] Sin rdId → buscando la mejor versión cacheada del pool...'); // espíritu del log ~4886
       for (let i = 1; i < scored.length; i++) {
         const alt = scored[i].s;
+        if (hayLimpiaCacheada && hasHardcodedSubs(alt)) {
+          console.warn('[RD] Saltando copia con subs QUEMADOS en el rescate:', extractFilename(alt));
+          continue;
+        }
         const altFn = extractFilename(alt);
         const altMatch = matchInDownloads(alt.url || '', alt.url || '', altFn, downloads);
         if (altMatch && !isJunkMatch(altMatch)) {
@@ -565,7 +591,11 @@ export function resolveActiveStream(
     // qué códec de audio tenga ese archivo — el pipeline /t/ (aguas abajo, en
     // usePlayer) transcodea CUALQUIER audio a AAC, así que alcanza con el rdId.
     if (!rdId) {
-      const titleMatch = findCachedByTitleYear([best, ...pool.map((p) => p.s)], downloads);
+      const titleMatch = findCachedByTitleYear(
+        [best, ...pool.map((p) => p.s)],
+        downloads,
+        hayLimpiaCacheada // si hay una copia limpia [RD+], no rescatar una quemada del historial
+      );
       if (titleMatch) {
         rdId = titleMatch.id;
         rdDownloadUrl = titleMatch.download || null;
