@@ -856,6 +856,7 @@ onBeforeUnmount(() => {
         @toggle-subs="onToggleSubs"
         @adjust-offset="subtitles.adjustOffset"
         @reset-offset="subtitles.adjustOffset(-subtitles.offsetMs.value)"
+        @report-unwatchable="player.reportUnwatchable()"
         @set-speed="onSetSpeed"
         @mouseenter="cancelHideSettingsPanel"
         @mouseleave="hideSettingsPanelDelayed"

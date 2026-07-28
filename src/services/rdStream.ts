@@ -74,6 +74,14 @@ export interface RdStreamResolverOptions {
   rdClient: RealDebridClient;
   /** Resolución server-side para contenido no cacheado (ADR-004). Default: no-op. */
   serverResolve?: ServerResolveFn;
+  /**
+   * isHashBlacklisted — el usuario ya reportó este `infoHash` como "no sirve" para
+   * este título (subtítulo ajeno/video incorrecto), vía el botón del reproductor
+   * (ver `streamBlacklist.ts`). Se filtra ANTES de puntuar, para que jamás vuelva a
+   * elegirse automáticamente en este dispositivo. Default: nunca bloquea (no-op) —
+   * los tests existentes no se ven afectados.
+   */
+  isHashBlacklisted?: (key: string, infoHash: string) => boolean;
 }
 
 export interface RdStreamResolver {
@@ -122,6 +130,7 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
   // Default no-op: sin función inyectada, el camino server-side queda inactivo
   // (los tests existentes no la pasan → comportamiento idéntico al actual).
   const serverResolve: ServerResolveFn = opts.serverResolve ?? (async () => null);
+  const isHashBlacklisted = opts.isHashBlacklisted ?? (() => false);
 
   async function getStream(
     tmdbId: string | number,
@@ -139,13 +148,24 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
       if (!imdbId) return emptySelectedStream();
 
       // ── 2. Streams desde Torrentio (líneas ~4718-4724) ──
-      const streams: TorrentioStream[] = await torrentioClient.fetchStreams({
+      const streamsRaw: TorrentioStream[] = await torrentioClient.fetchStreams({
         rdToken,
         imdbId,
         type,
         season,
         episode,
       });
+      // Filtrar ANTES de puntuar las copias que el usuario ya reportó como "no
+      // sirve" para este título (ver streamBlacklist.ts / caso "La muerte de Robin
+      // Hood" 2026-07-14) — así jamás se vuelven a elegir automáticamente.
+      const blacklistKeyStr = `${type}:${tmdbId}:${season ?? ''}:${episode ?? ''}`;
+      const streams = streamsRaw.filter((s) => {
+        const h = extractInfoHash(s);
+        return !h || !isHashBlacklisted(blacklistKeyStr, h);
+      });
+      if (streamsRaw.length && !streams.length) {
+        console.warn('[RD] Todos los candidatos estaban reportados por el usuario (blacklist) — sin streams');
+      }
       if (!streams.length) {
         console.warn('[RD] Sin streams en Torrentio'); // línea ~4724
         return emptySelectedStream();

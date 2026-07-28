@@ -65,6 +65,7 @@ const emit = defineEmits<{
   (e: 'set-speed', value: number): void;
   (e: 'mouseenter'): void;
   (e: 'mouseleave'): void;
+  (e: 'report-unwatchable'): void;
 }>();
 
 const { show: showToast } = useToast();
@@ -209,6 +210,16 @@ function onSetSpeed(value: number) {
         <button class="sp-offset-btn" @click="emit('adjust-offset', 1000)">+1s</button>
         <button class="sp-offset-btn" @click="emit('adjust-offset', 5000)">+5s</button>
       </div>
+    </div>
+
+    <!-- Reporte manual "esta copia no sirve" (2026-07-14, caso real "La muerte de
+         Robin Hood"): subtítulo extranjero quemado en la imagen que la detección
+         automática no puede atrapar cuando el archivo no declara nada sospechoso.
+         Bloquea esa copia para este título y cambia de reproductor. -->
+    <div v-if="mode === 'audiosubs'" class="sp-report-row">
+      <button class="sp-report-btn" @click="emit('report-unwatchable')">
+        ⚠️ Video/subtítulo incorrecto — cambiar de reproductor
+      </button>
     </div>
 
     <!-- Vista: Velocidad (preserva `#nfPanelSpeed`, líneas ~3653-3672) -->
@@ -392,6 +403,27 @@ function onSetSpeed(value: number) {
 }
 .sp-offset-reset:hover {
   color: #fff;
+}
+
+.sp-report-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 12px 24px 16px;
+}
+.sp-report-btn {
+  width: 100%;
+  background: rgba(255, 80, 80, 0.08);
+  border: 1px solid rgba(255, 80, 80, 0.25);
+  border-radius: 5px;
+  color: rgba(255, 150, 150, 0.9);
+  padding: 8px 10px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.25s ease, border-color 0.25s ease;
+}
+.sp-report-btn:hover {
+  background: rgba(255, 80, 80, 0.16);
+  border-color: rgba(255, 80, 80, 0.4);
 }
 
 .nf-panel-speed {

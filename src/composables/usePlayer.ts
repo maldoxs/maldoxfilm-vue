@@ -46,6 +46,7 @@ import {
   type MediaSourceLike,
 } from '../services/playback';
 import { pickHlsFallbackFromTranscode, pickDashUrlFromTranscode } from '../services/realdebrid';
+import { blacklistKey, addToBlacklist } from '../services/streamBlacklist';
 import { parseMediaInfos, pickSpanishAudioToken, hasNativeDecodableAudio } from '../services/mediaInfos';
 import {
   resolveTpipeline,
@@ -437,6 +438,11 @@ export interface UsePlayerReturn {
   tpipelineSeeking: Ref<boolean>;
   /** Seek del pipeline /t/: recarga el MPD en la posición indicada. */
   tpipelineSeekTo(seconds: number): Promise<void>;
+  /**
+   * reportUnwatchable — botón "esta copia no sirve" (subtítulo ajeno/video
+   * incorrecto): bloquea la copia activa para este título y cambia de reproductor.
+   */
+  reportUnwatchable(): void;
 }
 
 export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
@@ -465,6 +471,13 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   // Se borra al cerrar el reproductor o al cambiar de título, para que no se
   // acumulen torrents (error 21). Solo el camino server-side setea este id.
   let currentServerTorrentId: string | null = null;
+  // Reporte manual "esta copia no sirve" (2026-07-14, caso real "La muerte de Robin
+  // Hood"): el nombre del archivo tiene un techo real — una copia sin ninguna
+  // etiqueta sospechosa puede igual traer subtítulo ajeno quemado, indetectable por
+  // texto. Se trackea la copia/título activos para poder bloquearla si el usuario
+  // confirma el problema viéndolo (ver `reportUnwatchable` más abajo).
+  let currentBlacklistKey: string | null = null;
+  let currentInfoHash: string | null = null;
   function cleanupServerTorrent() {
     if (currentServerTorrentId) {
       opts.serverCleanup?.(currentServerTorrentId);
@@ -1448,6 +1461,8 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     const myGen = playerStore.generation; // capturado ANTES del fetch — equiv. `const myGen = ++_playerGen`
     isLoadingRd.value = true;
     loadingMessage.value = '🔍 Buscando en Real-Debrid...';
+    currentBlacklistKey = blacklistKey(params.id, params.type, params.season, params.episode);
+    currentInfoHash = null;
 
     let selected: SelectedStream;
     try {
@@ -1466,6 +1481,8 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
 
     if (playerStore.isStale(myGen)) return; // usuario cambió de fuente — ignorar este resultado (línea ~7827)
     clearMsgTimers();
+
+    currentInfoHash = selected.infoHash || null;
 
     const { url: streamUrl, rdId, isX265: streamIsX265, fallbackUrl, streamFilename: streamFn } = selected;
 
@@ -1877,6 +1894,23 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     }
   }
 
+  /**
+   * reportUnwatchable — botón "esta copia no sirve" del reproductor (2026-07-14,
+   * caso real "La muerte de Robin Hood": 3 copias cacheadas DISTINTAS, una sin
+   * ninguna etiqueta sospechosa, traían el mismo subtítulo lituano quemado — la
+   * detección por nombre de archivo no puede atrapar ese caso, solo el usuario
+   * viéndolo puede confirmarlo). Bloquea la copia activa para este título (no se
+   * volverá a elegir en este dispositivo) y cambia de reproductor de inmediato.
+   */
+  function reportUnwatchable() {
+    if (currentBlacklistKey && currentInfoHash) {
+      addToBlacklist(currentBlacklistKey, currentInfoHash);
+      console.warn('[RD] Copia reportada por el usuario — bloqueada para este título:', currentInfoHash);
+    }
+    opts.onToast('🔁 Copia descartada por reporte — cambiando de reproductor');
+    opts.onFallbackToNextSource();
+  }
+
   return {
     loadingMessage,
     isLoadingRd,
@@ -1891,5 +1925,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     tpipelineOffset,
     tpipelineSeeking,
     tpipelineSeekTo,
+    reportUnwatchable,
   };
 }

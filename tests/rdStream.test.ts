@@ -453,3 +453,71 @@ describe('rdStream — noTrustworthyCachedVersion (todas las copias cacheadas so
     expect(result.noTrustworthyCachedVersion).toBeUndefined();
   });
 });
+
+// ── isHashBlacklisted: excluye del pool las copias reportadas por el usuario ──
+describe('rdStream — isHashBlacklisted (reporte manual "esta copia no sirve")', () => {
+  const BAD_STREAM = {
+    name: '[RD+] Torrentio\n1080p',
+    title: 'The Death Of Robin Hood 2026 1080p WEBRip 💾 2.9 GB',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/TEST_TOKEN/5555555555555555555555555555555555555e/null/0/bad.mkv',
+    infoHash: '5555555555555555555555555555555555555e',
+    behaviorHints: { filename: 'The Death Of Robin Hood 2026 1080p WEBRip.mkv' },
+  };
+  const GOOD_STREAM = {
+    name: '[RD+] Torrentio\n1080p',
+    title: 'The Death Of Robin Hood 2026 1080p WEB-DL H264 💾 5 GB',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/TEST_TOKEN/6666666666666666666666666666666666666f/null/0/good.mkv',
+    infoHash: '6666666666666666666666666666666666666f',
+    behaviorHints: { filename: 'The.Death.Of.Robin.Hood.2026.1080p.WEB-DL.H264.mkv' },
+  };
+  const DOWNLOADS = [
+    { id: 'RD_BAD', download: 'https://x5.stream.real-debrid.com/d/BAD/bad.mkv', filename: 'The Death Of Robin Hood 2026 1080p WEBRip.mkv', filesize: 2_900_000_000 },
+    { id: 'RD_GOOD', download: 'https://x6.stream.real-debrid.com/d/GOOD/good.mkv', filename: 'The.Death.Of.Robin.Hood.2026.1080p.WEB-DL.H264.mkv', filesize: 5_000_000_000 },
+  ];
+
+  function buildResolverWithBlacklist(blacklisted: Set<string>) {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const respond = (json: unknown, finalUrl?: string) =>
+        ({ ok: true, status: 200, url: finalUrl ?? url, json: async () => json, text: async () => JSON.stringify(json) }) as unknown as Response;
+      if (/external_ids/.test(url)) return respond({ imdb_id: 'tt0000003' });
+      if (/torrentio\.strem\.fun\/realdebrid=/.test(url)) return respond({ streams: [BAD_STREAM, GOOD_STREAM] });
+      if (/resolve\/realdebrid\/TEST_TOKEN\/5555/.test(url)) return respond({}, DOWNLOADS[0].download);
+      if (/resolve\/realdebrid\/TEST_TOKEN\/6666/.test(url)) return respond({}, DOWNLOADS[1].download);
+      if (/\/downloads\?limit=500/.test(url)) return respond(DOWNLOADS);
+      throw new Error('Sin ruta mockeada para: ' + url);
+    });
+    const tmdbClient = createTmdbClient({ apiKey: 'TMDB_KEY', fetchImpl: fetchImpl as unknown as typeof fetch });
+    const torrentioClient = createTorrentioClient({ fetchImpl: fetchImpl as unknown as typeof fetch });
+    const rdClient = createRealDebridClient({ rdToken: 'TEST_TOKEN', fetchImpl: fetchImpl as unknown as typeof fetch });
+    return createRdStreamResolver({
+      rdToken: 'TEST_TOKEN',
+      tmdbClient,
+      torrentioClient,
+      rdClient,
+      isHashBlacklisted: (_key, hash) => blacklisted.has(hash),
+    });
+  }
+
+  test('sin nada bloqueado, elige el de mayor puntaje normalmente (WEB-DL H264)', async () => {
+    const resolver = buildResolverWithBlacklist(new Set());
+    const result = await resolver.getStream(1284465, 'movie');
+    expect(result.rdId).toBe('RD_GOOD');
+  });
+
+  test('bloqueando el OTRO candidato (el de mayor puntaje), se excluye ANTES de puntuar y gana el que queda', async () => {
+    const resolver = buildResolverWithBlacklist(new Set(['6666666666666666666666666666666666666f']));
+    const result = await resolver.getStream(1284465, 'movie');
+    expect(result.rdId).toBe('RD_BAD');
+    expect(result.streamFilename).not.toContain('WEB-DL'); // el bloqueado nunca aparece
+  });
+
+  test('si TODOS los candidatos están bloqueados, devuelve forma vacía (no revive la basura)', async () => {
+    const resolver = buildResolverWithBlacklist(
+      new Set(['5555555555555555555555555555555555555e', '6666666666666666666666666666666666666f'])
+    );
+    const result = await resolver.getStream(1284465, 'movie');
+    expect(result.url).toBeNull();
+    expect(result.rdId).toBeNull();
+  });
+});
