@@ -342,6 +342,24 @@ async function _shakaLoad(video: HTMLVideoElement, url: string, startTime?: numb
     bufferingGoal: 90,
     rebufferingGoal: 2,
     bufferBehind: isLowMemoryDevice() ? 10 : 30,
+    // ── CAUSA RAÍZ de las pausas en /t/ (2026-07-14, análisis profundo) ──────────
+    // Shaka descarga segmentos SECUENCIALMENTE por defecto (`segmentPrefetchLimit: 0`,
+    // confirmado en la doc oficial: "If 0, the segments will be fetched sequentially").
+    // Contra un CDN normal eso da igual — el archivo ya existe. Pero `/t/` de RD GENERA
+    // cada segmento BAJO DEMANDA: el ciclo real era pedir 1 → RD lo produce (esperando)
+    // → descargar → recién pedir el siguiente. **RD quedaba OCIOSO entre pedidos.**
+    //
+    // Evidencia medida (log real "Ghost Rider", mismo archivo, mismo servidor):
+    //   Pre-buffer (Shaka pide sin freno):        +35s en 20s = 1.75x
+    //   Durante reproducción (1 pedido a la vez): 0.42x  ← 4x más lento
+    // No era que RD fuera lento: era que lo dejábamos esperando entre requests.
+    //
+    // Con prefetch en paralelo, N segmentos se piden a la vez → la cola de generación
+    // de RD nunca queda vacía. 4 × ~5s de segmento = ~20s de pipeline siempre en vuelo,
+    // dentro del límite de 6 conexiones por host del navegador (deja margen para audio).
+    // Valor conservador a propósito: si hiciera falta más, subir de a poco midiendo el
+    // ratio del `Pre-buffer` en el log, NUNCA a ciegas.
+    segmentPrefetchLimit: 4,
   };
   p.configure({ streaming: streamingCfg });
   // BUG real encontrado (log: "El Padrino"): el camino server-side (rd-stream, DASH
@@ -624,6 +642,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   let seekStuckSince = 0; // desde cuándo un seek está trabado SIN buffer (far-seek a tramo no generado)
   let lastBufferAhead = 0; // buffer por delante en el tick anterior — detecta si la descarga PROGRESA aunque currentTime aún no arranque
   let lastNudgeAt = 0; // cuándo se mandó el último "empujón" (pingSeek sin reload) — cooldown
+  let lastTotalContent = 0; // posición+buffer del latido anterior — para medir el ritmo de RD
   // Plan B /t/ (2026-07-14, caso "Ghost Rider"): copias cacheadas alternativas del MISMO
   // título. Si la copia en reproducción resulta lenta de generar en RD (2 recuperaciones
   // de stall fallidas), se cambia a la siguiente de esta lista desde la misma posición —
@@ -715,6 +734,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     seekStuckSince = 0;
     lastBufferAhead = 0;
     lastNudgeAt = 0;
+    lastTotalContent = 0; // reset del medidor de ritmo (nueva peli/posición ≠ continuidad)
   }
 
   // ── Recuperaciones por camino (recargan el stream desde la posición actual) ──
@@ -897,11 +917,27 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // usuario haya pausado → la barra gris sigue cargando en pausa. Solo se saltea si hay
       // un reload de seek en curso (_tReloading ya está pingueando su propia posición).
       if (tpipelineState && !_tReloading && Date.now() - lastNudgeAt >= HEARTBEAT_MS) {
-        lastNudgeAt = Date.now();
+        const nowMs = Date.now();
+        const elapsedS = lastNudgeAt ? (nowMs - lastNudgeAt) / 1000 : 0;
+        lastNudgeAt = nowMs;
         const realPos = tpipelineOffset.value + video.currentTime;
+        // RITMO DE GENERACIÓN de RD (2026-07-14) — la métrica que importa de verdad:
+        // "contenido total disponible" = posición + buffer. Su derivada dividida por el
+        // tiempo transcurrido = a qué velocidad RD está produciendo video.
+        //   >1.0x → RD produce más rápido de lo que se consume (la barra gris se aleja)
+        //   <1.0x → déficit: el corte es cuestión de tiempo, por más buffer que haya
+        // Sirve para VERIFICAR con números el efecto de `segmentPrefetchLimit` (antes de
+        // ese fix, un caso real medido cayó a 0.42x durante la reproducción).
+        const totalContent = realPos + bufferAhead(video);
+        let rate = '';
+        if (elapsedS > 0 && lastTotalContent > 0) {
+          const r = (totalContent - lastTotalContent) / elapsedS;
+          rate = ` | RD genera: ${r.toFixed(2)}x${r < 1 && !video.paused ? ' ⚠️ DÉFICIT' : ''}`;
+        }
+        lastTotalContent = totalContent;
         // DIAG temporal (2026-07-12, a pedido: "tengo dudas si está avanzando en pausa") —
         // rastro visible para confirmar que el latido corre SIEMPRE, incluso en pausa.
-        console.warn(`[/t/] 💓 Latido → t=${realPos.toFixed(1)}s${video.paused ? ' (en PAUSA)' : ''} | buffer +${bufferAhead(video).toFixed(1)}s`);
+        console.warn(`[/t/] 💓 Latido → t=${realPos.toFixed(1)}s${video.paused ? ' (en PAUSA)' : ''} | buffer +${bufferAhead(video).toFixed(1)}s${rate}`);
         void pingSeek(tpipelineState.resolved.mediaId, realPos).catch(() => {});
       }
       // No interferir durante recuperación, cambio de audio, pausa o fin
