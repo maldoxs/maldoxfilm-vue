@@ -512,15 +512,24 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   let _tSeekTimer: ReturnType<typeof setTimeout> | null = null;
   let _tReloading = false;
 
-  // ── Limpieza del torrent que `rd-stream` creó en RD (ADR-006) ─────────────
-  // Se borra al cerrar el reproductor o al cambiar de título, para que no se
-  // acumulen torrents (error 21). Solo el camino server-side setea este id.
+  // ── Limpieza de torrents creados en RD (ADR-006) ──────────────────────────
+  // Se borran al cerrar el reproductor o al cambiar de título, para que no se
+  // acumulen torrents (error 21).
+  // Extendido 2026-08-02 (caso real: capturas de la cuenta del usuario con
+  // "Doctor Sleep (2019) DC" + 3 archivos extra pegados para siempre): además
+  // del torrent del camino legacy server-side, `resolveRawToRdId` (derivación
+  // de rdId null y CADA alternativa que prueba el Plan B) TAMBIÉN crea un
+  // torrent nuevo en la cuenta y nada lo borraba. Ahora se acumulan todos los
+  // ids creados en la sesión y se borran juntos.
   let currentServerTorrentId: string | null = null;
+  const sessionTorrentIds = new Set<string>();
   function cleanupServerTorrent() {
     if (currentServerTorrentId) {
       opts.serverCleanup?.(currentServerTorrentId);
       currentServerTorrentId = null;
     }
+    for (const id of sessionTorrentIds) opts.serverCleanup?.(id);
+    sessionTorrentIds.clear();
   }
 
   let activeMsgTimers: ReturnType<typeof setTimeout>[] = [];
@@ -883,6 +892,14 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   async function tryPlanBSwap(video: HTMLVideoElement, myGen: number): Promise<boolean> {
     if (planBSwapInFlight || !tpipelineAlts.length || !tpipelineState) return false;
     planBSwapInFlight = true;
+    // 2026-08-02 (caso real: "esta se paro" — el buffer cayó de 70s a 0 en ~12min
+    // y Plan B jamás reintentó): antes, una alternativa que fallaba al resolver se
+    // descartaba PARA SIEMPRE con `.shift()`. Si era la única, `tpipelineAlts`
+    // quedaba vacío y el disparador preventivo dejaba de intentar por el resto de
+    // la sesión — aunque el fallo fuera transitorio (el /downloads de RD tarda en
+    // aparecer). Ahora esas se guardan acá y vuelven a la cola al final para que
+    // un disparo POSTERIOR (con más tiempo de por medio) las reintente.
+    const retryLater: typeof tpipelineAlts = [];
     try {
       const pos = Math.max(video.currentTime, lastPlayingPos);
       const t = tpipelineOffset.value + pos;
@@ -898,10 +915,15 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
           // antes estas copias ni siquiera se ofrecían como alternativa.
           let altRdId = alt.rdId;
           if (!altRdId && alt.url) {
-            altRdId = (await resolveRawToRdId(alt.url)) ?? undefined;
+            const resolvedRaw = await resolveRawToRdId(alt.url);
+            altRdId = resolvedRaw.rdId ?? undefined;
+            // Siempre registrar el torrent creado (se use o no esta alternativa) —
+            // se borra al cerrar/cambiar título (ADR-006 extendido).
+            if (resolvedRaw.torrentId) sessionTorrentIds.add(resolvedRaw.torrentId);
             if (playerStore.isStale(myGen)) return false;
             if (!altRdId) {
-              console.warn('[/t/] Plan B: no se pudo resolver esta copia — probando la siguiente:', alt.filename);
+              console.warn('[/t/] Plan B: no se pudo resolver esta copia todavía — se reintentará más adelante:', alt.filename);
+              retryLater.push(alt);
               continue;
             }
           }
@@ -948,6 +970,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       console.warn('[/t/] Plan B: ninguna alternativa pasó la verificación — se sigue con la copia actual');
       return false;
     } finally {
+      if (retryLater.length) tpipelineAlts.push(...retryLater);
       planBSwapInFlight = false;
     }
   }
@@ -1796,7 +1819,11 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     if (!rdId && streamUrl) {
       try {
         loadingMessage.value = '🔍 Preparando streaming avanzado...';
-        const derivedId = await resolveRawToRdId(streamUrl);
+        const derivedRaw = await resolveRawToRdId(streamUrl);
+        // Registrar el torrent creado (ADR-006 extendido) para borrarlo al cerrar/
+        // cambiar título — antes quedaba pegado en la cuenta para siempre.
+        if (derivedRaw.torrentId) sessionTorrentIds.add(derivedRaw.torrentId);
+        const derivedId = derivedRaw.rdId;
         if (playerStore.isStale(myGen)) return;
         if (derivedId) {
           console.warn('[/t/] rdId derivado del link crudo:', derivedId, '→ intentando /t/ (AAC)');

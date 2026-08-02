@@ -41,16 +41,33 @@ export async function resolveTpipeline(rdId: string): Promise<TpipelineResolveRe
   return (await callFunction({ action: 'resolve', rdId })) as TpipelineResolveResult;
 }
 
+export interface ResolveRawResult {
+  rdId: string | null;
+  /**
+   * Id del torrent que RD creó en la cuenta al seguir el link de Torrentio
+   * (ver ADR-006 extendido, 2026-08-02). SIEMPRE hay que borrarlo cuando ya no
+   * se usa — si no, se acumulan en la cuenta para siempre (torrent + archivos
+   * "extra" del release, visible en real-debrid.com/torrents).
+   */
+  torrentId: string | null;
+}
+
 /**
  * resolveRawToRdId — para títulos sin rdId (no matcheados en /downloads): sigue
  * el link CRUDO de Torrentio server-side y devuelve el download id de RD (o null).
  * Con ese id se puede correr el pipeline `/t/` (AAC), igual que el reproductor
  * oficial de RD. Ver `handleResolveRaw` en netlify/functions/rd-tpipeline.js.
+ *
+ * IMPORTANTE: seguir este link SIEMPRE agrega un torrent nuevo a la cuenta RD
+ * (lo hace Torrentio server-side con nuestro token). El llamador es responsable
+ * de guardar `torrentId` y borrarlo con `serverCleanup` cuando el título se
+ * cierre o se descarte esa alternativa — si no, el torrent queda pegado.
  */
-export async function resolveRawToRdId(rawUrl: string): Promise<string | null> {
+export async function resolveRawToRdId(rawUrl: string): Promise<ResolveRawResult> {
   try {
     const data = (await callFunction({ action: 'resolveRaw', url: rawUrl })) as {
       rdId?: string | null;
+      torrentId?: string | null;
       finalUrl?: string;
       downloadsCount?: number;
       via?: string;
@@ -67,10 +84,10 @@ export async function resolveRawToRdId(rawUrl: string): Promise<string | null> {
         data.downloadsCount ?? '(no se pudo consultar)'
       );
     }
-    return data.rdId ?? null;
+    return { rdId: data.rdId ?? null, torrentId: data.torrentId ?? null };
   } catch (e) {
     console.warn('[/t/] resolveRaw falló (red/función):', (e as Error)?.message);
-    return null;
+    return { rdId: null, torrentId: null };
   }
 }
 

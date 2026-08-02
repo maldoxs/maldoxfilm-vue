@@ -106,6 +106,22 @@ async function handleResolve(rdId, token) {
 }
 
 /**
+ * fetchTorrentIds — snapshot de los ids de torrents en la cuenta (los más
+ * recientes primero). Usado por `handleResolveRaw` para detectar CUÁL torrent
+ * nuevo aparece al seguir un link de Torrentio (ver ADR-006 extendido abajo).
+ */
+async function fetchTorrentIds(token, limit = 15) {
+  try {
+    const res = await authFetch(`${RD_API_BASE}/torrents?limit=${limit}`, token);
+    if (!res.ok) return [];
+    const list = await res.json();
+    return Array.isArray(list) ? list.map((t) => t.id) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * handleResolveRaw — FASE 2/bis (ADR-009, caso "El Padrino"): dado el link CRUDO
  * de Torrentio (que ya trae el token embebido), lo sigue server-side hasta la URL
  * CDN de Real-Debrid y extrae el DOWNLOAD ID (`.../d/{ID}/...`). Con ese id, el
@@ -114,8 +130,19 @@ async function handleResolve(rdId, token) {
  * coincide → nuestro match daba rdId null → nunca intentábamos /t/ → caía al crudo
  * AC3 → mudo en desktop). Es exactamente lo que hace el reproductor oficial de RD.
  * NO lee el body (no descarga el video); solo necesita la URL final tras redirects.
+ *
+ * ADR-006 extendido (2026-08-02, caso real reportado por el usuario — capturas
+ * de su cuenta RD mostrando "Doctor Sleep (2019) DC" + 3 archivos "extra"
+ * generados): seguir este link SIEMPRE agrega un torrent nuevo a la cuenta RD,
+ * pero nada lo borraba nunca — cada alternativa que probaba el Plan B (la usara
+ * o no) quedaba pegada para siempre en /torrents. Ahora se detecta el id del
+ * torrent nuevo (snapshot antes/después) y se devuelve para que el cliente lo
+ * registre y lo borre vía `serverCleanup`/`rd-cleanup` al cerrar o descartar esa
+ * alternativa — igual que ya se hacía con el torrent del camino legacy.
  */
 async function handleResolveRaw(rawUrl, token) {
+  const idsBefore = await fetchTorrentIds(token);
+
   // 1. Seguir el link crudo hasta la URL final. NO leemos el body (no descargamos
   //    el video): solo necesitamos `res.url` (la URL tras los redirects).
   let finalUrl = '';
@@ -130,12 +157,19 @@ async function handleResolveRaw(rawUrl, token) {
   } catch {
     /* noop — sin URL → el cliente sigue con su fallback */
   }
-  if (!finalUrl) return { rdId: null, finalUrl: '' };
+  if (!finalUrl) return { rdId: null, torrentId: null, finalUrl: '' };
+
+  const findNewTorrentId = async () => {
+    const idsAfter = await fetchTorrentIds(token);
+    return idsAfter.find((id) => !idsBefore.includes(id)) ?? null;
+  };
 
   // Caso A: por si el redirect fuera directo a la página de streaming, el id
   // (RYDUFD5OWPH...) ya viene en la URL y ES el que usa /streaming-{id}.
   const streamMatch = finalUrl.match(/streaming-([A-Za-z0-9]+)/);
-  if (streamMatch) return { rdId: streamMatch[1], via: 'streaming-url' };
+  if (streamMatch) {
+    return { rdId: streamMatch[1], torrentId: await findNewTorrentId(), via: 'streaming-url' };
+  }
 
   // Caso B (lo normal): redirige al CDN `.../d/{token}/...`. OJO: ese {token} NO
   // es el `id` que necesita /streaming-{id} (son distintos campos en RD). El id
@@ -156,7 +190,9 @@ async function handleResolveRaw(rawUrl, token) {
         if (Array.isArray(downloads)) {
           lastCount = downloads.length;
           const match = downloads.find((d) => d.download && norm(d.download) === norm(finalUrl));
-          if (match && match.id) return { rdId: match.id, via: 'downloads-match', attempt };
+          if (match && match.id) {
+            return { rdId: match.id, torrentId: await findNewTorrentId(), via: 'downloads-match', attempt };
+          }
         }
       }
     } catch {
@@ -164,10 +200,12 @@ async function handleResolveRaw(rawUrl, token) {
     }
   }
 
-  // Sin id → devolver la URL (token redactado) + contexto para diagnóstico REAL en el
-  // cliente (antes esto se descartaba y el fallo quedaba sin explicación en el log).
+  // Sin id de descarga → el torrent puede haberse agregado igual (a veces RD tarda
+  // más de lo que esperamos los 3 reintentos) — se devuelve `torrentId` también acá
+  // para poder limpiarlo aunque esta alternativa se descarte.
   return {
     rdId: null,
+    torrentId: await findNewTorrentId(),
     finalUrl: finalUrl.replace(/(auth_token|realdebrid)=[^&/]+/gi, '$1=***'),
     downloadsCount: lastCount,
   };
