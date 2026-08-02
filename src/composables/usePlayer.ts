@@ -113,6 +113,11 @@ const STALL_BACKOFF_MS = 8000; // por cada recuperación previa, esperar este ex
 // Extended vs Theatrical suelen diferir 10-20+ minutos. 180s da margen de sobra sin
 // dejar pasar un corte distinto.
 const CUT_DURATION_TOLERANCE_SEC = 180;
+
+// Disparo preventivo del Plan B: cuántos latidos (de HEARTBEAT_MS c/u) promediar antes
+// de considerar el déficit "sostenido" (no un bache aislado), y el umbral del promedio.
+const PLAN_B_RATE_WINDOW = 5; // 5 × 6s = ~30s de historial
+const PLAN_B_RATE_THRESHOLD = 0.95; // promedio bajo esto, sostenido → cambiar antes de que se note
 const MAX_STALL_RECOVERIES = 4; // recuperaciones sin éxito → cambiar de fuente (con backoff, ~más paciencia)
 
 // ── LATIDO (heartbeat) continuo de RD (2026-07-12) ───────────────────────────
@@ -654,6 +659,15 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   // de stall fallidas), se cambia a la siguiente de esta lista desde la misma posición —
   // insistir con una copia que genera a <1x no tiene ninguna chance de destrabarse sola.
   let tpipelineAlts: { rdId: string; filename: string }[] = [];
+  // Disparo PREVENTIVO del Plan B (2026-07-14, a pedido: "no quiero esperar a que se
+  // trabe, quiero una solución definitiva"). Evidencia real (log "Ghost Rider"): el
+  // ritmo sostenido de generación de RD se mide en cada latido — cuando el promedio de
+  // los últimos ~30s (5 latidos de 6s) queda bajo 0.95x mientras se reproduce (no en
+  // pausa), el corte es cuestión de tiempo aunque el buffer todavía aguante. En vez de
+  // esperar a que se note (2 recuperaciones fallidas), se cambia de copia ANTES.
+  let rateHistory: number[] = [];
+  let planBSwapInFlight = false; // evita que el disparo preventivo y el reactivo choquen
+  let planBSelected: SelectedStream | null = null; // `selected` de tryTpipeline, para re-avisar a subtítulos tras el swap
 
   // ── Instrumentación (#3) — log compacto de los eventos críticos del <video> con
   // tiempo, buffer por delante, readyState/networkState. Sirve para capturar EXACTO
@@ -741,6 +755,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     lastBufferAhead = 0;
     lastNudgeAt = 0;
     lastTotalContent = 0; // reset del medidor de ritmo (nueva peli/posición ≠ continuidad)
+    rateHistory = [];
   }
 
   // ── Recuperaciones por camino (recargan el stream desde la posición actual) ──
@@ -847,6 +862,75 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   }
 
   /**
+   * tryPlanBSwap — cambia a la siguiente copia cacheada de `tpipelineAlts` (blindada
+   * por corte/duración — ver CUT_DURATION_TOLERANCE_SEC) desde la posición actual.
+   * Reusada por DOS disparadores (2026-07-14, a pedido: "quiero una solución
+   * definitiva, no esperar a que se trabe"):
+   *   1. REACTIVO: 2 recuperaciones de stall fallidas confirmadas (código previo).
+   *   2. PREVENTIVO: el ritmo sostenido de RD (medido en cada latido) cae bajo
+   *      `PLAN_B_RATE_THRESHOLD` durante `PLAN_B_RATE_WINDOW` latidos seguidos — se
+   *      cambia ANTES de que el buffer se agote y se note el corte.
+   * `planBSwapInFlight` evita que ambos disparadores choquen si se activan a la vez.
+   */
+  async function tryPlanBSwap(video: HTMLVideoElement, myGen: number): Promise<boolean> {
+    if (planBSwapInFlight || !tpipelineAlts.length || !tpipelineState) return false;
+    planBSwapInFlight = true;
+    try {
+      const pos = Math.max(video.currentTime, lastPlayingPos);
+      const t = tpipelineOffset.value + pos;
+      const originalDuration = tpipelineDuration.value;
+      while (tpipelineAlts.length) {
+        const alt = tpipelineAlts.shift()!;
+        try {
+          console.warn('[/t/] Plan B: probando otra copia cacheada:', alt.filename);
+          opts.onToast('🔄 Cambiando a una copia más rápida...');
+          const resolved2 = await resolveTpipeline(alt.rdId);
+          if (playerStore.isStale(myGen)) return false;
+          // BLINDAJE de duración (2026-07-14, a pedido: "y si la otra copia no tiene
+          // el mismo corte?"): el nombre ya se filtró en rdStream.ts (cutMarker),
+          // pero la duración REAL solo se conoce acá. Si difiere de la copia actual
+          // más de lo esperable entre re-codificaciones del MISMO corte, se descarta
+          // esta alternativa puntual y se prueba la siguiente — nunca se acepta a ciegas.
+          if (originalDuration > 0 && Math.abs(resolved2.duration - originalDuration) > CUT_DURATION_TOLERANCE_SEC) {
+            console.warn(
+              `[/t/] Plan B descartado — duración muy distinta (posible otro corte): ${alt.filename} | nueva: ${resolved2.duration.toFixed(0)}s vs actual: ${originalDuration.toFixed(0)}s`
+            );
+            continue;
+          }
+          const audio2 = pickBestAudio(resolved2.audioTracks);
+          const isSpanish2 = /lat|spa|es/i.test(audio2);
+          tpipelineState = { resolved: resolved2, audio: audio2, myGen };
+          tpipelineDuration.value = resolved2.duration;
+          activeTrack.value = audio2;
+          if (isSpanish2) spanishTrack.value = audio2;
+          dashBaseUrl.value = `https://${resolved2.cdn}/t/${resolved2.fullPathId}/`;
+          await tpipelineReloadMpd(video, t > 3 ? t : 1);
+          stallRecoveries = 0;
+          rateHistory = []; // copia nueva: el historial de ritmo de la vieja ya no aplica
+          console.warn(`[/t/] ✅ Plan B activo — ${resolved2.filename} | audio: ${audio2} | CDN: ${resolved2.cdn}`);
+          // BUG real encontrado (2026-07-14: "a veces se atrasa, a veces se adelanta"):
+          // re-avisar al sistema de subtítulos con el filename NUEVO — si no, se queda
+          // con el .srt/offset de la copia vieja aplicado sobre un archivo distinto.
+          if (planBSelected) {
+            opts.onStreamReady?.({
+              selected: { ...planBSelected, streamFilename: alt.filename, infoHash: undefined },
+              hasNativeSpanish: isSpanish2,
+              spanishTrack: isSpanish2 ? audio2 : null,
+            });
+          }
+          return true;
+        } catch (e) {
+          console.warn('[/t/] Plan B falló con esta copia — probando la siguiente:', e);
+        }
+      }
+      console.warn('[/t/] Plan B: ninguna alternativa pasó la verificación — se sigue con la copia actual');
+      return false;
+    } finally {
+      planBSwapInFlight = false;
+    }
+  }
+
+  /**
    * startStallMonitor — vigila que `currentTime` avance en CUALQUIER camino. Si se traba
    * (en play, sin avanzar) recupera vía `recover` (recarga desde la posición). Tras un seek
    * usa un umbral MÁS CORTO (`STALL_RECOVER_SEEK_MS`): ahí es donde algunas pelis se "pegaban".
@@ -936,15 +1020,36 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         // ese fix, un caso real medido cayó a 0.42x durante la reproducción).
         const totalContent = realPos + bufferAhead(video);
         let rate = '';
+        let rNum: number | null = null;
         if (elapsedS > 0 && lastTotalContent > 0) {
-          const r = (totalContent - lastTotalContent) / elapsedS;
-          rate = ` | RD genera: ${r.toFixed(2)}x${r < 1 && !video.paused ? ' ⚠️ DÉFICIT' : ''}`;
+          rNum = (totalContent - lastTotalContent) / elapsedS;
+          rate = ` | RD genera: ${rNum.toFixed(2)}x${rNum < 1 && !video.paused ? ' ⚠️ DÉFICIT' : ''}`;
         }
         lastTotalContent = totalContent;
         // DIAG temporal (2026-07-12, a pedido: "tengo dudas si está avanzando en pausa") —
         // rastro visible para confirmar que el latido corre SIEMPRE, incluso en pausa.
         console.warn(`[/t/] 💓 Latido → t=${realPos.toFixed(1)}s${video.paused ? ' (en PAUSA)' : ''} | buffer +${bufferAhead(video).toFixed(1)}s${rate}`);
         void pingSeek(tpipelineState.resolved.mediaId, realPos).catch(() => {});
+
+        // ── PLAN B PREVENTIVO (2026-07-14, a pedido: "quiero una solución definitiva,
+        // no esperar a que se trabe") ─────────────────────────────────────────────
+        // Solo cuenta el ritmo mientras se REPRODUCE de verdad (no en pausa, no en
+        // medio de una recuperación/seek) — en pausa el consumo es cero y el número
+        // no refleja la velocidad real de RD. Con `PLAN_B_RATE_WINDOW` latidos de
+        // déficit SOSTENIDO (no un bache aislado), se cambia de copia ANTES de que
+        // el buffer se agote — evidencia real: Ghost Rider promedió 0.94x sostenido
+        // y terminó pegándose igual, pese a tener 40s de colchón al arrancar.
+        if (rNum !== null && !video.paused && !stallRecovering && !switchingAudio) {
+          rateHistory.push(rNum);
+          if (rateHistory.length > PLAN_B_RATE_WINDOW) rateHistory.shift();
+          if (rateHistory.length === PLAN_B_RATE_WINDOW && tpipelineAlts.length && !planBSwapInFlight) {
+            const avg = rateHistory.reduce((a, b) => a + b, 0) / rateHistory.length;
+            if (avg < PLAN_B_RATE_THRESHOLD) {
+              console.warn(`[/t/] Plan B PREVENTIVO — déficit sostenido (promedio ${avg.toFixed(2)}x en ${PLAN_B_RATE_WINDOW} latidos) → cambiando antes de que se note`);
+              void tryPlanBSwap(video, myGen);
+            }
+          }
+        }
       }
       // No interferir durante recuperación, cambio de audio, pausa o fin
       // (una pausa normal NO debe disparar recuperación).
@@ -1413,73 +1518,19 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
 
       // Plan B: precargar la lista de copias alternativas cacheadas (armada en rdStream).
       tpipelineAlts = (selected.altCachedCandidates ?? []).filter((a) => a.rdId !== rdId);
+      planBSelected = selected; // para que tryPlanBSwap pueda re-avisar a subtítulos tras un swap
+      rateHistory = []; // arranque limpio del medidor de ritmo para este título
 
       startStallMonitor(video, myGen, async (v) => {
         if (!tpipelineState) throw new Error('sin /t/ state');
+        // ── PLAN B REACTIVO (2026-07-14, caso real "Ghost Rider"): a la 2da
+        // recuperación de stall confirmada sobre la MISMA copia, cambiar a la
+        // siguiente alternativa cacheada en vez de insistir con una copia que ya
+        // demostró generar <1x. Si no hay a qué cambiarse (o todas fallan), cae al
+        // reload clásico de la copia actual (comportamiento previo intacto).
+        if (stallRecoveries >= 2 && (await tryPlanBSwap(v, myGen))) return;
         const pos = Math.max(v.currentTime, lastPlayingPos);
         const t = tpipelineOffset.value + pos;
-        // ── PLAN B (2026-07-14, caso real "Ghost Rider"): a la 2da recuperación sobre la
-        // MISMA copia, la lentitud está confirmada (RD la genera a <1x — ej. 0.42x medido
-        // en los latidos) → recargarla de nuevo no tiene chance. Cambiar a la siguiente
-        // copia cacheada desde la misma posición: es un archivo DISTINTO en RD, su
-        // velocidad de generación es independiente. Si el cambio falla, se cae al reload
-        // clásico de la copia actual (comportamiento previo intacto).
-        if (stallRecoveries >= 2 && tpipelineAlts.length) {
-          // BLINDAJE de duración (2026-07-14, a pedido del usuario: "y si la otra
-          // copia no tiene la misma resolución/corte?"). El filtro por nombre ya
-          // corrió en rdStream.ts (mismo `cutMarker`), pero el nombre puede mentir
-          // o venir incompleto — la DURACIÓN REAL solo se conoce recién acá, cuando
-          // RD resuelve el archivo. Se compara contra la duración de la copia
-          // ACTUAL (capturada antes de tocar nada): si difieren más de 3 minutos,
-          // es señal fuerte de corte distinto (Extended vs Theatrical suelen diferir
-          // 10-20+ min; una re-codificación del MISMO corte varía solo segundos) →
-          // se descarta esa alternativa puntual y se prueba la siguiente, en vez de
-          // aceptar a ciegas o rendirse con la primera que falle la verificación.
-          const originalDuration = tpipelineDuration.value;
-          while (tpipelineAlts.length) {
-            const alt = tpipelineAlts.shift()!;
-            try {
-              console.warn('[/t/] Copia lenta confirmada — Plan B: probando otra copia cacheada:', alt.filename);
-              opts.onToast('🔄 Esta copia viene lenta — probando otra versión...');
-              const resolved2 = await resolveTpipeline(alt.rdId);
-              if (playerStore.isStale(myGen)) return;
-              if (originalDuration > 0 && Math.abs(resolved2.duration - originalDuration) > CUT_DURATION_TOLERANCE_SEC) {
-                console.warn(
-                  `[/t/] Plan B descartado — duración muy distinta (posible otro corte): ${alt.filename} | nueva: ${resolved2.duration.toFixed(0)}s vs actual: ${originalDuration.toFixed(0)}s`
-                );
-                continue; // probar la siguiente alternativa de la cola
-              }
-              const audio2 = pickBestAudio(resolved2.audioTracks);
-              const isSpanish2 = /lat|spa|es/i.test(audio2);
-              tpipelineState = { resolved: resolved2, audio: audio2, myGen };
-              tpipelineDuration.value = resolved2.duration;
-              activeTrack.value = audio2;
-              if (isSpanish2) spanishTrack.value = audio2;
-              dashBaseUrl.value = `https://${resolved2.cdn}/t/${resolved2.fullPathId}/`;
-              await tpipelineReloadMpd(v, t > 3 ? t : 1);
-              // Copia nueva arrancando: darle presupuesto fresco de recuperaciones.
-              stallRecoveries = 0;
-              console.warn(`[/t/] ✅ Plan B activo — ${resolved2.filename} | audio: ${audio2} | CDN: ${resolved2.cdn}`);
-              // BUG real encontrado (2026-07-14, a pedido del usuario: "a veces se
-              // atrasa, a veces se adelanta"): el Plan B cambia el VIDEO a otra copia
-              // pero nunca avisaba al sistema de subtítulos — el .srt seguía siendo
-              // el buscado/ajustado para la copia ORIGINAL. Re-disparar
-              // `onStreamReady` con el filename de la copia NUEVA fuerza una
-              // re-búsqueda (y pasa de nuevo por la verificación de duración de
-              // subtítulo agregada hoy) contra el archivo que realmente se está
-              // reproduciendo ahora.
-              opts.onStreamReady?.({
-                selected: { ...selected, streamFilename: alt.filename, infoHash: undefined },
-                hasNativeSpanish: isSpanish2,
-                spanishTrack: isSpanish2 ? audio2 : null,
-              });
-              return;
-            } catch (e) {
-              console.warn('[/t/] Plan B falló con esta copia — probando la siguiente:', e);
-            }
-          }
-          console.warn('[/t/] Plan B: ninguna alternativa pasó la verificación — se sigue con la copia actual');
-        }
         await tpipelineReloadMpd(v, t > 3 ? t : 1);
       });
 
@@ -1525,6 +1576,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     tpipelineOffset.value = 0;
     tpipelineSeeking.value = false;
     tpipelineAlts = []; // Plan B: lista fresca por título (no arrastrar copias de otro)
+    planBSelected = null;
     // Reset también dashBaseUrl: solo lo setean los caminos DASH (/t/ y transcode legacy).
     // Así `!isTpipeline && !dashBaseUrl` identifica de forma FIABLE el Direct Play (formato
     // correcto, fluido) — sin arrastrar un valor viejo de un título anterior que era /t/.
@@ -1966,6 +2018,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     tpipelineState = null;
     tpipelineOffset.value = 0;
     tpipelineAlts = [];
+    planBSelected = null;
     if (_tSeekTimer) { clearTimeout(_tSeekTimer); _tSeekTimer = null; }
     _tReloading = false;
     _shakaDestroy();
