@@ -851,3 +851,16 @@ describe('streamSelector — cutMarker (Extended/Director\'s Cut/Unrated vs Thea
     expect(cutMarker(a)).toBe(cutMarker(b));
   });
 });
+
+// ── cutMarker debe reconocer "DC" como abreviación de Director's Cut (bug real) ──
+describe('streamSelector — cutMarker reconoce "DC" (caso real "Doctor Sleep")', () => {
+  test('"DC" en el nombre se clasifica como directors, no theatrical por defecto', () => {
+    expect(cutMarker(stream({ title: 'Doctor Sleep (2019) DC (1080p BluRay x265 10bit Tigole)' }))).toBe('directors');
+    expect(cutMarker(stream({ title: 'Doctor Sleep (2019) DC + EXTRAS (1080p x265 10bit)' }))).toBe('directors');
+    expect(cutMarker(stream({ title: 'Doctor.Sleep.2019.DC.1080p.BluRay.x264-AAA' }))).toBe('directors');
+  });
+
+  test('no genera falso positivo por sustrings parecidos', () => {
+    expect(cutMarker(stream({ title: 'Movie 2020 1080p HDR10+ DDP5.1' }))).toBe('theatrical');
+  });
+});

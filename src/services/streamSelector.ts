@@ -84,7 +84,11 @@ export type CutMarker = 'extended' | 'directors' | 'unrated' | 'theatrical';
 export function cutMarker(s: TorrentioStream): CutMarker {
   const t = streamInfo(s);
   if (/\bextended\b/i.test(t)) return 'extended';
-  if (/director'?s?[\s.]*cut/i.test(t)) return 'directors';
+  // "DC" es abreviación MUY común de "Director's Cut" en releases (bug real
+  // encontrado 2026-07-14, caso "Doctor Sleep (2019) DC (...) Tigole" — sin esto,
+  // esa copia se clasificaba como 'theatrical' por defecto, arriesgando mezclarla
+  // con copias Theatrical de verdad en el Plan B).
+  if (/director'?s?[\s.]*cut|\bdc\b/i.test(t)) return 'directors';
   if (/\bunrated\b/i.test(t)) return 'unrated';
   return 'theatrical';
 }
