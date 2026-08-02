@@ -535,3 +535,59 @@ describe('rdStream — gate de idioma original (caso real "Kraken", noruega)', (
     expect(result.rdId).toBe('RD_NO');
   });
 });
+
+// ── Plan B: el filtro de altCachedCandidates respeta el CORTE/edición (caso real "Ghost Rider") ──
+describe('rdStream — Plan B respeta cutMarker (no ofrece Extended↔Theatrical como alternativa)', () => {
+  const EXTENDED_A = {
+    name: '[RD+] Torrentio\n720p',
+    title: 'Ghost Rider 2007 Extended Cut BluRay 720p AC3 5.1 - Waldek 💾 4.4 GB',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/TEST_TOKEN/9999999999999999999999999999999999999a/null/0/ext.mkv',
+    infoHash: '9999999999999999999999999999999999999a',
+    behaviorHints: { filename: 'Ghost Rider 2007 Extended Cut BluRay 720p AC3 5.1 - Waldek.mkv' },
+  };
+  const THEATRICAL_B = {
+    name: '[RD+] Torrentio\n1080p',
+    title: 'Ghost Rider 2007 1080p BluRay x264 DTS 💾 8 GB',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/TEST_TOKEN/8888888888888888888888888888888888888b/null/0/theat.mkv',
+    infoHash: '8888888888888888888888888888888888888b',
+    behaviorHints: { filename: 'Ghost.Rider.2007.1080p.BluRay.x264.DTS.mkv' },
+  };
+  const EXTENDED_C = {
+    name: '[RD+] Torrentio\n720p',
+    title: 'Ghost Rider 2007 Extended Cut WEBRip 720p AAC 💾 2.1 GB',
+    url: 'https://torrentio.strem.fun/resolve/realdebrid/TEST_TOKEN/7777777777777777777777777777777777777c/null/0/ext2.mkv',
+    infoHash: '7777777777777777777777777777777777777c',
+    behaviorHints: { filename: 'Ghost.Rider.2007.Extended.Cut.WEBRip.720p.AAC.mkv' },
+  };
+  const DOWNLOADS = [
+    { id: 'RD_EXT_A', download: 'https://x1.stream.real-debrid.com/d/A/ext.mkv', filename: 'Ghost Rider 2007 Extended Cut BluRay 720p AC3 5.1 - Waldek.mkv', filesize: 4_400_000_000 },
+    { id: 'RD_THEAT_B', download: 'https://x2.stream.real-debrid.com/d/B/theat.mkv', filename: 'Ghost.Rider.2007.1080p.BluRay.x264.DTS.mkv', filesize: 8_000_000_000 },
+    { id: 'RD_EXT_C', download: 'https://x3.stream.real-debrid.com/d/C/ext2.mkv', filename: 'Ghost.Rider.2007.Extended.Cut.WEBRip.720p.AAC.mkv', filesize: 2_100_000_000 },
+  ];
+
+  test('la Theatrical (sin marcador Extended) NUNCA aparece como alternativa de una Extended Cut', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const respond = (json: unknown, finalUrl?: string) =>
+        ({ ok: true, status: 200, url: finalUrl ?? url, json: async () => json, text: async () => JSON.stringify(json) }) as unknown as Response;
+      if (/external_ids/.test(url)) return respond({ imdb_id: 'tt0259324' });
+      if (/torrentio\.strem\.fun\/realdebrid=/.test(url)) return respond({ streams: [EXTENDED_A, THEATRICAL_B, EXTENDED_C] });
+      if (/resolve\/realdebrid\/TEST_TOKEN\/9999/.test(url)) return respond({}, DOWNLOADS[0].download);
+      if (/\/downloads\?limit=500/.test(url)) return respond(DOWNLOADS);
+      throw new Error('Sin ruta mockeada para: ' + url);
+    });
+    const tmdbClient = createTmdbClient({ apiKey: 'TMDB_KEY', fetchImpl: fetchImpl as unknown as typeof fetch });
+    const torrentioClient = createTorrentioClient({ fetchImpl: fetchImpl as unknown as typeof fetch });
+    const rdClient = createRealDebridClient({ rdToken: 'TEST_TOKEN', fetchImpl: fetchImpl as unknown as typeof fetch });
+    const resolver = createRdStreamResolver({ rdToken: 'TEST_TOKEN', tmdbClient, torrentioClient, rdClient });
+    const result = await resolver.getStream(1481, 'movie');
+
+    // Cualquiera de las dos Extended puede ganar el scoring (no es lo que se prueba
+    // acá) — lo que importa es que la ALTERNATIVA sea la OTRA Extended, nunca la
+    // Theatrical, sin importar cuál haya ganado.
+    expect(['RD_EXT_A', 'RD_EXT_C']).toContain(result.rdId);
+    const altIds = (result.altCachedCandidates ?? []).map((a) => a.rdId);
+    expect(altIds).not.toContain('RD_THEAT_B'); // la Theatrical NUNCA es alternativa
+    expect(altIds).toEqual(result.rdId === 'RD_EXT_A' ? ['RD_EXT_C'] : ['RD_EXT_A']);
+  });
+});

@@ -107,6 +107,12 @@ const SEEK_FREEZE_FAR_MS = 5000; // seek lejano → volver rápido (no se va a p
 // (NOTA: ya NO recargamos el manifest en el seek — RD no expone un mecanismo de seek
 // replicable desde la API pública; recargar mataba el player. El seek lo maneja Shaka nativo.)
 const STALL_BACKOFF_MS = 8000; // por cada recuperación previa, esperar este extra (dar tiempo al transcoder)
+
+// Plan B /t/ (2026-07-14): margen de duración para aceptar una copia alternativa
+// como "el mismo corte" — una re-codificación del MISMO corte varía solo segundos;
+// Extended vs Theatrical suelen diferir 10-20+ minutos. 180s da margen de sobra sin
+// dejar pasar un corte distinto.
+const CUT_DURATION_TOLERANCE_SEC = 180;
 const MAX_STALL_RECOVERIES = 4; // recuperaciones sin éxito → cambiar de fuente (con backoff, ~más paciencia)
 
 // ── LATIDO (heartbeat) continuo de RD (2026-07-12) ───────────────────────────
@@ -1419,40 +1425,60 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         // velocidad de generación es independiente. Si el cambio falla, se cae al reload
         // clásico de la copia actual (comportamiento previo intacto).
         if (stallRecoveries >= 2 && tpipelineAlts.length) {
-          const alt = tpipelineAlts.shift()!;
-          try {
-            console.warn('[/t/] Copia lenta confirmada — Plan B: cambiando a otra copia cacheada:', alt.filename);
-            opts.onToast('🔄 Esta copia viene lenta — probando otra versión...');
-            const resolved2 = await resolveTpipeline(alt.rdId);
-            if (playerStore.isStale(myGen)) return;
-            const audio2 = pickBestAudio(resolved2.audioTracks);
-            const isSpanish2 = /lat|spa|es/i.test(audio2);
-            tpipelineState = { resolved: resolved2, audio: audio2, myGen };
-            tpipelineDuration.value = resolved2.duration;
-            activeTrack.value = audio2;
-            if (isSpanish2) spanishTrack.value = audio2;
-            dashBaseUrl.value = `https://${resolved2.cdn}/t/${resolved2.fullPathId}/`;
-            await tpipelineReloadMpd(v, t > 3 ? t : 1);
-            // Copia nueva arrancando: darle presupuesto fresco de recuperaciones.
-            stallRecoveries = 0;
-            console.warn(`[/t/] ✅ Plan B activo — ${resolved2.filename} | audio: ${audio2} | CDN: ${resolved2.cdn}`);
-            // BUG real encontrado (2026-07-14, a pedido del usuario: "a veces se
-            // atrasa, a veces se adelanta"): el Plan B cambia el VIDEO a otra copia
-            // (corte/intro potencialmente distinto) pero nunca avisaba al sistema
-            // de subtítulos — el .srt seguía siendo el buscado/ajustado para la
-            // copia ORIGINAL. Re-disparar `onStreamReady` con el filename de la
-            // copia NUEVA fuerza una re-búsqueda (y pasa de nuevo por la
-            // verificación de duración agregada hoy) contra el archivo que
-            // realmente se está reproduciendo ahora.
-            opts.onStreamReady?.({
-              selected: { ...selected, streamFilename: alt.filename, infoHash: undefined },
-              hasNativeSpanish: isSpanish2,
-              spanishTrack: isSpanish2 ? audio2 : null,
-            });
-            return;
-          } catch (e) {
-            console.warn('[/t/] Plan B falló — se sigue con la copia actual:', e);
+          // BLINDAJE de duración (2026-07-14, a pedido del usuario: "y si la otra
+          // copia no tiene la misma resolución/corte?"). El filtro por nombre ya
+          // corrió en rdStream.ts (mismo `cutMarker`), pero el nombre puede mentir
+          // o venir incompleto — la DURACIÓN REAL solo se conoce recién acá, cuando
+          // RD resuelve el archivo. Se compara contra la duración de la copia
+          // ACTUAL (capturada antes de tocar nada): si difieren más de 3 minutos,
+          // es señal fuerte de corte distinto (Extended vs Theatrical suelen diferir
+          // 10-20+ min; una re-codificación del MISMO corte varía solo segundos) →
+          // se descarta esa alternativa puntual y se prueba la siguiente, en vez de
+          // aceptar a ciegas o rendirse con la primera que falle la verificación.
+          const originalDuration = tpipelineDuration.value;
+          while (tpipelineAlts.length) {
+            const alt = tpipelineAlts.shift()!;
+            try {
+              console.warn('[/t/] Copia lenta confirmada — Plan B: probando otra copia cacheada:', alt.filename);
+              opts.onToast('🔄 Esta copia viene lenta — probando otra versión...');
+              const resolved2 = await resolveTpipeline(alt.rdId);
+              if (playerStore.isStale(myGen)) return;
+              if (originalDuration > 0 && Math.abs(resolved2.duration - originalDuration) > CUT_DURATION_TOLERANCE_SEC) {
+                console.warn(
+                  `[/t/] Plan B descartado — duración muy distinta (posible otro corte): ${alt.filename} | nueva: ${resolved2.duration.toFixed(0)}s vs actual: ${originalDuration.toFixed(0)}s`
+                );
+                continue; // probar la siguiente alternativa de la cola
+              }
+              const audio2 = pickBestAudio(resolved2.audioTracks);
+              const isSpanish2 = /lat|spa|es/i.test(audio2);
+              tpipelineState = { resolved: resolved2, audio: audio2, myGen };
+              tpipelineDuration.value = resolved2.duration;
+              activeTrack.value = audio2;
+              if (isSpanish2) spanishTrack.value = audio2;
+              dashBaseUrl.value = `https://${resolved2.cdn}/t/${resolved2.fullPathId}/`;
+              await tpipelineReloadMpd(v, t > 3 ? t : 1);
+              // Copia nueva arrancando: darle presupuesto fresco de recuperaciones.
+              stallRecoveries = 0;
+              console.warn(`[/t/] ✅ Plan B activo — ${resolved2.filename} | audio: ${audio2} | CDN: ${resolved2.cdn}`);
+              // BUG real encontrado (2026-07-14, a pedido del usuario: "a veces se
+              // atrasa, a veces se adelanta"): el Plan B cambia el VIDEO a otra copia
+              // pero nunca avisaba al sistema de subtítulos — el .srt seguía siendo
+              // el buscado/ajustado para la copia ORIGINAL. Re-disparar
+              // `onStreamReady` con el filename de la copia NUEVA fuerza una
+              // re-búsqueda (y pasa de nuevo por la verificación de duración de
+              // subtítulo agregada hoy) contra el archivo que realmente se está
+              // reproduciendo ahora.
+              opts.onStreamReady?.({
+                selected: { ...selected, streamFilename: alt.filename, infoHash: undefined },
+                hasNativeSpanish: isSpanish2,
+                spanishTrack: isSpanish2 ? audio2 : null,
+              });
+              return;
+            } catch (e) {
+              console.warn('[/t/] Plan B falló con esta copia — probando la siguiente:', e);
+            }
           }
+          console.warn('[/t/] Plan B: ninguna alternativa pasó la verificación — se sigue con la copia actual');
         }
         await tpipelineReloadMpd(v, t > 3 ? t : 1);
       });

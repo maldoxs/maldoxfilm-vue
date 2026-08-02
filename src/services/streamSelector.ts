@@ -71,6 +71,25 @@ export function audioLangRank(s: TorrentioStream): number {
 }
 
 /**
+ * cutMarker — detecta la EDICIÓN del release por su nombre (Extended/Director's
+ * Cut/Unrated vs Theatrical/sin marcar). Necesario para el blindaje del Plan B
+ * de `/t/` (2026-07-14, a pedido del usuario: "y si la otra copia no tiene la
+ * misma resolución/corte?"): sin esto, el Plan B podía cambiar silenciosamente
+ * de "Extended Cut" a la versión de cine — mismo título, escenas DISTINTAS,
+ * saltos en la historia sin ningún aviso. `theatrical` es el valor por defecto
+ * (ningún marcador especial) — así una copia sin etiqueta se compara igual
+ * contra otra sin etiqueta, sin falsos positivos.
+ */
+export type CutMarker = 'extended' | 'directors' | 'unrated' | 'theatrical';
+export function cutMarker(s: TorrentioStream): CutMarker {
+  const t = streamInfo(s);
+  if (/\bextended\b/i.test(t)) return 'extended';
+  if (/director'?s?[\s.]*cut/i.test(t)) return 'directors';
+  if (/\bunrated\b/i.test(t)) return 'unrated';
+  return 'theatrical';
+}
+
+/**
  * extractTitleYear — extrae "Título" + "Año" del formato típico de Torrentio
  * ("Título (YYYY) ..."). Usado para el RESCATE POR TÍTULO (ver
  * `findCachedByTitleYear`) — caso real "El Padrino": el archivo YA estaba

@@ -43,6 +43,7 @@ import {
   isCachedStream,
   hasHardcodedSubs,
   isCinemaLeakSource,
+  cutMarker,
   hasEng,
   hasSpa,
   hasLatino,
@@ -318,11 +319,20 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
       // idioma igual o mejor que la elegida (mismo guard que el "upgrade a fluido").
       if (selected.rdId && !isDirectPlayEligible(finalActive.activeBest)) {
         const chosenRank = audioLangRank(finalActive.activeBest);
+        // BLINDAJE de corte (2026-07-14, a pedido del usuario: "y si la otra copia no
+        // tiene la misma resolución/corte?"): sin esto, el Plan B podía cambiar
+        // silenciosamente de "Extended Cut" a la versión de cine — mismo título,
+        // escenas DISTINTAS. Se filtra por edición ACÁ (dato ya disponible, gratis,
+        // por nombre de archivo); la duración REAL se verifica después en
+        // `usePlayer.ts` cuando RD resuelve cada candidato (ese dato recién existe
+        // ahí). Dos capas: nombre primero (barato), duración real después (certero).
+        const chosenCut = cutMarker(finalActive.activeBest);
         const alts: { rdId: string; filename: string }[] = [];
         for (const cand of finalPool) {
           if (alts.length >= 3) break;
           if (cand.s === finalActive.activeBest) continue;
           if (audioLangRank(cand.s) < chosenRank) continue; // nunca degradar el idioma
+          if (cutMarker(cand.s) !== chosenCut) continue; // nunca cambiar de EDICIÓN/corte
           const candFn = extractFilename(cand.s);
           const m = matchInDownloads(cand.s.url || '', cand.s.url || '', candFn, downloads);
           if (m && !isJunkMatch(m) && m.id !== selected.rdId && !alts.some((a) => a.rdId === m.id)) {

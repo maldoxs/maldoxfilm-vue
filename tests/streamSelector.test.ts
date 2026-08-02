@@ -17,6 +17,7 @@ import {
   isJunkMatch,
   MIN_VALID_FILE_BYTES,
   audioLangRank,
+  cutMarker,
   extractTitleYear,
   findCachedByTitleYear,
   hasHardcodedSubs,
@@ -828,5 +829,25 @@ describe('streamSelector — hasBadLang detecta escritura no-latina (bug real 5t
     });
     const { best } = selectBestStream([CYRILLIC_STREAM, cleanEnglish]);
     expect(best?.behaviorHints?.filename).not.toContain('(2026).mkv'); // no es el cirílico
+  });
+});
+
+// ── cutMarker — blindaje del Plan B contra cambio silencioso de edición/corte ──
+describe('streamSelector — cutMarker (Extended/Director\'s Cut/Unrated vs Theatrical)', () => {
+  test('detecta Extended, Director\'s Cut (con y sin apóstrofe/punto) y Unrated', () => {
+    expect(cutMarker(stream({ title: 'Ghost Rider 2007 Extended Cut BluRay 720p' }))).toBe('extended');
+    expect(cutMarker(stream({ title: 'Blade Runner Directors Cut 1080p' }))).toBe('directors');
+    expect(cutMarker(stream({ title: "Blade Runner Director's.Cut 1080p" }))).toBe('directors');
+    expect(cutMarker(stream({ title: 'Movie 2020 Unrated 1080p' }))).toBe('unrated');
+  });
+
+  test('sin ningún marcador → theatrical (default, no falso positivo)', () => {
+    expect(cutMarker(stream({ title: 'Ghost Rider 2007 720p BluRay x264' }))).toBe('theatrical');
+  });
+
+  test('dos copias SIN marcador se consideran el mismo corte (ambas theatrical)', () => {
+    const a = stream({ title: 'Movie 2020 720p BluRay' });
+    const b = stream({ title: 'Movie 2020 1080p WEB-DL' });
+    expect(cutMarker(a)).toBe(cutMarker(b));
   });
 });
