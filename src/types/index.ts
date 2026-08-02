@@ -83,7 +83,13 @@ export interface SelectedStream {
    * posición, en vez de insistir con la lenta hasta caer al iframe. Cada copia es un
    * archivo distinto en RD — la velocidad de generación varía entre copias.
    */
-  altCachedCandidates?: { rdId: string; filename: string }[];
+  /**
+   * Cada entrada trae `rdId` (ya en el historial de la cuenta → swap instantáneo) O
+   * `url` (copia `[RD+]` cacheada en el pool GLOBAL de RD, aún no en la cuenta → se
+   * resuelve ON DEMAND con `resolveRawToRdId` solo si el Plan B llega a necesitarla).
+   * Ver la nota del "límite estructural eliminado" en `rdStream.ts`.
+   */
+  altCachedCandidates?: { rdId?: string; url?: string; filename: string }[];
   /**
    * foreignAudioLanguage — código ISO-639-1 del audio real (ej. "no" noruego,
    * "ko" coreano) cuando el idioma ORIGINAL de la película (TMDB) NO es inglés

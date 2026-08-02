@@ -327,7 +327,7 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
         // `usePlayer.ts` cuando RD resuelve cada candidato (ese dato recién existe
         // ahí). Dos capas: nombre primero (barato), duración real después (certero).
         const chosenCut = cutMarker(finalActive.activeBest);
-        const alts: { rdId: string; filename: string }[] = [];
+        const alts: { rdId?: string; url?: string; filename: string }[] = [];
         for (const cand of finalPool) {
           if (alts.length >= 3) break;
           if (cand.s === finalActive.activeBest) continue;
@@ -336,12 +336,28 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
           const candFn = extractFilename(cand.s);
           const m = matchInDownloads(cand.s.url || '', cand.s.url || '', candFn, downloads);
           if (m && !isJunkMatch(m) && m.id !== selected.rdId && !alts.some((a) => a.rdId === m.id)) {
+            // Ya está en el historial de la cuenta → rdId directo, swap instantáneo.
             alts.push({ rdId: m.id, filename: m.filename || candFn });
+          } else if (!m && isCachedStream(cand.s) && cand.s.url) {
+            // ── LÍMITE ESTRUCTURAL ELIMINADO (2026-07-14, caso real "Doctor Sleep") ──
+            // Antes se EXIGÍA `matchInDownloads` — o sea, que la copia ya estuviera en
+            // el historial de descargas de ESTA cuenta. Esa restricción era ARTIFICIAL:
+            // una copia `[RD+]` está cacheada en el pool GLOBAL de RD, y resolver su
+            // link de Torrentio la agrega a la cuenta en segundos (es el mismo camino
+            // por el que la copia PRINCIPAL obtuvo su rdId — `resolveProxyUrl` arriba).
+            // Evidencia del bug: Doctor Sleep tenía 11 candidatos `[RD+]` y el Plan B
+            // se quedó con CERO alternativas solo porque ninguna se había visto antes.
+            // Ahora se guarda la URL y `usePlayer` la resuelve ON DEMAND (solo si el
+            // Plan B llega a necesitarla — cero costo si la reproducción va bien).
+            alts.push({ url: cand.s.url, filename: candFn });
           }
         }
         if (alts.length) {
           selected.altCachedCandidates = alts;
-          console.warn('[RD] Plan B /t/ — copias cacheadas alternativas:', alts.map((a) => a.filename));
+          console.warn(
+            '[RD] Plan B /t/ — alternativas:',
+            alts.map((a) => `${a.filename}${a.rdId ? ' (lista)' : ' (a resolver)'}`)
+          );
         }
 
         // ── SIN copia confiable — saltar directo a otro reproductor (2026-07-14, 3ª

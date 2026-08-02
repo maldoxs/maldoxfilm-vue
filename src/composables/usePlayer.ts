@@ -658,7 +658,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   // título. Si la copia en reproducción resulta lenta de generar en RD (2 recuperaciones
   // de stall fallidas), se cambia a la siguiente de esta lista desde la misma posición —
   // insistir con una copia que genera a <1x no tiene ninguna chance de destrabarse sola.
-  let tpipelineAlts: { rdId: string; filename: string }[] = [];
+  let tpipelineAlts: { rdId?: string; url?: string; filename: string }[] = [];
   // Disparo PREVENTIVO del Plan B (2026-07-14, a pedido: "no quiero esperar a que se
   // trabe, quiero una solución definitiva"). Evidencia real (log "Ghost Rider"): el
   // ritmo sostenido de generación de RD se mide en cada latido — cuando el promedio de
@@ -884,7 +884,21 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         try {
           console.warn('[/t/] Plan B: probando otra copia cacheada:', alt.filename);
           opts.onToast('🔄 Cambiando a una copia más rápida...');
-          const resolved2 = await resolveTpipeline(alt.rdId);
+          // Alternativa `[RD+]` que aún no está en el historial de la cuenta: se
+          // resuelve ACÁ (unos segundos, RD ya la tiene en su caché global) para
+          // obtener su rdId. Ver "límite estructural eliminado" en rdStream.ts —
+          // antes estas copias ni siquiera se ofrecían como alternativa.
+          let altRdId = alt.rdId;
+          if (!altRdId && alt.url) {
+            altRdId = (await resolveRawToRdId(alt.url)) ?? undefined;
+            if (playerStore.isStale(myGen)) return false;
+            if (!altRdId) {
+              console.warn('[/t/] Plan B: no se pudo resolver esta copia — probando la siguiente:', alt.filename);
+              continue;
+            }
+          }
+          if (!altRdId) continue;
+          const resolved2 = await resolveTpipeline(altRdId);
           if (playerStore.isStale(myGen)) return false;
           // BLINDAJE de duración (2026-07-14, a pedido: "y si la otra copia no tiene
           // el mismo corte?"): el nombre ya se filtró en rdStream.ts (cutMarker),
@@ -1517,7 +1531,9 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       opts.onStarted();
 
       // Plan B: precargar la lista de copias alternativas cacheadas (armada en rdStream).
-      tpipelineAlts = (selected.altCachedCandidates ?? []).filter((a) => a.rdId !== rdId);
+      // Excluir la copia EN USO. Las entradas sin `rdId` (a resolver on-demand) no
+      // pueden ser la actual — la actual siempre tiene rdId por definición.
+      tpipelineAlts = (selected.altCachedCandidates ?? []).filter((a) => !a.rdId || a.rdId !== rdId);
       planBSelected = selected; // para que tryPlanBSwap pueda re-avisar a subtítulos tras un swap
       rateHistory = []; // arranque limpio del medidor de ritmo para este título
 

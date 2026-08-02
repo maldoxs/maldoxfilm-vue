@@ -355,17 +355,43 @@ describe('rdStream — altCachedCandidates (Plan B del pipeline /t/)', () => {
     ]); // la otra copia cacheada, sin duplicar la elegida
   });
 
-  test('sin otras copias cacheadas → sin lista (el Plan B simplemente no aplica)', async () => {
+  test('una copia [RD+] NO descargada antes SÍ se ofrece como alternativa (a resolver on-demand)', async () => {
+    // Cambio estructural (2026-07-14, caso real "Doctor Sleep"): antes se EXIGÍA que
+    // la alternativa ya estuviera en el historial de descargas de la cuenta — por eso
+    // Doctor Sleep se quedó con CERO alternativas pese a tener 11 candidatos [RD+].
+    // Ahora una copia [RD+] (cacheada en el pool GLOBAL de RD) se ofrece igual,
+    // guardando su URL para resolverla solo si el Plan B llega a necesitarla.
     const fetchImpl = makeRouter([
       { match: /external_ids/, json: { imdb_id: 'tt0000001' } },
       { match: /torrentio\.strem\.fun\/realdebrid=/, json: { streams: [AC3_A, AC3_B] } },
       { match: /resolve\/realdebrid\/TEST_TOKEN\/eeee/, json: {}, url: DL[0].download },
-      { match: /\/downloads\?limit=500/, json: [DL[0]] }, // solo la elegida está cacheada
+      { match: /\/downloads\?limit=500/, json: [DL[0]] }, // solo la elegida está en el historial
     ]);
     const resolver = buildResolver(fetchImpl as unknown as typeof fetch);
     const result = await resolver.getStream(42, 'movie');
 
     expect(result.rdId).toBe('RD_A');
+    expect(result.altCachedCandidates).toHaveLength(1);
+    const alt = result.altCachedCandidates![0];
+    expect(alt.rdId).toBeUndefined(); // aún no está en la cuenta
+    expect(alt.url).toContain('ffffffffffffffffffffffffffffffffffffffff'); // guarda la URL para resolver después
+    expect(alt.filename).toContain('Slow.Movie');
+  });
+
+  test('un candidato NO cacheado ([RD download]) nunca se ofrece como alternativa', async () => {
+    const noCacheado = { ...AC3_B, name: '[RD download] Torrentio\n1080p' };
+    const fetchImpl = makeRouter([
+      { match: /external_ids/, json: { imdb_id: 'tt0000001' } },
+      { match: /torrentio\.strem\.fun\/realdebrid=/, json: { streams: [AC3_A, noCacheado] } },
+      { match: /resolve\/realdebrid\/TEST_TOKEN\/eeee/, json: {}, url: DL[0].download },
+      { match: /\/downloads\?limit=500/, json: [DL[0]] },
+    ]);
+    const resolver = buildResolver(fetchImpl as unknown as typeof fetch);
+    const result = await resolver.getStream(42, 'movie');
+
+    expect(result.rdId).toBe('RD_A');
+    // Sin [RD+] ni match en downloads → no hay a qué cambiarse (RD tendría que
+    // DESCARGARLO, demasiado lento para un swap en caliente).
     expect(result.altCachedCandidates).toBeUndefined();
   });
 });
