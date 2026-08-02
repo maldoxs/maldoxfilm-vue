@@ -49,9 +49,27 @@ export async function resolveTpipeline(rdId: string): Promise<TpipelineResolveRe
  */
 export async function resolveRawToRdId(rawUrl: string): Promise<string | null> {
   try {
-    const data = (await callFunction({ action: 'resolveRaw', url: rawUrl })) as { rdId?: string | null };
+    const data = (await callFunction({ action: 'resolveRaw', url: rawUrl })) as {
+      rdId?: string | null;
+      finalUrl?: string;
+      downloadsCount?: number;
+      via?: string;
+    };
+    if (!data.rdId) {
+      // DIAGNÓSTICO (2026-07-14): antes este fallo quedaba mudo — el Plan B decía
+      // "no se pudo resolver" sin explicar por qué. `finalUrl` vacío = el link de
+      // Torrentio no redirigió (torrent caído/bloqueado); `finalUrl` con valor pero
+      // sin match = la entrada aún no aparecía en /downloads pese a los reintentos.
+      console.warn(
+        '[/t/] resolveRaw sin rdId — finalUrl:',
+        data.finalUrl || '(vacío: Torrentio no redirigió)',
+        '| downloads revisados:',
+        data.downloadsCount ?? '(no se pudo consultar)'
+      );
+    }
     return data.rdId ?? null;
-  } catch {
+  } catch (e) {
+    console.warn('[/t/] resolveRaw falló (red/función):', (e as Error)?.message);
     return null;
   }
 }

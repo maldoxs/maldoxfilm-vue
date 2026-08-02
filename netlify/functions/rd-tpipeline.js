@@ -141,21 +141,36 @@ async function handleResolveRaw(rawUrl, token) {
   // es el `id` que necesita /streaming-{id} (son distintos campos en RD). El id
   // correcto es el `id` de la entrada de /downloads cuyo `download` == esta URL.
   const norm = (u) => (u || '').toLowerCase().split('?')[0];
-  try {
-    const dlRes = await authFetch(`${RD_API_BASE}/downloads?limit=500`, token);
-    if (dlRes.ok) {
-      const downloads = await dlRes.json();
-      if (Array.isArray(downloads)) {
-        const match = downloads.find((d) => d.download && norm(d.download) === norm(finalUrl));
-        if (match && match.id) return { rdId: match.id, via: 'downloads-match' };
+  // REINTENTO con espera (2026-07-14, caso real "Doctor Sleep"): resolver el link de
+  // Torrentio AGREGA el torrent a la cuenta RD, pero la entrada en `/downloads` puede
+  // tardar un instante en aparecer. Sin reintento, el Plan B recibía `rdId: null` y
+  // descartaba una alternativa que en realidad SÍ estaba disponible — quedándose sin
+  // opciones. 3 intentos espaciados cubren esa ventana sin alargar de más el swap.
+  let lastCount = -1;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 1200));
+    try {
+      const dlRes = await authFetch(`${RD_API_BASE}/downloads?limit=500`, token);
+      if (dlRes.ok) {
+        const downloads = await dlRes.json();
+        if (Array.isArray(downloads)) {
+          lastCount = downloads.length;
+          const match = downloads.find((d) => d.download && norm(d.download) === norm(finalUrl));
+          if (match && match.id) return { rdId: match.id, via: 'downloads-match', attempt };
+        }
       }
+    } catch {
+      /* noop — se reintenta */
     }
-  } catch {
-    /* noop */
   }
 
-  // Sin id → devolver la URL (token redactado) para diagnóstico; el cliente cae al fallback.
-  return { rdId: null, finalUrl: finalUrl.replace(/(auth_token|realdebrid)=[^&/]+/gi, '$1=***') };
+  // Sin id → devolver la URL (token redactado) + contexto para diagnóstico REAL en el
+  // cliente (antes esto se descartaba y el fallo quedaba sin explicación en el log).
+  return {
+    rdId: null,
+    finalUrl: finalUrl.replace(/(auth_token|realdebrid)=[^&/]+/gi, '$1=***'),
+    downloadsCount: lastCount,
+  };
 }
 
 async function handleSeek(mediaId, seconds, token) {
