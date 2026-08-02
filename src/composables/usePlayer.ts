@@ -117,7 +117,15 @@ const CUT_DURATION_TOLERANCE_SEC = 180;
 // Disparo preventivo del Plan B: cuántos latidos (de HEARTBEAT_MS c/u) promediar antes
 // de considerar el déficit "sostenido" (no un bache aislado), y el umbral del promedio.
 const PLAN_B_RATE_WINDOW = 5; // 5 × 6s = ~30s de historial
-const PLAN_B_RATE_THRESHOLD = 0.95; // promedio bajo esto, sostenido → cambiar antes de que se note
+/**
+ * PLAN_B_TIME_TO_EMPTY_SEC — margen (en segundos de reproducción) por debajo del cual
+ * el corte se considera INMINENTE y se cambia de copia. Se calcula como
+ * `buffer / (1 - ritmoPromedio)`. Reemplaza al umbral de ritmo puro, que demostró NO
+ * predecir cortes (caso real "Doctor Sleep": promedio 0.95x con 56s de colchón aguantó
+ * 5 min sin un solo corte → un swap ahí solo habría bajado la calidad al pedo).
+ * 90s da tiempo de sobra para resolver y cargar la copia nueva antes de que se note.
+ */
+const PLAN_B_TIME_TO_EMPTY_SEC = 90;
 const MAX_STALL_RECOVERIES = 4; // recuperaciones sin éxito → cambiar de fuente (con backoff, ~más paciencia)
 
 // ── LATIDO (heartbeat) continuo de RD (2026-07-12) ───────────────────────────
@@ -1032,12 +1040,27 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         //   <1.0x → déficit: el corte es cuestión de tiempo, por más buffer que haya
         // Sirve para VERIFICAR con números el efecto de `segmentPrefetchLimit` (antes de
         // ese fix, un caso real medido cayó a 0.42x durante la reproducción).
-        const totalContent = realPos + bufferAhead(video);
+        const bufNow = bufferAhead(video);
+        const totalContent = realPos + bufNow;
         let rate = '';
         let rNum: number | null = null;
         if (elapsedS > 0 && lastTotalContent > 0) {
           rNum = (totalContent - lastTotalContent) / elapsedS;
-          rate = ` | RD genera: ${rNum.toFixed(2)}x${rNum < 1 && !video.paused ? ' ⚠️ DÉFICIT' : ''}`;
+          // Se muestra el PROMEDIO, no la lectura instantánea (2026-07-14, evidencia
+          // real "Doctor Sleep"): RD genera POR RÁFAGAS (0.00x → 2.51x → 0.00x →
+          // 3.34x). Marcar cada lectura suelta bajo 1.0x como "déficit" era alarmista
+          // y falso — ese tramo promediaba 0.95x con 56s de colchón y NO tuvo ni un
+          // corte en 5 minutos. Lo que importa es la tendencia, no el instante.
+          const hist = [...rateHistory, rNum].slice(-PLAN_B_RATE_WINDOW);
+          const avg = hist.reduce((a, b) => a + b, 0) / hist.length;
+          // MINUTOS DE AUTONOMÍA: el número que de verdad predice un corte. Un déficit
+          // con colchón grande es inofensivo (56s a 0.95x = 18 min de margen); un
+          // déficit chico con colchón mínimo es urgente (10s a 0.5x = 20 s).
+          const deficit = 1 - avg;
+          const secsLeft = deficit > 0.01 ? bufNow / deficit : Infinity;
+          const riesgo = !video.paused && secsLeft < PLAN_B_TIME_TO_EMPTY_SEC ? ' ⚠️ RIESGO DE CORTE' : '';
+          const autonomia = Number.isFinite(secsLeft) ? ` | margen: ${Math.round(secsLeft)}s` : '';
+          rate = ` | RD: ${rNum.toFixed(2)}x (prom ${avg.toFixed(2)}x)${autonomia}${riesgo}`;
         }
         lastTotalContent = totalContent;
         // DIAG temporal (2026-07-12, a pedido: "tengo dudas si está avanzando en pausa") —
@@ -1058,8 +1081,21 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
           if (rateHistory.length > PLAN_B_RATE_WINDOW) rateHistory.shift();
           if (rateHistory.length === PLAN_B_RATE_WINDOW && tpipelineAlts.length && !planBSwapInFlight) {
             const avg = rateHistory.reduce((a, b) => a + b, 0) / rateHistory.length;
-            if (avg < PLAN_B_RATE_THRESHOLD) {
-              console.warn(`[/t/] Plan B PREVENTIVO — déficit sostenido (promedio ${avg.toFixed(2)}x en ${PLAN_B_RATE_WINDOW} latidos) → cambiando antes de que se note`);
+            // CRITERIO CORREGIDO (2026-07-14, a pedido: "¿qué ganamos con la
+            // sensibilidad?"). Antes bastaba `avg < 0.95` — pero la evidencia real
+            // ("Doctor Sleep") mostró que ESO NO PREDICE UN CORTE: ese tramo promedió
+            // 0.95x con 56s de colchón y aguantó 5 minutos SIN un solo `waiting`. Un
+            // déficit con colchón grande es inofensivo; lo que importa es cuánto FALTA
+            // para quedarse sin buffer = buffer / (1 - ritmo). Se cambia de copia solo
+            // si ese margen baja de PLAN_B_TIME_TO_EMPTY_SEC — o sea, cuando el corte
+            // es realmente inminente, no ante cualquier bache. Evita bajar la calidad
+            // (la alternativa suele ser de menor resolución) sin necesidad real.
+            const deficit = 1 - avg;
+            const secsLeft = deficit > 0.01 ? bufNow / deficit : Infinity;
+            if (secsLeft < PLAN_B_TIME_TO_EMPTY_SEC) {
+              console.warn(
+                `[/t/] Plan B PREVENTIVO — corte inminente: ~${Math.round(secsLeft)}s de margen (buffer ${bufNow.toFixed(0)}s, ritmo prom ${avg.toFixed(2)}x) → cambiando antes de que se note`
+              );
               void tryPlanBSwap(video, myGen);
             }
           }
