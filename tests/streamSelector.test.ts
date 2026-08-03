@@ -22,6 +22,9 @@ import {
   hasHardcodedSubs,
   isCinemaLeakSource,
   hasNonLatinTitle,
+  playbackClass,
+  playsWithoutConversion,
+  declaresLowRes,
 } from '../src/services/streamSelector';
 import type { TorrentioStream, RDDownload } from '../src/types';
 
@@ -828,5 +831,84 @@ describe('streamSelector — hasBadLang detecta escritura no-latina (bug real 5t
     });
     const { best } = selectBestStream([CYRILLIC_STREAM, cleanEnglish]);
     expect(best?.behaviorHints?.filename).not.toContain('(2026).mkv'); // no es el cirílico
+  });
+});
+
+// ── Clases de reproducción (ADR-010, 2026-08-02) ─────────────────────────────────
+// "Reproduce sin cortes" no es una preferencia más que se suma al puntaje: es una
+// condición previa. Se ordena primero por clase y recién después por puntaje, porque
+// mientras compitiera por puntos siempre existía una combinación de bonos capaz de dar
+// vuelta la decisión — que es exactamente lo que venía pasando.
+describe('streamSelector — playbackClass (clase de reproducción)', () => {
+  const cacheada = (over: Partial<TorrentioStream>) =>
+    stream({ name: '[RD+] Torrentio\n1080p', ...over });
+
+  test('cacheada y sin señales de conversión → clase 2', () => {
+    expect(playbackClass(cacheada({ title: 'Peli 2020 1080p BluRay H264 AAC 💾 2.5 GB' }))).toBe(2);
+  });
+
+  test('cacheada pero con audio que obliga a convertir → clase 1', () => {
+    expect(playbackClass(cacheada({ title: 'Peli 2020 1080p BluRay x264 AC3 5.1 💾 4 GB' }))).toBe(1);
+    expect(playbackClass(cacheada({ title: 'Peli 2020 1080p DTS-HD 💾 8 GB' }))).toBe(1);
+  });
+
+  test('cacheada pero HEVC/AV1 → clase 1 (no reproduce directo en todos lados)', () => {
+    expect(playbackClass(cacheada({ title: 'Peli 2020 1080p x265 10bit 💾 2 GB' }))).toBe(1);
+    expect(playbackClass(cacheada({ title: 'Peli 2020 1080p AV1 Opus 💾 2 GB' }))).toBe(1);
+  });
+
+  test('NO cacheada → clase 0, por limpia que sea', () => {
+    expect(playbackClass(stream({ name: '[RD download] Torrentio\n1080p', title: 'Peli 2020 1080p H264 AAC.mp4' }))).toBe(0);
+  });
+
+  test('cacheada limpia pero de baja resolución declarada → NO se promueve a clase 2', () => {
+    expect(playbackClass(cacheada({ title: 'Peli 2020 480p DVDRip H264 AAC 💾 700 MB' }))).toBe(1);
+    expect(declaresLowRes(stream({ title: 'Peli 480p' }))).toBe(true);
+    // Sin resolución declarada NO cuenta como baja: muchos releases buenos no la escriben.
+    expect(declaresLowRes(stream({ title: 'Peli 2020 BluRay H264 AAC' }))).toBe(false);
+  });
+
+  test('casos REALES: las dos copias latinas que reproducen directo son clase 2', () => {
+    // Ninguna de las dos declara códec en el nombre. La verificación contra la API de RD
+    // (2026-08-02) confirmó que ambas son h264 + aac y reproducen sin conversión. Con el
+    // criterio estricto de `isDirectPlayEligible` (que exige el tag H264) habrían quedado
+    // en clase 1 — y Parásitos habría cedido su lugar a una copia en coreano.
+    const suenos = cacheada({
+      title: 'Sueños.De.Fuga.1994.1080P-Dual-Lat 💾 2.3 GB 🇲🇽',
+      behaviorHints: { filename: 'Sueños.De.Fuga.1994.1080P-Dual-Lat.mkv' },
+    });
+    const parasitos = cacheada({
+      title: 'Parásitos.2019.1080P-Dual-Lat 💾 2.2 GB 🇲🇽',
+      behaviorHints: { filename: 'Parásitos.2019.1080P-Dual-Lat (1).mp4' },
+    });
+    expect(playsWithoutConversion(suenos)).toBe(true);
+    expect(playbackClass(suenos)).toBe(2);
+    expect(playbackClass(parasitos)).toBe(2);
+  });
+
+  test('la clase manda sobre el puntaje: una copia limpia le gana a una latina que hay que convertir', () => {
+    // Este es el caso que la clase viene a resolver. La latina puntúa MÁS alto (+200 de
+    // idioma) pero declara AC3, así que Real-Debrid tendría que convertirla al vuelo.
+    const latinoAC3 = cacheada({
+      title: 'Peli 2020 1080p Dual-Lat AC3 5.1 💾 4 GB 🇲🇽',
+      behaviorHints: { filename: 'Peli.2020.1080p.Dual-Lat.AC3.mkv' },
+      url: 'https://x/lat',
+    });
+    const inglesLimpia = cacheada({
+      title: 'Peli 2020 1080p BluRay H264 AAC 💾 2.5 GB',
+      behaviorHints: { filename: 'Peli.2020.1080p.BluRay.H264.AAC.mp4' },
+      url: 'https://x/eng',
+    });
+    expect(scoreStream(latinoAC3)).toBeGreaterThan(scoreStream(inglesLimpia)); // puntúa más
+    const { pool } = rankStreams([latinoAC3, inglesLimpia]);
+    expect(pool[0].s).toBe(inglesLimpia); // y aun así gana la que se puede reproducir
+  });
+
+  test('entre dos de la MISMA clase sigue mandando el puntaje (latino primero)', () => {
+    const latino = cacheada({ title: 'Peli 2020 1080p Dual-Lat H264 AAC 💾 2.5 GB 🇲🇽', url: 'https://x/l' });
+    const ingles = cacheada({ title: 'Peli 2020 1080p BluRay H264 AAC 💾 2.5 GB', url: 'https://x/e' });
+    expect(playbackClass(latino)).toBe(playbackClass(ingles));
+    const { pool } = rankStreams([ingles, latino]);
+    expect(pool[0].s).toBe(latino);
   });
 });

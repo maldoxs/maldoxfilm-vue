@@ -282,6 +282,14 @@ export const isCinemaLeakSource = (s: TorrentioStream): boolean => CINEMA_LEAK_R
  * con H265 4K 21GB —caso Maze Runner— NO es fluido). La compatibilidad gana al idioma:
  * mejor reproducir en inglés+subs que congelarse intentando el latino pesado.
  */
+/**
+ * NOTA sobre `isTv` (2026-08-02): esta rama NO se ejecuta en producción. `loadRdSource`
+ * pasa `isTv: false` SIEMPRE, deliberadamente, para que TV y escritorio elijan la MISMA
+ * copia y tengan el mismo comportamiento de seek (ver la nota en `usePlayer.ts`). Se
+ * conserva el parámetro porque los tests lo ejercitan y porque documenta qué penalizaría
+ * una TV; pero cualquier cambio ahí es inerte hasta que alguien vuelva a pasar `true`.
+ * No inventar comportamiento distinto por dispositivo sin revisar esa decisión primero.
+ */
 export function scoreStream(s: TorrentioStream, isTv = false): number {
   // ── Descartes automáticos ──
   if (isJunkStream(s)) return -10000; // sample/trailer/test → nunca
@@ -354,11 +362,55 @@ export function scoreStream(s: TorrentioStream, isTv = false): number {
   return pts;
 }
 
+// Resolución DECLARADA por debajo de 720p. No se usa para descartar: solo para no
+// promover una copia de baja calidad a la clase de "reproduce sin conversión" (ver
+// `playbackClass`). Una copia que NO declara resolución no cae acá — muchos releases
+// buenos no la escriben, y penalizarlos por omisión sería peor que el problema.
+const LOW_RES_RE = /\b(480p|360p|240p|dvdrip|dvd-rip|vhsrip)\b/i;
+export const declaresLowRes = (s: TorrentioStream): boolean => LOW_RES_RE.test(streamInfo(s));
+
 /**
- * rankStreams — ordena por puntaje descendente, descartando los marcados con
- * idioma incompatible (pts <= -500). Si todos quedan descartados, cae a la
- * lista completa con pts=0 (preserva el comportamiento original — siempre
- * intentar reproducir algo en vez de no reproducir nada).
+ * playsWithoutConversion — ¿esta copia se puede reproducir SIN que Real-Debrid la
+ * convierta al vuelo? Es el criterio que decide entre las dos formas de reproducir, y
+ * la diferencia entre ellas no es de grado: una anda siempre, la otra depende de que RD
+ * genere más rápido de lo que mirás, cosa que no controlamos.
+ *
+ * Criterio DELIBERADAMENTE distinto de `isDirectPlayEligible`, que exige que el nombre
+ * declare H264. Esa exigencia demostró estar equivocada con datos reales (2026-08-02):
+ *   - `Parásitos.2019.1080P-Dual-Lat.mp4` no declara códec y reproduce perfecto
+ *   - `Sueños.De.Fuga.1994.1080P-Dual-Lat.mkv` tampoco, y por dentro es h264 + aac
+ * Con el criterio estricto ambas quedaban marcadas como "no reproducibles" y la primera
+ * habría cedido su lugar a una copia en coreano. Acá se decide por DESCARTE: si nada en
+ * el nombre dice que necesita conversión, se asume que no la necesita. La verificación
+ * definitiva la hace el reproductor con `mediaInfos` antes de comprometerse (ADR-010).
+ */
+export const playsWithoutConversion = (s: TorrentioStream): boolean =>
+  !isX265(s) && !isAV1(s) && !hasBadAudio(s);
+
+/**
+ * playbackClass — clase de reproducción. Se ordena PRIMERO por esto y recién después por
+ * puntaje, porque "reproduce sin cortes" no es una preferencia más que se suma: es una
+ * condición previa. Mientras compitiera por puntos, siempre iba a existir una combinación
+ * de bonos capaz de dar vuelta la decisión — que es exactamente lo que pasaba.
+ *
+ *   2 (A) — cacheada en RD y no necesita conversión → anda siempre
+ *   1 (B) — cacheada, pero hay que convertirla → depende de la velocidad de RD ese día
+ *   0 (C) — no cacheada → RD tendría que descargarla; medido el 15-jun: se queda en 0%
+ *
+ * Dentro de cada clase manda el puntaje de siempre, así que el latino sigue ganando al
+ * inglés y 1080p a 720p. Los pesos del scoring NO se tocan.
+ */
+export function playbackClass(s: TorrentioStream): 0 | 1 | 2 {
+  if (!isCachedStream(s)) return 0;
+  if (playsWithoutConversion(s) && !declaresLowRes(s)) return 2;
+  return 1;
+}
+
+/**
+ * rankStreams — ordena por CLASE de reproducción y, dentro de cada clase, por puntaje
+ * descendente. Descarta los marcados con idioma incompatible (pts <= -5000); si todos
+ * quedan descartados, cae a la lista completa con pts=0 (preserva el comportamiento
+ * original — siempre intentar reproducir algo en vez de no reproducir nada).
  */
 export function rankStreams(
   streams: TorrentioStream[],
@@ -372,7 +424,7 @@ export function rankStreams(
   const scored = withUrl
     .map((s) => ({ s, pts: scoreStream(s, isTv) }))
     .filter((x) => x.pts > -5000)
-    .sort((a, b) => b.pts - a.pts);
+    .sort((a, b) => playbackClass(b.s) - playbackClass(a.s) || b.pts - a.pts);
   const pool = scored.length ? scored : withUrl.map((s) => ({ s, pts: 0 }));
   return { withUrl, scored, pool };
 }
