@@ -237,7 +237,7 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
     const offKey = buildOffsetStorageKey(infoHash, streamFilename, imdbId);
     const savedOff = safeStorage.getItem(offKey);
     // BUG real encontrado (2026-07-14, reportado por el usuario: "el subtítulo
-    // sale antes de hablar" tras un swap del Plan B): si el archivo NUEVO no
+    // sale antes de hablar" al reproducir otro archivo): si el archivo NUEVO no
     // tiene offset propio guardado, `offsetMs` nunca se reseteaba a 0 — quedaba
     // arrastrando el ajuste MANUAL de la copia anterior (un archivo distinto)
     // aplicado sobre este archivo, sin relación. Ahora SIEMPRE se resuelve el

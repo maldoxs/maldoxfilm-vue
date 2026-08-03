@@ -61,8 +61,16 @@ export function parseMediaInfos(raw: unknown): MediaInfos {
   const root = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const details = (root.details && typeof root.details === 'object' ? root.details : {}) as Record<string, unknown>;
 
+  // `details.video` viene como MAPA de pistas, igual que el audio:
+  //   { und1: { stream:'0:0', lang:'Unknown', codec:'h264', width, height } }
+  // El comentario de arriba (y este parser) asumían un objeto plano `{ codec }`, así que
+  // `videoCodec` salía SIEMPRE null y el códec de video quedaba "desconocido" — bug real
+  // verificado contra la API el 2026-08-02. Se aceptan las dos formas: la plana (por si RD
+  // la devuelve así en algún caso) y el mapa, tomando la primera pista con códec.
   const video = (details.video && typeof details.video === 'object' ? details.video : {}) as Record<string, unknown>;
-  const videoCodec = video.codec ? str(video.codec).toLowerCase() : null;
+  const videoCodecRaw =
+    video.codec ?? toEntries(details.video).map(([, v]) => v.codec).find((c) => !!c) ?? null;
+  const videoCodec = videoCodecRaw ? str(videoCodecRaw).toLowerCase() : null;
 
   const audio: RdAudioTrack[] = toEntries(details.audio).map(([token, a]) => ({
     token,
@@ -105,6 +113,28 @@ const NATIVE_AUDIO_CODECS = /^(aac|mp3|mp4a|opus|vorbis)/i;
 export function hasNativeDecodableAudio(info: MediaInfos): boolean | null {
   if (!info.audio.length) return null;
   return info.audio.some((t) => NATIVE_AUDIO_CODECS.test(t.codec));
+}
+
+/**
+ * videoNeedsHevcSupport — ¿el video REAL del archivo exige soporte HEVC para
+ * reproducirse directo? Devuelve:
+ *   true  → es HEVC/H265 (solo reproduce directo donde el navegador lo soporte)
+ *   false → es H264/AVC (reproduce directo en todos lados)
+ *   null  → códec desconocido o ausente → NO cambiar el comportamiento actual
+ *           (se sigue con la heurística por nombre, `isX265`)
+ *
+ * Contraparte de {@link hasNativeDecodableAudio} para el video. Existe por el mismo
+ * motivo: el NOMBRE del release miente en las dos direcciones. Caso real medido
+ * (2026-08-02, "Sueños de Fuga"): `...1080P-Dual-Lat.mkv` no declara ningún códec y
+ * la heurística por nombre lo mandaba a transcodificar, cuando RD reporta que por
+ * dentro es h264 + aac — o sea, reproducible directo sin conversión alguna.
+ */
+export function videoNeedsHevcSupport(info: MediaInfos): boolean | null {
+  const c = info.videoCodec;
+  if (!c) return null;
+  if (/^(hevc|h\.?265|x265)/.test(c)) return true;
+  if (/^(h\.?264|avc|x264)/.test(c)) return false;
+  return null;
 }
 
 const SPANISH_ISO = new Set(['spa', 'es', 'lat']);

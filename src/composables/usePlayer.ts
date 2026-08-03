@@ -46,7 +46,7 @@ import {
   type MediaSourceLike,
 } from '../services/playback';
 import { pickHlsFallbackFromTranscode, pickDashUrlFromTranscode } from '../services/realdebrid';
-import { parseMediaInfos, pickSpanishAudioToken, hasNativeDecodableAudio } from '../services/mediaInfos';
+import { parseMediaInfos, pickSpanishAudioToken, hasNativeDecodableAudio, videoNeedsHevcSupport } from '../services/mediaInfos';
 import {
   resolveTpipeline,
   resolveRawToRdId,
@@ -108,25 +108,14 @@ const SEEK_FREEZE_FAR_MS = 5000; // seek lejano → volver rápido (no se va a p
 // replicable desde la API pública; recargar mataba el player. El seek lo maneja Shaka nativo.)
 const STALL_BACKOFF_MS = 8000; // por cada recuperación previa, esperar este extra (dar tiempo al transcoder)
 
-// Plan B /t/ (2026-07-14): margen de duración para aceptar una copia alternativa
-// como "el mismo corte" — una re-codificación del MISMO corte varía solo segundos;
-// Extended vs Theatrical suelen diferir 10-20+ minutos. 180s da margen de sobra sin
-// dejar pasar un corte distinto.
-const CUT_DURATION_TOLERANCE_SEC = 180;
-
-// Disparo preventivo del Plan B: cuántos latidos (de HEARTBEAT_MS c/u) promediar antes
-// de considerar el déficit "sostenido" (no un bache aislado), y el umbral del promedio.
-const PLAN_B_RATE_WINDOW = 5; // 5 × 6s = ~30s de historial
-/**
- * PLAN_B_TIME_TO_EMPTY_SEC — margen (en segundos de reproducción) por debajo del cual
- * el corte se considera INMINENTE y se cambia de copia. Se calcula como
- * `buffer / (1 - ritmoPromedio)`. Reemplaza al umbral de ritmo puro, que demostró NO
- * predecir cortes (caso real "Doctor Sleep": promedio 0.95x con 56s de colchón aguantó
- * 5 min sin un solo corte → un swap ahí solo habría bajado la calidad al pedo).
- * 90s da tiempo de sobra para resolver y cargar la copia nueva antes de que se note.
- */
-const PLAN_B_TIME_TO_EMPTY_SEC = 90;
 const MAX_STALL_RECOVERIES = 4; // recuperaciones sin éxito → cambiar de fuente (con backoff, ~más paciencia)
+/**
+ * DIRECT_PLAY_MAX_WAIT_MS — tope duro del intento de Direct Play. Mientras el navegador
+ * reporte que está bajando data se le renueva el plazo de `HEVC_DIRECT_PLAY_TIMEOUT_MS`;
+ * esto acota el total para que un archivo que no abre nunca no cuelgue el arranque.
+ * Ver la nota en `tryHevcDirectPlay`.
+ */
+const DIRECT_PLAY_MAX_WAIT_MS = 30000;
 
 // ── LATIDO (heartbeat) continuo de RD (2026-07-12) ───────────────────────────
 // EVIDENCIA: en la pestaña de red del reproductor OFICIAL de RD, el player manda
@@ -408,6 +397,34 @@ function _shakaDestroy() {
   }
 }
 
+/**
+ * _shakaDetachAndWait — igual que `_shakaDestroy` pero ESPERANDO a que termine.
+ *
+ * Hace falta antes de asignar `video.src` (Direct Play): mientras Shaka sigue
+ * enganchado, el `<video>` tiene un MediaSource attachado y asignarle un `src` normal
+ * puede no arrancar nunca — se queda sin disparar `loadedmetadata` y el intento muere
+ * por timeout, sin importar que el archivo esté perfecto. `destroy()` de Shaka es
+ * asíncrono, así que dispararlo sin esperar deja justamente esa ventana abierta.
+ *
+ * Nunca lanza ni cuelga: si `destroy()` no resuelve, sigue igual tras un tope corto.
+ */
+async function _shakaDetachAndWait(timeoutMs = 3000): Promise<void> {
+  const p = _shakaPlayer;
+  if (!p) return;
+  _shakaPlayer = null;
+  try {
+    const r = p.destroy();
+    if (r && typeof (r as Promise<void>).then === 'function') {
+      await Promise.race([
+        (r as Promise<void>).catch(() => {}),
+        new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+      ]);
+    }
+  } catch {
+    /* silenciar — igual que _shakaDestroy */
+  }
+}
+
 export interface UsePlayerOptions {
   /** Ref al elemento <video> activo. */
   videoRef: Ref<HTMLVideoElement | null | undefined>;
@@ -517,10 +534,9 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   // acumulen torrents (error 21).
   // Extendido 2026-08-02 (caso real: capturas de la cuenta del usuario con
   // "Doctor Sleep (2019) DC" + 3 archivos extra pegados para siempre): además
-  // del torrent del camino legacy server-side, `resolveRawToRdId` (derivación
-  // de rdId null y CADA alternativa que prueba el Plan B) TAMBIÉN crea un
-  // torrent nuevo en la cuenta y nada lo borraba. Ahora se acumulan todos los
-  // ids creados en la sesión y se borran juntos.
+  // del torrent del camino legacy server-side, `resolveRawToRdId` (derivación de
+  // rdId null) TAMBIÉN crea un torrent nuevo en la cuenta y nada lo borraba.
+  // Ahora se acumulan todos los ids creados en la sesión y se borran juntos.
   let currentServerTorrentId: string | null = null;
   const sessionTorrentIds = new Set<string>();
   function cleanupServerTorrent() {
@@ -562,16 +578,45 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   async function tryHevcDirectPlay(video: HTMLVideoElement, streamUrl: string, startPositionSec?: number): Promise<boolean> {
     let played = false;
     await new Promise<void>((resolve) => {
-      const tmo = setTimeout(() => {
-        if (!played) {
-          video.src = '';
-          resolve();
-        }
-      }, HEVC_DIRECT_PLAY_TIMEOUT_MS);
+      // ── PACIENCIA MIENTRAS LLEGUE DATA (2026-08-02) ──────────────────────────────
+      // Los 10s fijos alcanzaban para un archivo chico, no para uno grande: el `<video>`
+      // necesita el índice del MP4 antes de emitir `loadedmetadata`, y en un archivo de
+      // ~3 GB servido a ~250 KB/s de arranque eso puede pasar de 10s. Medido el 02-08
+      // sobre una copia REAL de RD (`H264.AAC-LAMA.mp4`, 2,92 GB): el archivo estaba
+      // perfecto —con faststart y soporte de rangos— y el intento igual se abortaba.
+      //
+      // Ahora: si el navegador reporta que está bajando data (`progress`), se le renueva
+      // el plazo; si no llega NADA, se aborta igual de rápido que antes. Tope duro para
+      // no colgar el arranque cuando el archivo simplemente no se puede abrir.
+      const topeDuro = Date.now() + DIRECT_PLAY_MAX_WAIT_MS;
+      const desde = Date.now();
+      let tmo: ReturnType<typeof setTimeout>;
+      const limpiar = () => {
+        clearTimeout(tmo);
+        video.removeEventListener('progress', onProgress);
+      };
+      const abortar = () => {
+        if (played) return;
+        limpiar();
+        console.warn(`[RD] Direct Play: sin metadatos tras ${((Date.now() - desde) / 1000).toFixed(1)}s — se descarta`);
+        video.src = '';
+        resolve();
+      };
+      const armar = (ms: number) => {
+        clearTimeout(tmo);
+        tmo = setTimeout(abortar, ms);
+      };
+      const onProgress = () => {
+        const restante = topeDuro - Date.now();
+        if (restante > 0) armar(Math.min(HEVC_DIRECT_PLAY_TIMEOUT_MS, restante));
+      };
+      video.addEventListener('progress', onProgress);
+      armar(HEVC_DIRECT_PLAY_TIMEOUT_MS);
       video.addEventListener(
         'loadedmetadata',
         () => {
-          clearTimeout(tmo);
+          limpiar();
+          console.warn(`[RD] Direct Play: metadatos en ${((Date.now() - desde) / 1000).toFixed(1)}s`);
           if (video.duration && isFinite(video.duration) && video.duration > MIN_VALID_DURATION_SEC) {
             played = true;
             const resumeAt =
@@ -622,7 +667,8 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       video.addEventListener(
         'error',
         () => {
-          clearTimeout(tmo);
+          limpiar();
+          console.warn(`[RD] Direct Play: error del <video> tras ${((Date.now() - desde) / 1000).toFixed(1)}s — se descarta`);
           video.src = '';
           resolve();
         },
@@ -671,20 +717,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   let lastBufferAhead = 0; // buffer por delante en el tick anterior — detecta si la descarga PROGRESA aunque currentTime aún no arranque
   let lastNudgeAt = 0; // cuándo se mandó el último "empujón" (pingSeek sin reload) — cooldown
   let lastTotalContent = 0; // posición+buffer del latido anterior — para medir el ritmo de RD
-  // Plan B /t/ (2026-07-14, caso "Ghost Rider"): copias cacheadas alternativas del MISMO
-  // título. Si la copia en reproducción resulta lenta de generar en RD (2 recuperaciones
-  // de stall fallidas), se cambia a la siguiente de esta lista desde la misma posición —
-  // insistir con una copia que genera a <1x no tiene ninguna chance de destrabarse sola.
-  let tpipelineAlts: { rdId?: string; url?: string; filename: string }[] = [];
-  // Disparo PREVENTIVO del Plan B (2026-07-14, a pedido: "no quiero esperar a que se
-  // trabe, quiero una solución definitiva"). Evidencia real (log "Ghost Rider"): el
-  // ritmo sostenido de generación de RD se mide en cada latido — cuando el promedio de
-  // los últimos ~30s (5 latidos de 6s) queda bajo 0.95x mientras se reproduce (no en
-  // pausa), el corte es cuestión de tiempo aunque el buffer todavía aguante. En vez de
-  // esperar a que se note (2 recuperaciones fallidas), se cambia de copia ANTES.
-  let rateHistory: number[] = [];
-  let planBSwapInFlight = false; // evita que el disparo preventivo y el reactivo choquen
-  let planBSelected: SelectedStream | null = null; // `selected` de tryTpipeline, para re-avisar a subtítulos tras el swap
 
   // ── Instrumentación (#3) — log compacto de los eventos críticos del <video> con
   // tiempo, buffer por delante, readyState/networkState. Sirve para capturar EXACTO
@@ -772,7 +804,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     lastBufferAhead = 0;
     lastNudgeAt = 0;
     lastTotalContent = 0; // reset del medidor de ritmo (nueva peli/posición ≠ continuidad)
-    rateHistory = [];
   }
 
   // ── Recuperaciones por camino (recargan el stream desde la posición actual) ──
@@ -879,103 +910,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   }
 
   /**
-   * tryPlanBSwap — cambia a la siguiente copia cacheada de `tpipelineAlts` (blindada
-   * por corte/duración — ver CUT_DURATION_TOLERANCE_SEC) desde la posición actual.
-   * Reusada por DOS disparadores (2026-07-14, a pedido: "quiero una solución
-   * definitiva, no esperar a que se trabe"):
-   *   1. REACTIVO: 2 recuperaciones de stall fallidas confirmadas (código previo).
-   *   2. PREVENTIVO: el ritmo sostenido de RD (medido en cada latido) cae bajo
-   *      `PLAN_B_RATE_THRESHOLD` durante `PLAN_B_RATE_WINDOW` latidos seguidos — se
-   *      cambia ANTES de que el buffer se agote y se note el corte.
-   * `planBSwapInFlight` evita que ambos disparadores choquen si se activan a la vez.
-   */
-  async function tryPlanBSwap(video: HTMLVideoElement, myGen: number): Promise<boolean> {
-    if (planBSwapInFlight || !tpipelineAlts.length || !tpipelineState) return false;
-    planBSwapInFlight = true;
-    // 2026-08-02 (caso real: "esta se paro" — el buffer cayó de 70s a 0 en ~12min
-    // y Plan B jamás reintentó): antes, una alternativa que fallaba al resolver se
-    // descartaba PARA SIEMPRE con `.shift()`. Si era la única, `tpipelineAlts`
-    // quedaba vacío y el disparador preventivo dejaba de intentar por el resto de
-    // la sesión — aunque el fallo fuera transitorio (el /downloads de RD tarda en
-    // aparecer). Ahora esas se guardan acá y vuelven a la cola al final para que
-    // un disparo POSTERIOR (con más tiempo de por medio) las reintente.
-    const retryLater: typeof tpipelineAlts = [];
-    try {
-      const pos = Math.max(video.currentTime, lastPlayingPos);
-      const t = tpipelineOffset.value + pos;
-      const originalDuration = tpipelineDuration.value;
-      while (tpipelineAlts.length) {
-        const alt = tpipelineAlts.shift()!;
-        try {
-          console.warn('[/t/] Plan B: probando otra copia cacheada:', alt.filename);
-          opts.onToast('🔄 Cambiando a una copia más rápida...');
-          // Alternativa `[RD+]` que aún no está en el historial de la cuenta: se
-          // resuelve ACÁ (unos segundos, RD ya la tiene en su caché global) para
-          // obtener su rdId. Ver "límite estructural eliminado" en rdStream.ts —
-          // antes estas copias ni siquiera se ofrecían como alternativa.
-          let altRdId = alt.rdId;
-          if (!altRdId && alt.url) {
-            const resolvedRaw = await resolveRawToRdId(alt.url);
-            altRdId = resolvedRaw.rdId ?? undefined;
-            // Siempre registrar el torrent creado (se use o no esta alternativa) —
-            // se borra al cerrar/cambiar título (ADR-006 extendido).
-            if (resolvedRaw.torrentId) sessionTorrentIds.add(resolvedRaw.torrentId);
-            if (playerStore.isStale(myGen)) return false;
-            if (!altRdId) {
-              console.warn('[/t/] Plan B: no se pudo resolver esta copia todavía — se reintentará más adelante:', alt.filename);
-              retryLater.push(alt);
-              continue;
-            }
-          }
-          if (!altRdId) continue;
-          const resolved2 = await resolveTpipeline(altRdId);
-          if (playerStore.isStale(myGen)) return false;
-          // BLINDAJE de duración (2026-07-14, a pedido: "y si la otra copia no tiene
-          // el mismo corte?"): el nombre ya se filtró en rdStream.ts (cutMarker),
-          // pero la duración REAL solo se conoce acá. Si difiere de la copia actual
-          // más de lo esperable entre re-codificaciones del MISMO corte, se descarta
-          // esta alternativa puntual y se prueba la siguiente — nunca se acepta a ciegas.
-          if (originalDuration > 0 && Math.abs(resolved2.duration - originalDuration) > CUT_DURATION_TOLERANCE_SEC) {
-            console.warn(
-              `[/t/] Plan B descartado — duración muy distinta (posible otro corte): ${alt.filename} | nueva: ${resolved2.duration.toFixed(0)}s vs actual: ${originalDuration.toFixed(0)}s`
-            );
-            continue;
-          }
-          const audio2 = pickBestAudio(resolved2.audioTracks);
-          const isSpanish2 = /lat|spa|es/i.test(audio2);
-          tpipelineState = { resolved: resolved2, audio: audio2, myGen };
-          tpipelineDuration.value = resolved2.duration;
-          activeTrack.value = audio2;
-          if (isSpanish2) spanishTrack.value = audio2;
-          dashBaseUrl.value = `https://${resolved2.cdn}/t/${resolved2.fullPathId}/`;
-          await tpipelineReloadMpd(video, t > 3 ? t : 1);
-          stallRecoveries = 0;
-          rateHistory = []; // copia nueva: el historial de ritmo de la vieja ya no aplica
-          console.warn(`[/t/] ✅ Plan B activo — ${resolved2.filename} | audio: ${audio2} | CDN: ${resolved2.cdn}`);
-          // BUG real encontrado (2026-07-14: "a veces se atrasa, a veces se adelanta"):
-          // re-avisar al sistema de subtítulos con el filename NUEVO — si no, se queda
-          // con el .srt/offset de la copia vieja aplicado sobre un archivo distinto.
-          if (planBSelected) {
-            opts.onStreamReady?.({
-              selected: { ...planBSelected, streamFilename: alt.filename, infoHash: undefined },
-              hasNativeSpanish: isSpanish2,
-              spanishTrack: isSpanish2 ? audio2 : null,
-            });
-          }
-          return true;
-        } catch (e) {
-          console.warn('[/t/] Plan B falló con esta copia — probando la siguiente:', e);
-        }
-      }
-      console.warn('[/t/] Plan B: ninguna alternativa pasó la verificación — se sigue con la copia actual');
-      return false;
-    } finally {
-      if (retryLater.length) tpipelineAlts.push(...retryLater);
-      planBSwapInFlight = false;
-    }
-  }
-
-  /**
    * startStallMonitor — vigila que `currentTime` avance en CUALQUIER camino. Si se traba
    * (en play, sin avanzar) recupera vía `recover` (recarga desde la posición). Tras un seek
    * usa un umbral MÁS CORTO (`STALL_RECOVER_SEEK_MS`): ahí es donde algunas pelis se "pegaban".
@@ -1066,63 +1000,15 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         const bufNow = bufferAhead(video);
         const totalContent = realPos + bufNow;
         let rate = '';
-        let rNum: number | null = null;
         if (elapsedS > 0 && lastTotalContent > 0) {
-          rNum = (totalContent - lastTotalContent) / elapsedS;
-          // Se muestra el PROMEDIO, no la lectura instantánea (2026-07-14, evidencia
-          // real "Doctor Sleep"): RD genera POR RÁFAGAS (0.00x → 2.51x → 0.00x →
-          // 3.34x). Marcar cada lectura suelta bajo 1.0x como "déficit" era alarmista
-          // y falso — ese tramo promediaba 0.95x con 56s de colchón y NO tuvo ni un
-          // corte en 5 minutos. Lo que importa es la tendencia, no el instante.
-          const hist = [...rateHistory, rNum].slice(-PLAN_B_RATE_WINDOW);
-          const avg = hist.reduce((a, b) => a + b, 0) / hist.length;
-          // MINUTOS DE AUTONOMÍA: el número que de verdad predice un corte. Un déficit
-          // con colchón grande es inofensivo (56s a 0.95x = 18 min de margen); un
-          // déficit chico con colchón mínimo es urgente (10s a 0.5x = 20 s).
-          const deficit = 1 - avg;
-          const secsLeft = deficit > 0.01 ? bufNow / deficit : Infinity;
-          const riesgo = !video.paused && secsLeft < PLAN_B_TIME_TO_EMPTY_SEC ? ' ⚠️ RIESGO DE CORTE' : '';
-          const autonomia = Number.isFinite(secsLeft) ? ` | margen: ${Math.round(secsLeft)}s` : '';
-          rate = ` | RD: ${rNum.toFixed(2)}x (prom ${avg.toFixed(2)}x)${autonomia}${riesgo}`;
+          const rNum = (totalContent - lastTotalContent) / elapsedS;
+          rate = ` | RD: ${rNum.toFixed(2)}x`;
         }
         lastTotalContent = totalContent;
         // DIAG temporal (2026-07-12, a pedido: "tengo dudas si está avanzando en pausa") —
         // rastro visible para confirmar que el latido corre SIEMPRE, incluso en pausa.
         console.warn(`[/t/] 💓 Latido → t=${realPos.toFixed(1)}s${video.paused ? ' (en PAUSA)' : ''} | buffer +${bufferAhead(video).toFixed(1)}s${rate}`);
         void pingSeek(tpipelineState.resolved.mediaId, realPos).catch(() => {});
-
-        // ── PLAN B PREVENTIVO (2026-07-14, a pedido: "quiero una solución definitiva,
-        // no esperar a que se trabe") ─────────────────────────────────────────────
-        // Solo cuenta el ritmo mientras se REPRODUCE de verdad (no en pausa, no en
-        // medio de una recuperación/seek) — en pausa el consumo es cero y el número
-        // no refleja la velocidad real de RD. Con `PLAN_B_RATE_WINDOW` latidos de
-        // déficit SOSTENIDO (no un bache aislado), se cambia de copia ANTES de que
-        // el buffer se agote — evidencia real: Ghost Rider promedió 0.94x sostenido
-        // y terminó pegándose igual, pese a tener 40s de colchón al arrancar.
-        if (rNum !== null && !video.paused && !stallRecovering && !switchingAudio) {
-          rateHistory.push(rNum);
-          if (rateHistory.length > PLAN_B_RATE_WINDOW) rateHistory.shift();
-          if (rateHistory.length === PLAN_B_RATE_WINDOW && tpipelineAlts.length && !planBSwapInFlight) {
-            const avg = rateHistory.reduce((a, b) => a + b, 0) / rateHistory.length;
-            // CRITERIO CORREGIDO (2026-07-14, a pedido: "¿qué ganamos con la
-            // sensibilidad?"). Antes bastaba `avg < 0.95` — pero la evidencia real
-            // ("Doctor Sleep") mostró que ESO NO PREDICE UN CORTE: ese tramo promedió
-            // 0.95x con 56s de colchón y aguantó 5 minutos SIN un solo `waiting`. Un
-            // déficit con colchón grande es inofensivo; lo que importa es cuánto FALTA
-            // para quedarse sin buffer = buffer / (1 - ritmo). Se cambia de copia solo
-            // si ese margen baja de PLAN_B_TIME_TO_EMPTY_SEC — o sea, cuando el corte
-            // es realmente inminente, no ante cualquier bache. Evita bajar la calidad
-            // (la alternativa suele ser de menor resolución) sin necesidad real.
-            const deficit = 1 - avg;
-            const secsLeft = deficit > 0.01 ? bufNow / deficit : Infinity;
-            if (secsLeft < PLAN_B_TIME_TO_EMPTY_SEC) {
-              console.warn(
-                `[/t/] Plan B PREVENTIVO — corte inminente: ~${Math.round(secsLeft)}s de margen (buffer ${bufNow.toFixed(0)}s, ritmo prom ${avg.toFixed(2)}x) → cambiando antes de que se note`
-              );
-              void tryPlanBSwap(video, myGen);
-            }
-          }
-        }
       }
       // No interferir durante recuperación, cambio de audio, pausa o fin
       // (una pausa normal NO debe disparar recuperación).
@@ -1375,7 +1261,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     }
   }
 
-  // ── Plan B: x265 sin transcode → alternativa H.264 (líneas ~8135-8156) ──
+  // ── x265 sin transcode → alternativa H.264 (líneas ~8135-8156) ──
   function loadX265FallbackDirect(video: HTMLVideoElement, fallbackUrl: string, myGen: number) {
     opts.onToast('🔄 x265 sin transcode — probando alternativa H.264...');
     video.src = fallbackUrl;
@@ -1589,21 +1475,8 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       opts.onStreamReady?.({ selected, hasNativeSpanish, spanishTrack: isSpanish ? audio : null });
       opts.onStarted();
 
-      // Plan B: precargar la lista de copias alternativas cacheadas (armada en rdStream).
-      // Excluir la copia EN USO. Las entradas sin `rdId` (a resolver on-demand) no
-      // pueden ser la actual — la actual siempre tiene rdId por definición.
-      tpipelineAlts = (selected.altCachedCandidates ?? []).filter((a) => !a.rdId || a.rdId !== rdId);
-      planBSelected = selected; // para que tryPlanBSwap pueda re-avisar a subtítulos tras un swap
-      rateHistory = []; // arranque limpio del medidor de ritmo para este título
-
       startStallMonitor(video, myGen, async (v) => {
         if (!tpipelineState) throw new Error('sin /t/ state');
-        // ── PLAN B REACTIVO (2026-07-14, caso real "Ghost Rider"): a la 2da
-        // recuperación de stall confirmada sobre la MISMA copia, cambiar a la
-        // siguiente alternativa cacheada en vez de insistir con una copia que ya
-        // demostró generar <1x. Si no hay a qué cambiarse (o todas fallan), cae al
-        // reload clásico de la copia actual (comportamiento previo intacto).
-        if (stallRecoveries >= 2 && (await tryPlanBSwap(v, myGen))) return;
         const pos = Math.max(v.currentTime, lastPlayingPos);
         const t = tpipelineOffset.value + pos;
         await tpipelineReloadMpd(v, t > 3 ? t : 1);
@@ -1650,8 +1523,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     tpipelineState = null;
     tpipelineOffset.value = 0;
     tpipelineSeeking.value = false;
-    tpipelineAlts = []; // Plan B: lista fresca por título (no arrastrar copias de otro)
-    planBSelected = null;
     // Reset también dashBaseUrl: solo lo setean los caminos DASH (/t/ y transcode legacy).
     // Así `!isTpipeline && !dashBaseUrl` identifica de forma FIABLE el Direct Play (formato
     // correcto, fluido) — sin arrastrar un valor viejo de un título anterior que era /t/.
@@ -1784,29 +1655,43 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     const hevcOk = detectHevcSupport(getMediaSource());
     const { hasBadAudio } = checkBadAudioForDirectPlay(streamFn, !!rdId);
 
-    // ── ADR-009 fix 3: audio REAL vía mediaInfos ANTES de decidir Direct Play ──
-    // La heurística por NOMBRE (`checkBadAudioForDirectPlay`) no ve un AC3 que el
-    // release no menciona (caso "El Padrino": Direct Play mudo en desktop, con
-    // audio en TV — mismo archivo, distinto decoder de hardware). Cuando hay rdId,
-    // RD ya sabe las pistas reales (`/streaming/mediaInfos/{rdId}` — la MISMA
-    // llamada que el camino transcode legacy hace más abajo): si NINGUNA pista es
-    // decodificable nativa, se salta el Direct Play y se va directo a /t/ (que
-    // re-encodea a AAC). ADITIVO: si la llamada falla o no hay pistas (null), el
-    // comportamiento queda EXACTAMENTE como antes. Sin rdId no hay metadata → el
-    // probe post-arranque (fix 4) cubre ese caso.
-    let realAudioNotDecodable = false;
-    if (rdId && !hasBadAudio) {
+    // ── DECIDE EL CÓDEC REAL, NO EL NOMBRE (2026-08-02) ──────────────────────────────
+    // El nombre del release miente en las DOS direcciones y hasta ahora solo se lo
+    // corregía en una:
+    //
+    //   Nombre dice OK, archivo real es AC3   → ya se detectaba (ADR-009 fix 3, caso
+    //     "El Padrino": Direct Play mudo en desktop, con audio en TV).
+    //   Nombre dice MALO, archivo real sirve  → NO se detectaba. Caso real medido
+    //     ("Sueños de Fuga"): `...1080P-Dual-Lat.mkv` no declara códec, así que la
+    //     regla "MKV sin AAC = audio incompatible" lo mandaba a /t/. RD reporta que
+    //     por dentro es h264 + aac. Le estuvimos pidiendo a RD que convirtiera un
+    //     archivo que ya estaba en el formato correcto — y lo generaba a 0.70x, o sea
+    //     se cortaba cada pocos segundos, teniendo Direct Play disponible.
+    //
+    // Con `rdId` se consulta SIEMPRE `/streaming/mediaInfos/{rdId}` (la misma llamada
+    // que el camino transcode ya hacía más abajo) y ese dato manda sobre el nombre,
+    // para audio Y para video. Si la llamada falla o el códec es desconocido (null),
+    // el comportamiento queda EXACTAMENTE como antes: heurística por nombre.
+    let realAudioOk: boolean | null = null; // true = decodificable nativo · false = no · null = sin dato
+    let realIsHevc: boolean | null = null; // true = el video ES HEVC · false = no lo es · null = sin dato
+    if (rdId) {
       try {
-        const realAudio = hasNativeDecodableAudio(parseMediaInfos(await opts.rdClient.fetchMediaInfos(rdId)));
-        if (realAudio === false) {
-          realAudioNotDecodable = true;
-          console.warn('[RD] mediaInfos: ninguna pista de audio nativa (AC3/DTS real) → saltando Direct Play, va a /t/');
-        }
+        const info = parseMediaInfos(await opts.rdClient.fetchMediaInfos(rdId));
+        realAudioOk = hasNativeDecodableAudio(info);
+        realIsHevc = videoNeedsHevcSupport(info);
+        console.warn(
+          `[RD] mediaInfos (códec REAL) → video: ${info.videoCodec ?? 'desconocido'} | audio: ${
+            info.audio.map((a) => `${a.token}=${a.codec}`).join(', ') || 'sin pistas'
+          }`
+        );
       } catch {
         /* sin mediaInfos → heurística por nombre, como siempre */
       }
       if (playerStore.isStale(myGen)) return;
     }
+    // El dato real manda; el nombre solo decide cuando no hay dato.
+    const audioSirve = realAudioOk !== null ? realAudioOk : !hasBadAudio;
+    const videoSirve = realIsHevc !== null ? !realIsHevc || hevcOk : !streamIsX265 || hevcOk;
 
     // ── rdId NULL → derivar download id del link crudo y correr /t/ (AAC) ────────────
     // Bug real "El Padrino" (confirmado con el reproductor OFICIAL de RD: Audio=aac,
@@ -1851,8 +1736,19 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // que antes andaban (La Momia/Michael: su única versión cacheada es MKV). Si el directo
     // falla (p.ej. MKV no soportado), `tryHevcDirectPlay` devuelve false y cae al transcode.
     // El contenedor MP4 ya se prioriza en el SCORING (no hace falta bloquear acá).
-    const canTryDirect = (!streamIsX265 || hevcOk) && !hasBadAudio && !realAudioNotDecodable;
+    const canTryDirect = videoSirve && audioSirve;
     if (canTryDirect) {
+      console.warn(
+        `[RD] Direct Play: intentando — video ${realIsHevc !== null ? 'VERIFICADO' : 'por nombre'}, audio ${
+          realAudioOk !== null ? 'VERIFICADO' : 'por nombre'
+        }`
+      );
+      // Shaka de una reproducción anterior podría seguir enganchado al MISMO <video>
+      // (es el mismo elemento del DOM para todos los títulos). Con el MediaSource puesto,
+      // asignar `video.src` no arranca y el intento muere por timeout aunque el archivo
+      // esté perfecto. Se espera a que suelte el elemento antes de tocarlo.
+      await _shakaDetachAndWait();
+      if (playerStore.isStale(myGen)) return;
       const played = await tryHevcDirectPlay(video, streamUrl, params.startPositionSec);
       if (played) {
         const hasSpaDirect = isDualLatFilename(streamFn);
@@ -2096,8 +1992,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     tpipelineSeeking.value = false;
     tpipelineState = null;
     tpipelineOffset.value = 0;
-    tpipelineAlts = [];
-    planBSelected = null;
     if (_tSeekTimer) { clearTimeout(_tSeekTimer); _tSeekTimer = null; }
     _tReloading = false;
     _shakaDestroy();

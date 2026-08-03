@@ -80,7 +80,7 @@ describe('pickSpanishSubToken — subtítulo español embebido del propio archiv
 });
 
 // ── ADR-009 fix 3 — audio real antes de Direct Play ─────────────────────────
-import { hasNativeDecodableAudio } from '../src/services/mediaInfos';
+import { hasNativeDecodableAudio, videoNeedsHevcSupport } from '../src/services/mediaInfos';
 
 describe('hasNativeDecodableAudio — ¿el navegador puede decodificar el audio nativo?', () => {
   const infoWith = (codecs: string[]) =>
@@ -107,5 +107,56 @@ describe('hasNativeDecodableAudio — ¿el navegador puede decodificar el audio 
   test('sin pistas parseadas → null (no cambiar el comportamiento por nombre)', () => {
     expect(hasNativeDecodableAudio(parseMediaInfos(null))).toBeNull();
     expect(hasNativeDecodableAudio(parseMediaInfos({ details: {} }))).toBeNull();
+  });
+});
+
+// ── videoNeedsHevcSupport — el códec REAL del video decide, no el nombre ──────────
+// Caso real medido el 2026-08-02 ("Sueños de Fuga"): el release
+// `Sueños.De.Fuga.1994.1080P-Dual-Lat.mkv` no declara NINGÚN códec en su nombre, así
+// que la heurística lo trataba como incompatible y lo mandaba a transcodificar. La
+// respuesta real de RD para ese archivo (verificada contra la API) es h264 + aac: se
+// podía reproducir directo, sin conversión y sin cortes.
+describe('videoNeedsHevcSupport — ¿el video real exige soporte HEVC?', () => {
+  const conVideo = (codec: unknown) => parseMediaInfos({ details: { video: { codec } } });
+
+  test('h264/avc → false (reproduce directo en cualquier navegador)', () => {
+    expect(videoNeedsHevcSupport(conVideo('h264'))).toBe(false);
+    expect(videoNeedsHevcSupport(conVideo('H264'))).toBe(false);
+    expect(videoNeedsHevcSupport(conVideo('avc1'))).toBe(false);
+    expect(videoNeedsHevcSupport(conVideo('x264'))).toBe(false);
+  });
+
+  test('hevc/h265 → true (solo directo donde haya soporte)', () => {
+    expect(videoNeedsHevcSupport(conVideo('hevc'))).toBe(true);
+    expect(videoNeedsHevcSupport(conVideo('h265'))).toBe(true);
+    expect(videoNeedsHevcSupport(conVideo('x265'))).toBe(true);
+  });
+
+  test('códec desconocido o ausente → null (se sigue con la heurística por nombre)', () => {
+    expect(videoNeedsHevcSupport(conVideo('av1'))).toBeNull();
+    expect(videoNeedsHevcSupport(conVideo(''))).toBeNull();
+    expect(videoNeedsHevcSupport(parseMediaInfos({ details: {} }))).toBeNull();
+    expect(videoNeedsHevcSupport(parseMediaInfos(null))).toBeNull();
+  });
+
+  test('caso REAL "Sueños de Fuga": el .mkv sin códec en el nombre es h264 + aac', () => {
+    // Respuesta EXACTA de la API de RD para rdId 65KSIPEY2X37E, copiada tal cual: `video`
+    // es un MAPA de pistas, no un objeto plano. Esa forma es la que hacía que el códec
+    // saliera "desconocido" antes del fix de `parseMediaInfos`.
+    const real = parseMediaInfos({
+      duration: 8549.563,
+      details: {
+        video: {
+          und1: { stream: '0:0', lang: 'Unknown', lang_iso: 'und', codec: 'h264', width: 0, height: 0 },
+        },
+        audio: {
+          spa1: { lang: 'Spanish', lang_iso: 'spa', codec: 'aac' },
+          eng1: { lang: 'English', lang_iso: 'eng', codec: 'aac' },
+        },
+      },
+    });
+    expect(real.videoCodec).toBe('h264'); // antes salía null → "desconocido"
+    expect(videoNeedsHevcSupport(real)).toBe(false);
+    expect(hasNativeDecodableAudio(real)).toBe(true); // → Direct Play, sin transcodificar
   });
 });

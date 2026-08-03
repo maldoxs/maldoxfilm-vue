@@ -472,7 +472,19 @@ function onRdStarted() {
           }
         } else {
           const v = vp.videoRef;
-          if (v && prog.positionSec) {
+          // FIX doble-resume en DIRECT PLAY (2026-08-02): `tryHevcDirectPlay` YA posiciona
+          // el video en la posición guardada antes de reproducir (recibe `startPositionSec`,
+          // igual que el pipeline /t/). Este segundo seek a la MISMA posición era redundante
+          // y destructivo: cada seek descarta el buffer recién juntado y arranca de cero.
+          // Visible en el log como `seeking → waiting → seeking` terminando en
+          // `playing | buffer +0.0s`. Es exactamente el mismo problema que se corrigió para
+          // `/t/` en el bloque de arriba (2026-07-05) y que nunca se extendió a este camino.
+          const yaPosicionado = !!v && !!prog.positionSec && Math.abs((v.currentTime || 0) - prog.positionSec) <= 5;
+          if (v && prog.positionSec && yaPosicionado) {
+            console.warn(
+              `[PLAYER] Direct Play ya arrancó en la posición guardada (${Math.floor(v.currentTime / 60)}:${String(Math.floor(v.currentTime % 60)).padStart(2, '0')}) — sin re-seek`
+            );
+          } else if (v && prog.positionSec) {
             // FIX (2026-07-06): este seek nativo ocurre DESPUÉS de que onStarted ya apagó
             // el spinner (arrancó en el minuto 0 primero) → sin esto, mientras el navegador
             // busca el byte del minuto guardado (Range request), la pantalla quedaba NEGRA

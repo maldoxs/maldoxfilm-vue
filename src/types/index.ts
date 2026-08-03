@@ -75,22 +75,6 @@ export interface SelectedStream {
    */
   serverTorrentId?: string | null;
   /**
-   * altCachedCandidates — OTRAS copias del título que también están cacheadas en la
-   * cuenta RD (rdId propio), ordenadas por score y con idioma igual o mejor que la
-   * elegida. Plan B del pipeline /t/ (caso real "Ghost Rider", 2026-07-14): si la
-   * copia elegida resulta LENTA de generar en el servidor de RD (dos recuperaciones
-   * de stall fallidas), el player cambia a la siguiente de esta lista desde la misma
-   * posición, en vez de insistir con la lenta hasta caer al iframe. Cada copia es un
-   * archivo distinto en RD — la velocidad de generación varía entre copias.
-   */
-  /**
-   * Cada entrada trae `rdId` (ya en el historial de la cuenta → swap instantáneo) O
-   * `url` (copia `[RD+]` cacheada en el pool GLOBAL de RD, aún no en la cuenta → se
-   * resuelve ON DEMAND con `resolveRawToRdId` solo si el Plan B llega a necesitarla).
-   * Ver la nota del "límite estructural eliminado" en `rdStream.ts`.
-   */
-  altCachedCandidates?: { rdId?: string; url?: string; filename: string }[];
-  /**
    * foreignAudioLanguage — código ISO-639-1 del audio real (ej. "no" noruego,
    * "ko" coreano) cuando el idioma ORIGINAL de la película (TMDB) NO es inglés
    * ni español y NINGÚN candidato del catálogo confirma audio ENG/SPA/Latino

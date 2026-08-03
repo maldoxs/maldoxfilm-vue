@@ -73,7 +73,7 @@ export async function resolveRawToRdId(rawUrl: string): Promise<ResolveRawResult
       via?: string;
     };
     if (!data.rdId) {
-      // DIAGNÓSTICO (2026-07-14): antes este fallo quedaba mudo — el Plan B decía
+      // DIAGNÓSTICO (2026-07-14): antes este fallo quedaba mudo — se reportaba
       // "no se pudo resolver" sin explicar por qué. `finalUrl` vacío = el link de
       // Torrentio no redirigió (torrent caído/bloqueado); `finalUrl` con valor pero
       // sin match = la entrada aún no aparecía en /downloads pese a los reintentos.

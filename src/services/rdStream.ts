@@ -37,13 +37,9 @@ import {
   extractFilename,
   extractInfoHash,
   isDirectPlayEligible,
-  matchInDownloads,
-  isJunkMatch,
-  audioLangRank,
   isCachedStream,
   hasHardcodedSubs,
   isCinemaLeakSource,
-  cutMarker,
   hasEng,
   hasSpa,
   hasLatino,
@@ -289,8 +285,7 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
               merged.scored,
               downloads
             );
-            // El pool AMPLIADO sirve para las alternativas /t/ aunque no haya
-            // aparecido una fluida (más copias cacheadas donde elegir el Plan B).
+            // Se conserva el pool AMPLIADO: la selección de más abajo trabaja sobre él.
             finalPool = merged.pool;
             if (active2.rdId && isDirectPlayEligible(active2.activeBest)) {
               console.warn('[RD] Re-fetch encontró versión FLUIDA cacheada:', active2.activeFilename);
@@ -311,55 +306,11 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
         }
       }
 
-      // ── Alternativas cacheadas para el Plan B de /t/ (2026-07-14, caso "Ghost Rider") ──
-      // Si la copia elegida va a /t/ y resulta LENTA en el servidor de RD (cada copia es
-      // un archivo distinto — la velocidad de generación varía entre copias), el player
-      // necesita a quién cambiarse SIN re-consultar nada. Se listan acá las otras copias
-      // que TAMBIÉN tienen rdId propio (cacheadas en la cuenta), en orden de score, con
-      // idioma igual o mejor que la elegida (mismo guard que el "upgrade a fluido").
+      // UNA SOLA COPIA: la que eligió el scoring. Si va por `/t/` y RD la genera lento,
+      // se reproduce igual — NO se cambia de copia en el camino. El cambio automático de
+      // copia se eliminó por completo el 2026-08-02 a pedido explícito del usuario; NO
+      // volver a agregarlo. Lo de abajo es el chequeo de confianza, independiente.
       if (selected.rdId && !isDirectPlayEligible(finalActive.activeBest)) {
-        const chosenRank = audioLangRank(finalActive.activeBest);
-        // BLINDAJE de corte (2026-07-14, a pedido del usuario: "y si la otra copia no
-        // tiene la misma resolución/corte?"): sin esto, el Plan B podía cambiar
-        // silenciosamente de "Extended Cut" a la versión de cine — mismo título,
-        // escenas DISTINTAS. Se filtra por edición ACÁ (dato ya disponible, gratis,
-        // por nombre de archivo); la duración REAL se verifica después en
-        // `usePlayer.ts` cuando RD resuelve cada candidato (ese dato recién existe
-        // ahí). Dos capas: nombre primero (barato), duración real después (certero).
-        const chosenCut = cutMarker(finalActive.activeBest);
-        const alts: { rdId?: string; url?: string; filename: string }[] = [];
-        for (const cand of finalPool) {
-          if (alts.length >= 3) break;
-          if (cand.s === finalActive.activeBest) continue;
-          if (audioLangRank(cand.s) < chosenRank) continue; // nunca degradar el idioma
-          if (cutMarker(cand.s) !== chosenCut) continue; // nunca cambiar de EDICIÓN/corte
-          const candFn = extractFilename(cand.s);
-          const m = matchInDownloads(cand.s.url || '', cand.s.url || '', candFn, downloads);
-          if (m && !isJunkMatch(m) && m.id !== selected.rdId && !alts.some((a) => a.rdId === m.id)) {
-            // Ya está en el historial de la cuenta → rdId directo, swap instantáneo.
-            alts.push({ rdId: m.id, filename: m.filename || candFn });
-          } else if (!m && isCachedStream(cand.s) && cand.s.url) {
-            // ── LÍMITE ESTRUCTURAL ELIMINADO (2026-07-14, caso real "Doctor Sleep") ──
-            // Antes se EXIGÍA `matchInDownloads` — o sea, que la copia ya estuviera en
-            // el historial de descargas de ESTA cuenta. Esa restricción era ARTIFICIAL:
-            // una copia `[RD+]` está cacheada en el pool GLOBAL de RD, y resolver su
-            // link de Torrentio la agrega a la cuenta en segundos (es el mismo camino
-            // por el que la copia PRINCIPAL obtuvo su rdId — `resolveProxyUrl` arriba).
-            // Evidencia del bug: Doctor Sleep tenía 11 candidatos `[RD+]` y el Plan B
-            // se quedó con CERO alternativas solo porque ninguna se había visto antes.
-            // Ahora se guarda la URL y `usePlayer` la resuelve ON DEMAND (solo si el
-            // Plan B llega a necesitarla — cero costo si la reproducción va bien).
-            alts.push({ url: cand.s.url, filename: candFn });
-          }
-        }
-        if (alts.length) {
-          selected.altCachedCandidates = alts;
-          console.warn(
-            '[RD] Plan B /t/ — alternativas:',
-            alts.map((a) => `${a.filename}${a.rdId ? ' (lista)' : ' (a resolver)'}`)
-          );
-        }
-
         // ── SIN copia confiable — saltar directo a otro reproductor (2026-07-14, 3ª
         // vuelta caso "La muerte de Robin Hood") ────────────────────────────────────
         // Evidencia: se probaron 3 copias cacheadas DISTINTAS (una HC, otra PLSUBBED,

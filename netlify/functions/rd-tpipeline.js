@@ -134,8 +134,8 @@ async function fetchTorrentIds(token, limit = 15) {
  * ADR-006 extendido (2026-08-02, caso real reportado por el usuario — capturas
  * de su cuenta RD mostrando "Doctor Sleep (2019) DC" + 3 archivos "extra"
  * generados): seguir este link SIEMPRE agrega un torrent nuevo a la cuenta RD,
- * pero nada lo borraba nunca — cada alternativa que probaba el Plan B (la usara
- * o no) quedaba pegada para siempre en /torrents. Ahora se detecta el id del
+ * pero nada lo borraba nunca — cada link resuelto (se usara o no) quedaba pegado
+ * para siempre en /torrents. Ahora se detecta el id del
  * torrent nuevo (snapshot antes/después) y se devuelve para que el cliente lo
  * registre y lo borre vía `serverCleanup`/`rd-cleanup` al cerrar o descartar esa
  * alternativa — igual que ya se hacía con el torrent del camino legacy.
@@ -177,9 +177,9 @@ async function handleResolveRaw(rawUrl, token) {
   const norm = (u) => (u || '').toLowerCase().split('?')[0];
   // REINTENTO con espera (2026-07-14, caso real "Doctor Sleep"): resolver el link de
   // Torrentio AGREGA el torrent a la cuenta RD, pero la entrada en `/downloads` puede
-  // tardar un instante en aparecer. Sin reintento, el Plan B recibía `rdId: null` y
-  // descartaba una alternativa que en realidad SÍ estaba disponible — quedándose sin
-  // opciones. 3 intentos espaciados cubren esa ventana sin alargar de más el swap.
+  // tardar un instante en aparecer. Sin reintento, el llamador recibía `rdId: null` y
+  // descartaba una copia que en realidad SÍ estaba disponible. 3 intentos espaciados
+  // cubren esa ventana sin alargar de más la resolución.
   let lastCount = -1;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 1200));
