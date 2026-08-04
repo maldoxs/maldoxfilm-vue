@@ -156,8 +156,18 @@ export const hasBadLang = (s: TorrentioStream): boolean => {
 
 // ── Tamaño del archivo (extraído del emoji 💾 en el title de Torrentio) ──────
 export function getGb(s: TorrentioStream): number {
-  const m = (s.title || '').match(/💾\s*([\d.]+)\s*GB/i);
-  return m ? parseFloat(m[1]) : 5;
+  const t = s.title || '';
+  const gb = t.match(/💾\s*([\d.]+)\s*GB/i);
+  if (gb) return parseFloat(gb[1]);
+  // BUG REAL (2026-08-03, caso "Containment 2015"): Torrentio expresa en MB todo lo que
+  // pesa menos de 1 GB, y esta función solo sabía leer GB. Un archivo de 678 MB caía al
+  // valor por defecto de 5 GB — que justo está en el tramo premiado con +40 por "tamaño
+  // ideal" — y encima recibía el castigo por peso en transcode como si pesara 5 GB.
+  // Consecuencia medida: la copia de 720p (678 MB) le ganaba a la de 1080p (1.2 GB) por
+  // 10 puntos de diferencia, todos regalados por la lectura equivocada.
+  const mb = t.match(/💾\s*([\d.]+)\s*MB/i);
+  if (mb) return parseFloat(mb[1]) / 1024;
+  return 5; // sin tamaño declarado: se mantiene el default histórico
 }
 export const isHuge = (s: TorrentioStream): boolean => getGb(s) > 15;
 
@@ -400,9 +410,23 @@ export const playsWithoutConversion = (s: TorrentioStream): boolean =>
  * Dentro de cada clase manda el puntaje de siempre, así que el latino sigue ganando al
  * inglés y 1080p a 720p. Los pesos del scoring NO se tocan.
  */
+/**
+ * MAX_CLASS_A_GB — tope de tamaño para la clase A. No es un criterio de calidad: es de
+ * ancho de banda. Medido el 2026-08-02, Real-Debrid entrega el archivo directo a 8,1 MB/s.
+ * Un remux de 86 GB para 2h32 necesita 9,5 MB/s, o sea que NO se sostiene ni reproduciéndose
+ * directo — pesa más rápido de lo que se puede bajar. Con 20 GB para una película de dos
+ * horas quedan unos 22 Mbps, bien por debajo del límite y con margen de sobra.
+ *
+ * Caso que lo motivó ("Doctor Sleep", 2026-08-03): dos remuxes rusos de UHD Blu-ray de
+ * ~86 GB se colaron a la clase A porque su nombre no declara el códec —un remux 4K siempre
+ * es HEVC, pero el texto no lo dice— y quedaron por encima de copias de 1080p. No llegaron a
+ * usarse por casualidad (no tenían id en la cuenta), pero el hueco era real.
+ */
+const MAX_CLASS_A_GB = 20;
+
 export function playbackClass(s: TorrentioStream): 0 | 1 | 2 {
   if (!isCachedStream(s)) return 0;
-  if (playsWithoutConversion(s) && !declaresLowRes(s)) return 2;
+  if (playsWithoutConversion(s) && !declaresLowRes(s) && getGb(s) <= MAX_CLASS_A_GB) return 2;
   return 1;
 }
 

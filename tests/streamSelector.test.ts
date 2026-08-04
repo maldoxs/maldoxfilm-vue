@@ -23,6 +23,7 @@ import {
   isCinemaLeakSource,
   hasNonLatinTitle,
   playbackClass,
+  getGb,
   playsWithoutConversion,
   declaresLowRes,
 } from '../src/services/streamSelector';
@@ -910,5 +911,68 @@ describe('streamSelector — playbackClass (clase de reproducción)', () => {
     expect(playbackClass(latino)).toBe(playbackClass(ingles));
     const { pool } = rankStreams([ingles, latino]);
     expect(pool[0].s).toBe(latino);
+  });
+});
+
+// ── getGb: Torrentio expresa en MB lo que pesa menos de 1 GB ──────────────────────
+// Bug real encontrado el 2026-08-03 con "Containment 2015": la función solo leía GB, así
+// que un archivo de 678 MB caía al default de 5 GB — justo el tramo premiado con +40 por
+// "tamaño ideal". Resultado medido: la copia de 720p le ganaba a la de 1080p con puntos
+// regalados por una lectura equivocada.
+describe('streamSelector — getGb lee MB además de GB', () => {
+  const conTitulo = (title: string) => stream({ title });
+
+  test('lee GB como siempre', () => {
+    expect(getGb(conTitulo('Peli 2020 1080p 👤 15 💾 1.2 GB ⚙️ YTS'))).toBeCloseTo(1.2);
+    expect(getGb(conTitulo('Peli 2020 4K 💾 86.3 GB'))).toBeCloseTo(86.3);
+  });
+
+  test('ahora también lee MB y convierte', () => {
+    expect(getGb(conTitulo('Peli 2020 720p 👤 3 💾 678 MB ⚙️ YTS'))).toBeCloseTo(0.662, 2);
+    expect(getGb(conTitulo('Peli 2020 720p 💾 999 MB'))).toBeCloseTo(0.976, 2);
+  });
+
+  test('sin tamaño declarado se mantiene el default histórico', () => {
+    expect(getGb(conTitulo('Peli 2020 1080p sin tamaño'))).toBe(5);
+  });
+
+  test('caso REAL "Containment": la de 1080p vuelve a ganarle a la de 720p', () => {
+    const p720 = stream({
+      name: '[RD download] Torrentio\n720p',
+      title: 'Containment 2015 720p WEBRip 👤 3 💾 678 MB ⚙️ YTS',
+      behaviorHints: { filename: 'Containment.2015.720p.WEBRip.x264-[YTS.LT].mp4' },
+      url: 'https://x/720',
+    });
+    const p1080 = stream({
+      name: '[RD download] Torrentio\n1080p',
+      title: 'Containment 2015 1080p WEBRip 👤 15 💾 1.2 GB ⚙️ YTS',
+      behaviorHints: { filename: 'Containment.2015.1080p.WEBRip.x264-[YTS.LT].mp4' },
+      url: 'https://x/1080',
+    });
+    expect(scoreStream(p1080)).toBeGreaterThan(scoreStream(p720));
+    const { pool } = rankStreams([p720, p1080]);
+    expect(pool[0].s).toBe(p1080);
+  });
+});
+
+// ── Tope de tamaño de la clase A (ancho de banda, no calidad) ─────────────────────
+describe('streamSelector — un archivo enorme no entra en clase A', () => {
+  test('un remux de 86 GB no reproduce en tiempo real, así que no es clase A', () => {
+    // RD entrega 8,1 MB/s (medido). 86 GB para 2h32 necesitan 9,5 MB/s: no alcanza.
+    const remux = stream({
+      name: '[RD+] Torrentio\n4k',
+      title: 'Peli 2019 UHD Blu-ray disc 2160p HDR10 💾 86.3 GB',
+      behaviorHints: { filename: 'Peli.2019.UHD.BluRay.2160p.mkv' },
+    });
+    expect(playbackClass(remux)).toBe(1);
+  });
+
+  test('el mismo archivo con tamaño razonable sí es clase A', () => {
+    const normal = stream({
+      name: '[RD+] Torrentio\n1080p',
+      title: 'Peli 2019 1080p BluRay 💾 4.2 GB',
+      behaviorHints: { filename: 'Peli.2019.1080p.BluRay.mp4' },
+    });
+    expect(playbackClass(normal)).toBe(2);
   });
 });
