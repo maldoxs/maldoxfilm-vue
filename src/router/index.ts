@@ -121,9 +121,34 @@ const routes: RouteRecordRaw[] = [
 export const router = createRouter({
   history: createWebHistory(),
   routes,
-  scrollBehavior() {
-    // El original siempre arrancaba cada "página" con scroll arriba (showXxx → window.scrollTo(0,0)).
-    return { top: 0 };
+  /**
+   * Navegación NUEVA (click en una tarjeta, ir a Películas, etc.) → arranca arriba, que es
+   * lo que hacía el original (`showXxx → window.scrollTo(0,0)`).
+   *
+   * Navegación HACIA ATRÁS (el botón "Volver" de la ficha, o el atrás del navegador) →
+   * restaura la posición donde estabas. `savedPosition` solo llega en ese caso, así que la
+   * distinción es automática. Sin esto, volver de una ficha a una lista larga te dejaba
+   * arriba de todo y había que buscar de nuevo dónde estabas.
+   *
+   * La espera es necesaria porque las listas cargan por red DESPUÉS de montarse: en el
+   * instante en que corre esta función la página todavía mide casi cero, y restaurar a 800px
+   * no haría nada. Se espera a que el documento sea lo bastante alto como para que la
+   * posición exista, con un tope de 1,2s para no colgar la navegación si los datos no llegan
+   * (en ese caso queda arriba, que es el comportamiento de antes).
+   */
+  scrollBehavior(_to, _from, savedPosition) {
+    if (!savedPosition) return { top: 0 };
+    const objetivo = savedPosition.top ?? 0;
+    if (objetivo <= 0) return savedPosition;
+    return new Promise((resolve) => {
+      const desde = Date.now();
+      const intentar = () => {
+        const alcanzable = document.documentElement.scrollHeight - window.innerHeight >= objetivo;
+        if (alcanzable || Date.now() - desde > 1200) resolve(savedPosition);
+        else requestAnimationFrame(intentar);
+      };
+      requestAnimationFrame(intentar);
+    });
   },
 });
 
