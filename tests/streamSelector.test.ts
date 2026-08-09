@@ -976,3 +976,53 @@ describe('streamSelector — un archivo enorme no entra en clase A', () => {
     expect(playbackClass(normal)).toBe(2);
   });
 });
+
+// ── Idioma extranjero declarado por bandera o por "doblado" en su propio idioma ────
+// Bug real (2026-08-03, "Deliver Us From Evil"): la copia portuguesa no escribe "por" ni
+// "portuguese" —el título mismo está traducido— así que pasaba el filtro y ganaba la
+// selección, y la película se reproducía doblada al portugués. Mismo hueco que el del
+// título en cirílico de julio: el idioma SÍ estaba declarado, de una forma que no se
+// miraba. El usuario lo detectó porque la TV y el escritorio dieron distinto — la lista
+// que devuelve Torrentio varía entre consultas, así que el defecto aparecía a veces.
+describe('streamSelector — idioma extranjero por bandera o por "doblado"', () => {
+  test('caso REAL: la copia portuguesa se descarta', () => {
+    const pt = stream({
+      name: '[RD+] Torrentio\n1080p',
+      title: 'Livrai-nos do Mal (2014) 1080p 5.1 Dublado - Alan_680\n👤 1 💾 2.13 GB ⚙️ Comando\n🇵🇹',
+      behaviorHints: { filename: 'Livrai-nos do Mal (2014) 1080p Dublado - Alan_680.mp4' },
+    });
+    expect(hasBadLang(pt)).toBe(true);
+    expect(scoreStream(pt)).toBe(-10000);
+  });
+
+  test('y entonces gana la inglesa, que es lo que la TV ya hacía', () => {
+    const pt = stream({
+      name: '[RD+] Torrentio\n1080p',
+      title: 'Livrai-nos do Mal (2014) 1080p 5.1 Dublado 💾 2.13 GB 🇵🇹',
+      behaviorHints: { filename: 'Livrai-nos do Mal (2014) 1080p Dublado.mp4' },
+      url: 'https://x/pt',
+    });
+    const en = stream({
+      name: '[RD+] Torrentio\n1080p',
+      title: 'Deliver.Us.From.Evil.2014.1080p.BluRay.x265-RARBG 💾 1.85 GB',
+      behaviorHints: { filename: 'Deliver.Us.From.Evil.2014.1080p.BluRay.x265-RARBG.mp4' },
+      url: 'https://x/en',
+    });
+    const { pool } = rankStreams([pt, en]);
+    expect(pool[0].s).toBe(en);
+  });
+
+  test('si acompaña ENG o SPA NO se descarta (multi-idioma sigue sirviendo)', () => {
+    const multi = stream({
+      name: '[RD+] Torrentio\n1080p',
+      title: 'Peli 2020 1080p iTA-ENG BluRay 💾 3 GB\n🇬🇧 / 🇮🇹',
+      behaviorHints: { filename: 'Peli.2020.iTA-ENG.1080p.mkv' },
+    });
+    expect(hasBadLang(multi)).toBe(false);
+  });
+
+  test('las banderas de España y de países latinos NUNCA descartan', () => {
+    expect(hasBadLang(stream({ title: 'Peli 2020 1080p Dual-Lat 💾 2 GB 🇲🇽' }))).toBe(false);
+    expect(hasBadLang(stream({ title: 'Peli 2020 1080p Castellano 💾 2 GB 🇪🇸' }))).toBe(false);
+  });
+});

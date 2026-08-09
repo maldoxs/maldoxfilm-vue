@@ -145,12 +145,26 @@ export function findCachedByTitleYear(
 const NON_LATIN_SCRIPT_RE = /[Ѐ-ӿͰ-Ͽ぀-ヿ一-鿿가-힯؀-ۿ֐-׿]/;
 export const hasNonLatinTitle = (s: TorrentioStream): boolean => NON_LATIN_SCRIPT_RE.test(s.title || '');
 
+// Un release puede declarar su idioma SIN escribir el código: con la bandera del país, o
+// con la palabra "doblado" en su propio idioma. Bug real (2026-08-03, "Deliver Us From
+// Evil"): la copia `Livrai-nos do Mal (2014) 1080p 5.1 Dublado - Alan_680.mp4 🇵🇹` no dice
+// "por" ni "portuguese" en ningún lado —el título mismo está traducido— así que pasaba el
+// filtro y ganaba la selección. Resultado: la película se reproducía doblada al portugués.
+// Es el mismo hueco que el del título en cirílico (27-jul): el idioma estaba declarado, solo
+// que de una forma que el regex no miraba. Las banderas ya se usaban para detectar LATINO
+// (🇲🇽/🇦🇷/🇨🇴), así que esto le da simetría a esa detección.
+const FOREIGN_FLAG_RE = /🇵🇹|🇧🇷|🇮🇹|🇫🇷|🇷🇺|🇰🇷|🇩🇪|🇵🇱|🇹🇷|🇯🇵|🇨🇳/;
+const FOREIGN_DUB_WORD_RE = /\bdublado\b|\bdublada\b|\bdoppiato\b|\blektor\b|\bnapisy\b|\bvostfr\b|\btruefrench\b/i;
+
 export const hasBadLang = (s: TorrentioStream): boolean => {
   const t = streamInfo(s);
   const bad =
     /\bita\b|\bitalian\b|\bkor\b|\bkorean\b|\brus\b|\brussian\b|\bukr\b|\bfra\b|\bfrench\b|\bvff\b|\bpor\b|\bportuguese\b/.test(
       t
-    ) || hasNonLatinTitle(s);
+    ) ||
+    hasNonLatinTitle(s) ||
+    FOREIGN_FLAG_RE.test(s.title || '') ||
+    FOREIGN_DUB_WORD_RE.test(t);
   return bad && !hasEng(s) && !hasSpa(s); // solo descarta si NO acompaña ENG o SPA
 };
 
