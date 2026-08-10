@@ -74,10 +74,16 @@ function endpointsFor(gid: number) {
   const g = `with_genres=${gid}`;
   const today = new Date().toISOString().slice(0, 10);
   return {
-    trending: `/discover/tv?language=${LANG}&${g}&sort_by=popularity.desc`,
+    // PISOS DE VOTOS (2026-08-04) — mismo criterio que en Películas, con el número
+    // ajustado al universo de series, que es más chico. Medido en Drama: populares pasa
+    // de 51.874 a 2.624 con piso de 100, y mejor puntuadas de 3.979 a 1.132 con piso de
+    // 200. Se usa 200 y no 300 justamente porque hay menos series que películas.
+    // `onAir` NO lleva piso aunque ordene por popularidad: es la fila de lo que está al
+    // aire, y una serie que estrenó esta semana todavía no juntó votos.
+    trending: `/discover/tv?language=${LANG}&${g}&sort_by=popularity.desc&vote_count.gte=100`,
     onAir: `/discover/tv?language=${LANG}&${g}&with_status=0&sort_by=popularity.desc`,
     popular: `/discover/tv?language=${LANG}&${g}&sort_by=vote_count.desc`,
-    topRated: `/discover/tv?language=${LANG}&${g}&sort_by=vote_average.desc&vote_count.gte=50`,
+    topRated: `/discover/tv?language=${LANG}&${g}&sort_by=vote_average.desc&vote_count.gte=200`,
     upcoming: `/discover/tv?language=${LANG}&${g}&first_air_date.gte=${today}&sort_by=popularity.desc`,
   };
 }

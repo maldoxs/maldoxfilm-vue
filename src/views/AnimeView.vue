@@ -51,8 +51,14 @@ function endpointsForGenre(genreId: number) {
   return {
     airing: `/discover/tv?language=${LANG}&${g}&with_status=0&sort_by=popularity.desc`,
     latestEps: `/discover/tv?language=${LANG}&${g}&sort_by=first_air_date.desc&vote_count.gte=5`,
-    topAll: `/discover/tv?language=${LANG}&${g}&sort_by=popularity.desc`,
-    season: `/discover/tv?language=${LANG}&${g}&sort_by=vote_average.desc&vote_count.gte=50`,
+    // PISOS DE VOTOS (2026-08-04) — deliberadamente MÁS BAJOS que en Películas y Series:
+    // el catálogo de anime es unas diez veces más chico. Medido en Animación: con piso de
+    // 100 votos quedan 1.090 candidatos y con 300 apenas 476, y eso ANTES de filtrar por
+    // subgénero — algunos quedarían casi vacíos. Por eso 50 y 100 en vez de 100 y 300.
+    // `airing` (en emisión) y `latestEps` (recientes) no llevan piso nuevo: un anime que
+    // estrenó esta temporada todavía no juntó votos y son justo las filas para mostrarlo.
+    topAll: `/discover/tv?language=${LANG}&${g}&sort_by=popularity.desc&vote_count.gte=50`,
+    season: `/discover/tv?language=${LANG}&${g}&sort_by=vote_average.desc&vote_count.gte=100`,
     upcoming: `/discover/tv?language=${LANG}&${g}&sort_by=vote_count.desc`,
   };
 }

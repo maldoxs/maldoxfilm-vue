@@ -57,9 +57,20 @@ function endpointsFor(gid: number) {
   const today = new Date().toISOString().slice(0, 10);
   const twoYearsAgo = new Date(Date.now() - 2 * 365 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   return {
-    trending: `/discover/movie?language=${LANG}&${g}&sort_by=popularity.desc`,
+    // PISOS DE VOTOS (2026-08-04, medidos contra TMDB antes de fijarlos):
+    // - `popularity` es una métrica de TMDB que mide actividad reciente en SU sitio, no
+    //   calidad ni audiencia. Sin piso, la fila trae títulos sin público real. Con 100
+    //   votos, Suspenso pasa de 61.747 a 5.487 candidatos: sigue sobrando material.
+    // - `vote_average` con piso de 50 dejaba entrar notas que no significan nada: en
+    //   Suspenso se colaba una película con 8.5 y SESENTA Y NUEVE votos, al lado de El
+    //   Caballero Oscuro con 36.326. Con 300 (el piso que usa TMDB para su propio
+    //   ranking) desaparece y quedan 2.998 candidatos.
+    // NO se le pone piso a las otras tres: `popular` ya ordena POR cantidad de votos, y
+    // `nowPlaying`/`upcoming` son de estrenos — una película de ayer tiene 0 votos y un
+    // piso vaciaría justamente la fila que existe para mostrarla.
+    trending: `/discover/movie?language=${LANG}&${g}&sort_by=popularity.desc&vote_count.gte=100`,
     popular: `/discover/movie?language=${LANG}&${g}&sort_by=vote_count.desc`,
-    topRated: `/discover/movie?language=${LANG}&${g}&sort_by=vote_average.desc&vote_count.gte=50`,
+    topRated: `/discover/movie?language=${LANG}&${g}&sort_by=vote_average.desc&vote_count.gte=300`,
     nowPlaying: `/discover/movie?language=${LANG}&${g}&primary_release_date.gte=${twoYearsAgo}&sort_by=release_date.desc`,
     upcoming: `/discover/movie?language=${LANG}&${g}&primary_release_date.gte=${today}&sort_by=popularity.desc`,
   };
