@@ -64,6 +64,19 @@ export const useDeviceStore = defineStore('device', {
 
       const root = document.documentElement;
       root.classList.add(`${result.mode}-mode`);
+
+      // FIX webOS (TV): en fullscreen, webOS deja el viewport de layout en un ancho
+      // degenerado (~0). Como todos los contenedores de la app son bloques de ancho
+      // automático, colapsan con él y el texto se parte una palabra por línea — se ve
+      // sobre todo en "Mi Lista" vacía, la única pantalla sin nada que le imponga un
+      // ancho mínimo (las grillas lo disimulan con su `minmax(...)`).
+      // `screen.width` NO se degrada con ese estado, y para cualquier equipo detectado
+      // como TV el `dpr <= 1.5` de `detectDevice` garantiza que ya viene en píxeles CSS.
+      // Se expone como variable para que el piso de ancho lo aplique el CSS (ver
+      // `html.tv-mode #app-shell` en style.css) en vez de un hack de JS.
+      if (result.mode === 'tv' && screen.width >= 1280) {
+        root.style.setProperty('--tv-screen-w', `${screen.width}px`);
+      }
       if (result.mode === 'mobile') {
         const style = document.createElement('style');
         style.textContent = MOBILE_OVERRIDE_CSS;

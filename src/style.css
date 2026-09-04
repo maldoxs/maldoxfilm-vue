@@ -149,6 +149,16 @@ a {
 html.tv-mode body {
   font-size: 18px;
 }
+
+/* Piso de ancho del shell en TV — ver el comentario de `--tv-screen-w` en
+   `stores/device.ts`. Sin esto, cuando webOS deja el viewport de layout en un ancho
+   degenerado (fullscreen), el shell colapsa y todo lo de adentro se renderiza al ancho
+   de la palabra más larga. `min-width` (no `width`) para que sea puramente un piso: en
+   un viewport sano no cambia absolutamente nada. El fallback 1280px es el mismo umbral
+   con el que `detectDevice` reconoce una TV. */
+html.tv-mode #app-shell {
+  min-width: var(--tv-screen-w, 1280px);
+}
 html.tv-mode .section-title {
   font-size: 1.3rem !important;
 }

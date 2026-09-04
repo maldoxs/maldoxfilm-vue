@@ -65,8 +65,11 @@ const activeKey = computed<RouteKey>(() => {
 // barra del navegador — ver sessions/2026-06-13). Al navegar entre secciones del catálogo en
 // ese estado, webOS deja el layout con un ancho de viewport STALE → el catálogo (sobre todo Mi
 // Lista) se ve "cortado/zoom" hasta refrescar. NO se puede salir del fullscreen (reaparece la
-// barra). Solución: forzar un recálculo de layout (evento `resize`) tras cada navegación, así el
-// catálogo se re-mide con el viewport real del fullscreen. SOLO en TV → no afecta móvil/desktop.
+// barra). Este `resize` se agregó como intento de forzar un recálculo, pero NO resuelve el
+// problema: no hay ningún listener de `resize` en la app, y un evento sintético no obliga al
+// navegador a re-medir el viewport. Se deja porque es inocuo. La solución REAL es el piso de
+// ancho `html.tv-mode #app-shell` (style.css) alimentado por `--tv-screen-w` (stores/device.ts),
+// que no depende de que el viewport se corrija. SOLO en TV → no afecta móvil/desktop.
 watch(
   () => route.name,
   () => {
