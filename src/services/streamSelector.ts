@@ -314,10 +314,15 @@ export const isCinemaLeakSource = (s: TorrentioStream): boolean => CINEMA_LEAK_R
  * una TV; pero cualquier cambio ahí es inerte hasta que alguien vuelva a pasar `true`.
  * No inventar comportamiento distinto por dispositivo sin revisar esa decisión primero.
  */
-export function scoreStream(s: TorrentioStream, isTv = false): number {
+export function scoreStream(s: TorrentioStream, isTv = false, ignorarIdioma = false): number {
   // ── Descartes automáticos ──
   if (isJunkStream(s)) return -10000; // sample/trailer/test → nunca
-  if (hasBadLang(s)) return -10000; // idioma incompatible sin ENG/SPA
+  // `ignorarIdioma` SOLO lo usa `rankStreams` cuando el filtro de idioma dejó CERO
+  // candidatos (película de idioma original extranjero, sin ninguna copia doblada).
+  // Ahí descartar por idioma ya no distingue nada —todas están en el mismo idioma— y
+  // lo único que hace es tirar a la basura el resto de los criterios. Default `false`:
+  // el comportamiento normal no cambia en ningún caso.
+  if (!ignorarIdioma && hasBadLang(s)) return -10000; // idioma incompatible sin ENG/SPA
 
   let pts = 0;
 
@@ -444,11 +449,32 @@ export function playbackClass(s: TorrentioStream): 0 | 1 | 2 {
   return 1;
 }
 
+/** Orden vigente: primero la CLASE de reproducción, después el puntaje. */
+const porClaseYPuntaje = (a: ScoredStream, b: ScoredStream): number =>
+  playbackClass(b.s) - playbackClass(a.s) || b.pts - a.pts;
+
 /**
  * rankStreams — ordena por CLASE de reproducción y, dentro de cada clase, por puntaje
- * descendente. Descarta los marcados con idioma incompatible (pts <= -5000); si todos
- * quedan descartados, cae a la lista completa con pts=0 (preserva el comportamiento
- * original — siempre intentar reproducir algo en vez de no reproducir nada).
+ * descendente. Descarta los marcados con idioma incompatible (pts <= -5000).
+ *
+ * ── Rescate cuando el idioma descarta TODO (2026-09-04) ──────────────────────────
+ * Si NINGUNA copia sobrevive al filtro de idioma, la película es de idioma original
+ * extranjero y no existe ninguna versión doblada (cine coreano, francés, japonés —
+ * abunda en Suspenso). Hasta acá se caía a la lista CRUDA con `pts = 0`, o sea SIN
+ * ORDENAR: se terminaba eligiendo la primera que devolvió Torrentio, ignorando si
+ * estaba cacheada, su tamaño y su códec. Comprobado con el código real: con tres
+ * copias coreanas —un remux de 78 GB NO cacheado y dos cacheadas de 4 GB y 1,5 GB en
+ * h264+AAC— elegía el remux de 78 GB, que ni está en RD y que además necesita 9,5 MB/s
+ * cuando RD entrega 8,1 MB/s (no se sostendría ni reproduciéndose directo).
+ *
+ * Ahora se vuelven a ordenar ESAS MISMAS copias con los criterios de siempre —clase,
+ * cacheada, tamaño, códec— neutralizando únicamente el descarte por idioma, que ahí ya
+ * no distingue nada porque todas están en el mismo idioma. La basura (sample/trailer)
+ * se sigue excluyendo.
+ *
+ * No cambia nada donde hoy funciona: mientras sobreviva aunque sea una copia, se usa
+ * `scored` igual que siempre. Y si el rescate quedara vacío (todo basura), se cae a la
+ * lista plana de antes — nunca se devuelve menos de lo que se devolvía.
  */
 export function rankStreams(
   streams: TorrentioStream[],
@@ -462,8 +488,15 @@ export function rankStreams(
   const scored = withUrl
     .map((s) => ({ s, pts: scoreStream(s, isTv) }))
     .filter((x) => x.pts > -5000)
-    .sort((a, b) => playbackClass(b.s) - playbackClass(a.s) || b.pts - a.pts);
-  const pool = scored.length ? scored : withUrl.map((s) => ({ s, pts: 0 }));
+    .sort(porClaseYPuntaje);
+
+  if (scored.length) return { withUrl, scored, pool: scored };
+
+  const sinFiltroDeIdioma = withUrl
+    .map((s) => ({ s, pts: scoreStream(s, isTv, true) }))
+    .filter((x) => x.pts > -5000) // la basura (sample/trailer) sigue fuera
+    .sort(porClaseYPuntaje);
+  const pool = sinFiltroDeIdioma.length ? sinFiltroDeIdioma : withUrl.map((s) => ({ s, pts: 0 }));
   return { withUrl, scored, pool };
 }
 

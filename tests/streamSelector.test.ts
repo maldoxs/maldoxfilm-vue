@@ -132,13 +132,67 @@ describe('"Alien" — idiomas mixtos / mal etiquetados', () => {
     expect(scored.find((x) => x.s === itaOnlyRelease)).toBeUndefined();
   });
 
-  test('si TODOS son descartables, el pool cae a la lista completa con pts=0 (siempre reproducir algo)', () => {
+  test('si TODOS son descartables, el pool conserva todas las copias (siempre reproducir algo)', () => {
     const onlyBad1 = stream({ title: 'Alien ITA only 💾 4 GB', behaviorHints: { filename: 'a.ita.mkv' } });
     const onlyBad2 = stream({ title: 'Alien KOR only 💾 4 GB', behaviorHints: { filename: 'a.kor.mkv' } });
     const { pool, scored } = rankStreams([onlyBad1, onlyBad2]);
     expect(scored.length).toBe(0);
     expect(pool.length).toBe(2);
-    expect(pool[0].pts).toBe(0);
+  });
+});
+
+// ── Película de idioma original extranjero (2026-09-04) ──────────────────────────
+// Cuando el filtro de idioma descarta TODAS las copias —cine coreano/francés/japonés
+// sin ninguna versión doblada—, antes se caía a la lista CRUDA sin ordenar y se elegía
+// la primera que devolvió Torrentio, ignorando cacheado, tamaño y códec. El objetivo
+// del proyecto es que la reproducción sea fluida: entre copias del mismo idioma hay que
+// elegir igual la que mejor se reproduce.
+describe('Idioma original extranjero — el orden se mantiene aunque se descarten todas', () => {
+  const remux78gb = stream({
+    title: 'Parasite.2019.2160p.UHD.BluRay.REMUX.HEVC.KOREAN 💾 78 GB',
+    name: 'Torrentio\n[RD download]',
+    behaviorHints: { filename: 'Parasite.2019.2160p.REMUX.HEVC.KOREAN.mkv' },
+  });
+  const cacheada4gb = stream({
+    title: 'Parasite.2019.1080p.BluRay.x264.AAC.KOREAN 💾 4 GB',
+    name: 'Torrentio\n[RD+]',
+    behaviorHints: { filename: 'Parasite.2019.1080p.x264.AAC.KOREAN.mp4' },
+  });
+  const cacheada720p = stream({
+    title: 'Parasite.2019.720p.KOREAN 💾 1.5 GB',
+    name: 'Torrentio\n[RD+]',
+    behaviorHints: { filename: 'Parasite.2019.720p.KOREAN.mkv' },
+  });
+
+  test('elige la cacheada que reproduce directo, no la primera de la lista', () => {
+    // El remux va PRIMERO en la lista (como lo devolvió Torrentio): antes ganaba por eso.
+    const { scored, pool } = rankStreams([remux78gb, cacheada4gb, cacheada720p]);
+    expect(scored.length).toBe(0); // todas descartadas por idioma, como corresponde
+    expect(pool.length).toBe(3); // no se pierde ninguna: hay que reproducir algo
+    expect(pool[0].s).toBe(cacheada4gb); // cacheada + h264/AAC + 1080p + tamaño sano
+    expect(pool[pool.length - 1].s).toBe(remux78gb); // no cacheada y de 78 GB → última
+  });
+
+  test('la basura sigue excluida aunque el idioma ya no filtre', () => {
+    const sample = stream({
+      title: 'Parasite.2019.KOREAN.sample 💾 0.05 GB',
+      name: 'Torrentio\n[RD+]',
+      behaviorHints: { filename: 'Parasite.2019.KOREAN.sample.mkv' },
+    });
+    const { pool } = rankStreams([sample, cacheada4gb]);
+    expect(pool.find((p) => p.s === sample)).toBeUndefined();
+    expect(pool[0].s).toBe(cacheada4gb);
+  });
+
+  test('no cambia nada cuando SÍ hay una copia con idioma válido', () => {
+    const latina = stream({
+      title: 'Parasite.2019.1080p.Dual-Lat 💾 4 GB',
+      name: 'Torrentio\n[RD+]',
+      behaviorHints: { filename: 'Parasite.2019.1080p.Dual-Lat.mp4' },
+    });
+    const { scored, pool } = rankStreams([remux78gb, latina]);
+    expect(scored.length).toBe(1); // el filtro de idioma sigue actuando igual que siempre
+    expect(pool[0].s).toBe(latina);
   });
 });
 
