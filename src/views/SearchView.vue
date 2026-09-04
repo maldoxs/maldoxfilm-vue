@@ -157,7 +157,12 @@ function focusSearchInput() {
       <span v-else-if="searched">{{ results.length }} resultados</span>
     </div>
 
-    <div v-if="loading" class="search-spinner">
+    <!-- El spinner solo cuando NO hay nada que mostrar todavía (la primera búsqueda).
+         Antes aparecía en cada tecla: los resultados ya visibles se borraban y volvían
+         400ms después, y ese parpadeo se lee como lentitud aunque la respuesta llegue
+         igual de rápido. Mientras se escribe se mantienen los resultados anteriores;
+         el aviso de que hay algo en curso ya lo da el "Buscando..." de arriba. -->
+    <div v-if="loading && !results.length" class="search-spinner">
       <div class="spinner"></div>
     </div>
 
