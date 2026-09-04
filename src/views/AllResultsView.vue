@@ -19,6 +19,7 @@ import MovieCard from '../components/catalog/MovieCard.vue';
 import { useAppServices } from '../composables/useAppServices';
 import { useDeviceStore } from '../stores/device';
 import { TMDB_IMG_BASE } from '../services/catalog';
+import { safeStorage } from '../services/safeStorage';
 import type { MediaItem } from '../types';
 
 const props = defineProps<{
@@ -37,7 +38,65 @@ interface TmdbPage {
   total_results: number;
 }
 
+/**
+ * Memoria de posición del "Ver todo" — por ENTRADA DEL HISTORIAL.
+ *
+ * Esta vista NO scrollea la ventana: `.all-results` es `position: fixed` con su
+ * propio `overflow-y: auto`. Por eso el `scrollBehavior` del router (que restaura
+ * `window`) nunca pudo devolver la posición acá: `savedPosition.top` siempre vale 0
+ * porque el documento jamás se movió. Hay que guardar y restaurar el scroll del
+ * contenedor a mano.
+ *
+ * La clave identifica la ENTRADA del historial: volver con "Volver"/atrás regresa a
+ * la MISMA entrada → se restaura; entrar de nuevo desde el catálogo crea una entrada
+ * NUEVA → arranca arriba, como siempre. Así no hace falta adivinar la dirección de la
+ * navegación.
+ *
+ * Se compone de `position` (el índice que Vue Router lleva en `history.state`) MÁS la
+ * URL de esa entrada. Verificado en el navegador contra el build real: este router NO
+ * escribe `state.key`, solo `{back, current, forward, replaced, position, scroll}` —
+ * usar `key` habría dejado esto sin guardar nada nunca. La URL acompaña al índice
+ * porque `position` se reutiliza: si el usuario vuelve atrás y navega a otro lado, la
+ * entrada nueva ocupa el mismo índice, y sin la URL restauraríamos la posición de una
+ * lista sobre otra distinta.
+ *
+ * Se guarda en `safeStorage` (no en una variable del módulo) para que también sobreviva
+ * a un refresco de la página, y porque así queda inspeccionable al depurar.
+ */
+interface SavedSpot {
+  top: number;
+  pages: number;
+}
+const SCROLL_KEY_PREFIX = 'verTodo:scroll:';
+
+function historyKey(): string | null {
+  const st = window.history.state as { position?: number; current?: string } | null;
+  if (!st || typeof st.position !== 'number') return null;
+  return `${SCROLL_KEY_PREFIX}${st.position}|${st.current ?? ''}`;
+}
+
+function readSpot(key: string | null): SavedSpot | null {
+  if (!key) return null;
+  try {
+    const raw = safeStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SavedSpot;
+    return typeof parsed?.top === 'number' && typeof parsed?.pages === 'number' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSpot(key: string, spot: SavedSpot): void {
+  try {
+    safeStorage.setItem(key, JSON.stringify(spot));
+  } catch {
+    /* best effort — nunca debe romper la navegación */
+  }
+}
+
 const items = ref<MediaItem[]>([]);
+const rootRef = ref<HTMLElement | null>(null);
 const page = ref(1);
 const totalPages = ref(1);
 const totalResults = ref(0);
@@ -96,8 +155,63 @@ function reset() {
 
 watch(() => props.endpoint, reset);
 
+/**
+ * loadUpTo — vuelve a cargar páginas hasta llegar a la que estaba cargada al salir.
+ * Sin esto, restaurar el offset no serviría: al volver, la grilla arranca con una sola
+ * página y el contenedor no mide lo suficiente como para que esa posición exista.
+ * Respeta el `loading` de `loadNext` (esperando en vez de reentrar) y lleva un tope de
+ * vueltas para no quedarse girando si TMDB deja de responder.
+ */
+async function loadUpTo(targetPage: number) {
+  let vueltas = 0;
+  while (page.value <= targetPage && page.value <= totalPages.value && vueltas++ < 40) {
+    if (loading.value) {
+      await new Promise((r) => setTimeout(r, 60));
+      continue;
+    }
+    await loadNext();
+  }
+}
+
+/**
+ * Clave de ESTA vista, capturada al montar. No se puede leer al desmontar: para cuando
+ * corre `onBeforeUnmount`, el router ya empujó la entrada de destino y `history.state`
+ * apunta a la ficha, no a la grilla — guardar ahí escribía bajo la clave equivocada y la
+ * restauración nunca encontraba nada (comprobado en el navegador antes de corregirlo).
+ */
+let myKey: string | null = null;
+
+/**
+ * esVueltaAtras — distingue "volví a esta lista" de "entré de nuevo a esta lista".
+ *
+ * Hace falta porque `position` se REUTILIZA: si el usuario sale de la grilla con
+ * "Volver" y vuelve a entrar desde el catálogo, la entrada nueva ocupa el mismo índice
+ * y la misma URL que la anterior, así que la clave sola no alcanza — la lista arrancaba
+ * a mitad de camino en vez de arriba.
+ *
+ * `forward` es la señal del propio historial y se comprobó contra el build real:
+ *   entrada nueva  -> {position: 11, forward: null}
+ *   tras volver    -> {position: 11, forward: "/pelicula/860508"}
+ * Solo hay algo "adelante" cuando efectivamente se retrocedió desde ahí.
+ */
+function esVueltaAtras(): boolean {
+  return !!(window.history.state as { forward?: string | null } | null)?.forward;
+}
+
+/** restoreScroll — solo hace algo al VOLVER (misma entrada del historial). */
+async function restoreScroll() {
+  if (!esVueltaAtras()) return;
+  const saved = readSpot(myKey);
+  if (!saved || saved.top <= 0) return;
+  await loadUpTo(saved.pages);
+  await nextTick();
+  if (rootRef.value) rootRef.value.scrollTop = saved.top;
+}
+
 onMounted(() => {
+  myKey = historyKey();
   reset();
+  void restoreScroll();
   observer = new IntersectionObserver(
     (entries) => {
       if (entries[0]?.isIntersecting) void loadNext();
@@ -111,6 +225,11 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  // Guardar dónde quedó el usuario ANTES de desmontar (al abrir una ficha). `page` apunta
+  // a la SIGUIENTE por cargar, así que las ya cargadas son `page - 1`.
+  if (myKey && rootRef.value && rootRef.value.scrollTop > 0) {
+    writeSpot(myKey, { top: rootRef.value.scrollTop, pages: page.value - 1 });
+  }
   observer?.disconnect();
   observer = null;
 });
@@ -126,7 +245,7 @@ function goBack() {
 </script>
 
 <template>
-  <div class="all-results">
+  <div ref="rootRef" class="all-results">
     <!-- Telón: backdrop desenfocado + oscurecido para que resalten los pósters. -->
     <div
       class="all-results-backdrop"
