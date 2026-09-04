@@ -213,6 +213,17 @@ _playerRef = player;
 let seekMuteRestore: boolean | null = null;
 let seekUnmuteTimer: ReturnType<typeof setTimeout> | null = null;
 
+// Subtítulos y recarga de `/t/` (2026-09-04): `tpipelineReloadMpd` hace `video.pause()`
+// y mueve `tpipelineOffset` en el mismo paso, así que la base de tiempo del subtítulo
+// cambia mientras el video está detenido y no llega ningún `timeupdate` que lo recalcule
+// — el cue quedaba mostrando la línea de la posición ANTERIOR sobre el cuadro nuevo.
+// Recalcular en cuanto cambia el offset cierra esa ventana. Solo aplica a `/t/`: en los
+// demás caminos el offset se queda en 0 y este watch no dispara nunca.
+watch(
+  () => player.tpipelineOffset.value,
+  () => subtitles.refresh()
+);
+
 // ── Barra de controles custom (#nfControls) ─────────────────────────────────
 const nfControls = useNetflixControls({
   videoRef,

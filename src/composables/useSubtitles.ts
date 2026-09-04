@@ -83,6 +83,13 @@ export interface UseSubtitlesReturn {
   }): Promise<void>;
   /** Ajusta el offset +/- delta ms, re-renderiza y persiste (local + crowdsourcing). */
   adjustOffset(deltaMs: number): void;
+  /**
+   * refresh — recalcula el cue con la base de tiempo ACTUAL. Necesario cuando esa base
+   * cambia sin que el `<video>` emita ningún evento: en `/t/`, la recarga del MPD pausa
+   * el video y mueve `tpipelineOffset` en el mismo paso, así que sin esto el subtítulo
+   * se queda con la línea de la posición anterior.
+   */
+  refresh(): void;
   /** Limpia cues/listeners — llamar al cerrar el reproductor. */
   clear(): void;
   /**
@@ -146,6 +153,16 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
     video.addEventListener('timeupdate', timeUpdateHandler);
     video.addEventListener('seeked', timeUpdateHandler);
     video.addEventListener('seeking', seekingHandler);
+    // `pause`/`play` (2026-09-04): con el video detenido NO hay `timeupdate`, así que el
+    // cue en pantalla se queda con el último calculado. Normalmente da igual —el cuadro
+    // también está congelado—, pero en `/t/` la recarga del MPD PAUSA el video y cambia
+    // `tpipelineOffset` en el mismo paso (usePlayer, "video.pause(); tpipelineOffset =
+    // t"), o sea que la base de tiempo se mueve mientras no llega ningún evento: el
+    // subtítulo quedaba mostrando la línea de la posición ANTERIOR sobre el cuadro nuevo.
+    // Recalcular al pausar y al reanudar cierra esa ventana. Es la misma función pura de
+    // siempre: no cambia qué se muestra en ningún caso donde ya estaba bien.
+    video.addEventListener('pause', timeUpdateHandler);
+    video.addEventListener('play', timeUpdateHandler);
   }
 
   function detachVideoListeners() {
@@ -154,6 +171,8 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
     if (timeUpdateHandler) {
       video.removeEventListener('timeupdate', timeUpdateHandler);
       video.removeEventListener('seeked', timeUpdateHandler);
+      video.removeEventListener('pause', timeUpdateHandler);
+      video.removeEventListener('play', timeUpdateHandler);
     }
     if (seekingHandler) video.removeEventListener('seeking', seekingHandler);
     timeUpdateHandler = null;
@@ -438,5 +457,21 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
 
   const hasSubtitleData = computed(() => srtRaw.value !== null);
 
-  return { activeCueText, status, enabled, offsetMs, hasSubtitleData, fetchAndInject, adjustOffset, clear, cues };
+  return {
+    activeCueText,
+    status,
+    enabled,
+    offsetMs,
+    hasSubtitleData,
+    fetchAndInject,
+    adjustOffset,
+    clear,
+    cues,
+    /**
+     * refresh — recalcula el cue con la base de tiempo ACTUAL. Lo usa el reproductor
+     * cuando cambia `tpipelineOffset` con el video detenido, momento en el que ningún
+     * evento del `<video>` va a llegar para hacerlo solo.
+     */
+    refresh: renderAtCurrentTime,
+  };
 }
