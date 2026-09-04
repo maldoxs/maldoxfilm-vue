@@ -120,6 +120,20 @@ onMounted(() => {
   };
   document.addEventListener('click', requestOnce);
   document.addEventListener('keydown', requestOnce);
+
+  // Precarga del chunk de Buscar (TV). `/buscar` es un `import()` dinámico, así que la
+  // PRIMERA vez que se pulsa Buscar hay que descargar y parsear su chunk ANTES de pintar
+  // nada — en webOS esa espera se siente como que el botón "se pega". Se precarga cuando
+  // el navegador queda ocioso: no compite con la carga inicial y deja el primer Buscar
+  // instantáneo. Best effort: si falla, la navegación normal lo carga igual que siempre.
+  const prefetchSearch = () => {
+    void import('./views/SearchView.vue').catch(() => {});
+  };
+  // `requestIdleCallback` no existe en el Chromium viejo de webOS (llegó en Chrome 47).
+  const ric = (window as unknown as { requestIdleCallback?: (cb: () => void) => void })
+    .requestIdleCallback;
+  if (typeof ric === 'function') ric(prefetchSearch);
+  else setTimeout(prefetchSearch, 2500);
 });
 </script>
 

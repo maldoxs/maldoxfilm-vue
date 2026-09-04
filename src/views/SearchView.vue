@@ -95,7 +95,12 @@ watch(
 
 onMounted(() => {
   runSearch(props.query);
-  recommended.load(`/trending/all/week?language=${LANG}`);
+  // Los recomendados SOLO se renderizan en móvil (ver el bloque `v-else-if="isMobile"`
+  // del template). En TV y desktop esta llamada se hacía igual y el resultado no se
+  // mostraba nunca: una petición a TMDB compitiendo por el ancho de banda justo en el
+  // momento en que el usuario está esperando que aparezca la búsqueda. Se pide solo
+  // donde se usa.
+  if (deviceStore.isMobile) recommended.load(`/trending/all/week?language=${LANG}`);
 });
 
 function onSelect({ id, type }: { id: MediaItem['id']; type: 'movie' | 'tv' }) {
