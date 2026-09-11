@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import { parseMediaInfos, pickSpanishAudioToken, pickSpanishSubToken } from '../src/services/mediaInfos';
+import { detectAc3Support } from '../src/services/playback';
 
 // Forma REAL observada en vivo (La Momia Dr4gon): solo ita/eng, sin español.
 const momiaRaw = {
@@ -158,5 +159,65 @@ describe('videoNeedsHevcSupport — ¿el video real exige soporte HEVC?', () => 
     expect(real.videoCodec).toBe('h264'); // antes salía null → "desconocido"
     expect(videoNeedsHevcSupport(real)).toBe(false);
     expect(hasNativeDecodableAudio(real)).toBe(true); // → Direct Play, sin transcodificar
+  });
+});
+
+// ── AC3 por hardware (2026-09-11) ────────────────────────────────────────────────
+// Comprobado en un LG webOS: reproduce h264 + AC3 directo y CON audio. Antes la
+// regla excluia AC3 para todos, asi que en la TV se mandaban a convertir archivos
+// que ahi funcionan directos — y convertir es el camino que se corta.
+describe('hasNativeDecodableAudio — AC3 segun lo que soporte el equipo', () => {
+  const soloAc3 = {
+    videoCodec: 'h264',
+    audio: [{ token: 'eng1', codec: 'ac3' }],
+  } as unknown as Parameters<typeof hasNativeDecodableAudio>[0];
+
+  const soloEac3 = {
+    videoCodec: 'h264',
+    audio: [{ token: 'eng1', codec: 'eac3' }],
+  } as unknown as Parameters<typeof hasNativeDecodableAudio>[0];
+
+  test('sin soporte AC3 (escritorio): no es decodificable — comportamiento de siempre', () => {
+    expect(hasNativeDecodableAudio(soloAc3)).toBe(false);
+    expect(hasNativeDecodableAudio(soloAc3, false)).toBe(false);
+  });
+
+  test('con soporte AC3 (TV): SI es decodificable, va a reproduccion directa', () => {
+    expect(hasNativeDecodableAudio(soloAc3, true)).toBe(true);
+    expect(hasNativeDecodableAudio(soloEac3, true)).toBe(true);
+  });
+
+  test('el AAC sigue siendo decodificable en todos lados', () => {
+    const aac = { videoCodec: 'h264', audio: [{ token: 'spa1', codec: 'aac' }] } as unknown as Parameters<
+      typeof hasNativeDecodableAudio
+    >[0];
+    expect(hasNativeDecodableAudio(aac)).toBe(true);
+    expect(hasNativeDecodableAudio(aac, true)).toBe(true);
+  });
+
+  test('DTS y TrueHD NO se rescatan ni con soporte AC3', () => {
+    const dts = { videoCodec: 'h264', audio: [{ token: 'eng1', codec: 'dts' }] } as unknown as Parameters<
+      typeof hasNativeDecodableAudio
+    >[0];
+    expect(hasNativeDecodableAudio(dts, true)).toBe(false);
+  });
+});
+
+describe('detectAc3Support — solo confia en "probably"', () => {
+  test('la TV que responde "probably" habilita AC3 directo', () => {
+    expect(detectAc3Support({ canPlayType: () => 'probably' })).toBe(true);
+  });
+
+  test('"maybe" NO alcanza: sin red que detecte un video mudo, ante la duda se convierte', () => {
+    expect(detectAc3Support({ canPlayType: () => 'maybe' })).toBe(false);
+  });
+
+  test('Chrome de escritorio (cadena vacia) queda igual que siempre', () => {
+    expect(detectAc3Support({ canPlayType: () => '' })).toBe(false);
+  });
+
+  test('sin elemento no rompe', () => {
+    expect(detectAc3Support(null)).toBe(false);
+    expect(detectAc3Support(undefined)).toBe(false);
   });
 });

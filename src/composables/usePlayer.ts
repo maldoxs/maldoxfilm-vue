@@ -29,6 +29,7 @@
 import { ref, type Ref } from 'vue';
 import {
   detectHevcSupport,
+  detectAc3Support,
   checkBadAudioForDirectPlay,
   isDualLatFilename,
   MIN_VALID_DURATION_SEC,
@@ -1653,6 +1654,10 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // scoring uniforme y el fix de AbortSignal, esto hace que el seek funcione en TV. NO volver
     // a poner `!isTvNow` acá: desviaba el HEVC al transcode y rompía el seek en TV (probado).
     const hevcOk = detectHevcSupport(getMediaSource());
+    // AC3/EAC3 por hardware: la TV los decodifica en reproduccion directa aunque
+    // MediaSource diga que no (medido en LG webOS, ver `detectAc3Support`). Sin esto,
+    // en la TV se mandaban a convertir archivos que ahi se reproducen directos.
+    const ac3Ok = detectAc3Support(video);
     const { hasBadAudio } = checkBadAudioForDirectPlay(streamFn, !!rdId);
 
     // ── DECIDE EL CÓDEC REAL, NO EL NOMBRE (2026-08-02) ──────────────────────────────
@@ -1677,12 +1682,12 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     if (rdId) {
       try {
         const info = parseMediaInfos(await opts.rdClient.fetchMediaInfos(rdId));
-        realAudioOk = hasNativeDecodableAudio(info);
+        realAudioOk = hasNativeDecodableAudio(info, ac3Ok);
         realIsHevc = videoNeedsHevcSupport(info);
         console.warn(
           `[RD] mediaInfos (códec REAL) → video: ${info.videoCodec ?? 'desconocido'} | audio: ${
             info.audio.map((a) => `${a.token}=${a.codec}`).join(', ') || 'sin pistas'
-          }`
+          }${ac3Ok ? ' | este equipo decodifica AC3 directo' : ''}`
         );
       } catch {
         /* sin mediaInfos → heurística por nombre, como siempre */

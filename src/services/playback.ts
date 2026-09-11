@@ -37,6 +37,49 @@ export function detectHevcSupport(mediaSource: MediaSourceLike | undefined | nul
   return HEVC_MIME_TYPES.some((mime) => mediaSource.isTypeSupported(mime));
 }
 
+/** Lo mínimo que necesita {@link detectAc3Support}: un `<video>` real o un doble de test. */
+export interface CanPlayTypeLike {
+  canPlayType(type: string): string;
+}
+
+const AC3_MIME_TYPES = [
+  'video/mp4; codecs="avc1.640028, ac-3"',
+  'video/mp4; codecs="avc1.640028, ec-3"',
+  'audio/mp4; codecs="ac-3"',
+];
+
+/**
+ * detectAc3Support — ¿este equipo decodifica AC3/EAC3 en reproducción DIRECTA?
+ *
+ * Medido en un LG webOS el 2026-09-11, con una página de diagnóstico y después con
+ * un archivo h264 + AC3 real servido sin convertir: la TV lo reprodujo CON AUDIO.
+ * Y la misma TV declara lo contrario según por dónde se pregunte:
+ *
+ *   MediaSource.isTypeSupported(ac-3)  -> NO
+ *   video.canPlayType(ac-3)            -> "probably"   (y suena de verdad)
+ *
+ * Por eso se pregunta por `canPlayType` y no por `MediaSource`: la reproducción
+ * directa es un `<video src>`, que usa el decodificador de hardware del equipo, no
+ * el pipeline de MediaSource. El AC3 depende justamente de ese hardware — una TV lo
+ * suena, Chrome de escritorio queda mudo (caso "El Padrino", ya documentado).
+ *
+ * Se exige "probably" y no se acepta "maybe" a propósito: no hay ninguna red que
+ * detecte un video mudo después de arrancar, así que ante la duda conviene seguir
+ * mandándolo a convertir, que siempre funciona aunque a veces se corte. Chrome y
+ * Firefox de escritorio devuelven cadena vacía acá, así que su comportamiento no
+ * cambia en nada.
+ */
+export function detectAc3Support(el: CanPlayTypeLike | undefined | null): boolean {
+  if (!el || typeof el.canPlayType !== 'function') return false;
+  return AC3_MIME_TYPES.some((mime) => {
+    try {
+      return el.canPlayType(mime) === 'probably';
+    } catch {
+      return false;
+    }
+  });
+}
+
 // ── Detección de audio incompatible con reproducción directa (línea ~7873-7877)
 // NOTA: esta regex NO es idéntica a `BAD_AUDIO_RE` de streamSelector.ts — el
 // original la redefine localmente con dos diferencias deliberadas: agrega

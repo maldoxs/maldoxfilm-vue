@@ -102,6 +102,14 @@ export function parseMediaInfos(raw: unknown): MediaInfos {
 // Direct Play mudo en desktop).
 const NATIVE_AUDIO_CODECS = /^(aac|mp3|mp4a|opus|vorbis)/i;
 
+// AC3/EAC3: dependen del decodificador de HARDWARE, asi que no son "nativos" en todos
+// lados — por eso viven aparte y solo cuentan cuando el equipo declara soportarlos
+// (ver `detectAc3Support` en playback.ts). Comprobado en un LG webOS el 2026-09-11
+// reproduciendo un h264 + AC3 real sin convertir: se escucho. Antes se los excluia
+// para TODOS, de modo que en la TV se mandaban a convertir archivos que la TV podia
+// reproducir directo — y convertir es justamente el camino que se corta.
+const HARDWARE_AUDIO_CODECS = /^(ac-?3|e-?ac-?3|eac-?3)/i;
+
 /**
  * hasNativeDecodableAudio — ¿alguna pista de audio del archivo es decodificable
  * NATIVA por el navegador? Devuelve:
@@ -110,9 +118,11 @@ const NATIVE_AUDIO_CODECS = /^(aac|mp3|mp4a|opus|vorbis)/i;
  *   null  → no se pudo determinar (sin pistas parseadas) → NO cambiar el
  *           comportamiento actual (heurística por nombre de archivo).
  */
-export function hasNativeDecodableAudio(info: MediaInfos): boolean | null {
+export function hasNativeDecodableAudio(info: MediaInfos, ac3Ok = false): boolean | null {
   if (!info.audio.length) return null;
-  return info.audio.some((t) => NATIVE_AUDIO_CODECS.test(t.codec));
+  return info.audio.some(
+    (t) => NATIVE_AUDIO_CODECS.test(t.codec) || (ac3Ok && HARDWARE_AUDIO_CODECS.test(t.codec))
+  );
 }
 
 /**
