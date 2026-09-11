@@ -741,10 +741,6 @@ onBeforeUnmount(() => {
 
       <SubtitleOverlay :text="subtitles.activeCueText.value" :enabled="subtitles.enabled.value" />
 
-      <!-- TEMPORAL (2026-09-11) — cartel de diagnostico para la prueba de AC3 directo en
-           TV, donde no hay consola. Se quita en cuanto quede confirmado. -->
-      <div v-if="deviceStore.isTV && player.tvDiag.value" class="tv-diag">{{ player.tvDiag.value }}</div>
-
       <!-- Barra de controles custom — reemplaza #nfControls (líneas ~3751-3824) -->
       <div class="nf-controls" :class="{ hidden: controlsHidden }">
         <div class="nf-seek-wrap">
@@ -1018,23 +1014,6 @@ onBeforeUnmount(() => {
 }
 .playback-notice.hidden {
   opacity: 0;
-}
-
-/* TEMPORAL (2026-09-11) — cartel de diagnostico de la prueba de AC3 en TV. */
-.tv-diag {
-  position: absolute;
-  top: 14px;
-  left: 14px;
-  z-index: 900;
-  background: rgba(0, 0, 0, 0.82);
-  border: 2px solid #3d5afe;
-  border-radius: 8px;
-  padding: 10px 16px;
-  font-size: 1.15rem;
-  font-weight: 600;
-  color: #fff;
-  pointer-events: none;
-  max-width: 90vw;
 }
 
 .nf-controls {

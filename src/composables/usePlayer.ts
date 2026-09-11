@@ -498,12 +498,6 @@ export interface UsePlayerReturn {
   destroy(): void;
   /** ¿Está usando el pipeline /t/? Si true, el seek debe usar tpipelineSeekTo en vez del nativo. */
   isTpipeline: Ref<boolean>;
-  /**
-   * TEMPORAL (2026-09-11) — cartel de diagnostico en pantalla para la TV, donde no
-   * hay consola. Muestra el codec real y por que camino se reproduce. Se quita en
-   * cuanto quede confirmado que el AC3 directo funciona. Vacio = no se muestra.
-   */
-  tvDiag: Ref<string>;
   /** Duración total (seg) reportada por el pipeline /t/ (para la barra custom). */
   tpipelineDuration: Ref<number>;
   /** Offset del MPD actual (seg) — el tiempo real = offset + video.currentTime. */
@@ -525,7 +519,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
 
   // ── Pipeline /t/ state ──────────────────────────────────────────────────────
   const isTpipeline = ref(false);
-  const tvDiag = ref(''); // TEMPORAL — ver `tvDiag` en la interfaz
   const tpipelineDuration = ref(0);
   const tpipelineOffset = ref(0);
   const tpipelineSeeking = ref(false);
@@ -1701,11 +1694,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       }
       if (playerStore.isStale(myGen)) return;
     }
-    // TEMPORAL — cartel en pantalla para la prueba en TV (no hay consola ahi).
-    tvDiag.value =
-      `AC3 directo: ${ac3Ok ? 'SI' : 'NO'}` +
-      ` | audio real: ${realAudioOk === null ? 'sin dato' : realAudioOk ? 'sirve directo' : 'hay que convertir'}`;
-
     // El dato real manda; el nombre solo decide cuando no hay dato.
     const audioSirve = realAudioOk !== null ? realAudioOk : !hasBadAudio;
     const videoSirve = realIsHevc !== null ? !realIsHevc || hevcOk : !streamIsX265 || hevcOk;
@@ -1766,7 +1754,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // esté perfecto. Se espera a que suelte el elemento antes de tocarlo.
       await _shakaDetachAndWait();
       if (playerStore.isStale(myGen)) return;
-      tvDiag.value += ' | camino: DIRECTO'; // TEMPORAL
       const played = await tryHevcDirectPlay(video, streamUrl, params.startPositionSec);
       if (played) {
         const hasSpaDirect = isDualLatFilename(streamFn);
@@ -1791,7 +1778,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     if (rdId) {
       isTpipeline.value = false;
       tpipelineState = null;
-      tvDiag.value += ' | camino: CONVERSION /t/'; // TEMPORAL
       const tpipelineOk = await tryTpipeline({ video, rdId, myGen, selected, streamFn, startPositionSec: params.startPositionSec });
       if (tpipelineOk) {
         isLoadingRd.value = false;
@@ -2022,7 +2008,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   }
 
   return {
-    tvDiag,
     loadingMessage,
     isLoadingRd,
     dashBaseUrl,
