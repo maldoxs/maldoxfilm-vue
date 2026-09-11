@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diagnostico TV — MaldoxFilm</title>
+<style>
+  body { margin:0; padding:24px 32px; background:#0e0e0e; color:#f0f0f0;
+         font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; font-size:22px; }
+  h1 { font-size:28px; margin:0 0 4px; }
+  h2 { font-size:24px; margin:28px 0 10px; color:#8ab4ff; }
+  p.sub { color:#9a9a9a; font-size:18px; margin:0 0 8px; }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:7px 10px; border-bottom:1px solid #262626; vertical-align:top; }
+  td.k { color:#c8c8c8; }
+  td.v { text-align:right; white-space:nowrap; font-weight:600; }
+  .si { color:#5ddb87; }
+  .no { color:#ff6b6b; }
+  .ua { color:#9a9a9a; font-size:15px; word-break:break-all; padding-top:10px; }
+</style>
+</head>
+<body>
+<h1>Diagnostico TV</h1>
+<p class="sub">Que puede reproducir de verdad este navegador</p>
+
+<h2>Acceso nativo de la TV</h2>
+<table id="nativo"></table>
+
+<h2>Codecs por MediaSource (DASH / HLS)</h2>
+<p class="sub">Es el camino que usa el reproductor de la app</p>
+<table id="mse"></table>
+
+<h2>Codecs por reproduccion directa</h2>
+<p class="sub">Archivo servido tal cual, sin convertir</p>
+<table id="directo"></table>
+
+<div class="ua" id="ua"></div>
+
+<script>
+(function () {
+  function fila(tabla, clave, ok, texto) {
+    var tr = document.createElement('tr');
+    var td1 = document.createElement('td');
+    td1.className = 'k';
+    td1.textContent = clave;
+    var td2 = document.createElement('td');
+    td2.className = 'v ' + (ok ? 'si' : 'no');
+    td2.textContent = texto !== undefined ? texto : (ok ? 'SI' : 'NO');
+    tr.appendChild(td1);
+    tr.appendChild(td2);
+    document.getElementById(tabla).appendChild(tr);
+  }
+
+  // ── Acceso al motor nativo (luna://com.webos.media) ──
+  var w = window.webOS;
+  fila('nativo', 'window.webOS', !!w);
+  fila('nativo', 'window.webOS.service', !!(w && w.service));
+  fila('nativo', 'window.webOS.service.request', !!(w && w.service && typeof w.service.request === 'function'));
+  fila('nativo', 'window.webOSDev', !!window.webOSDev);
+  fila('nativo', 'window.PalmSystem', !!window.PalmSystem);
+
+  var combos = [
+    ['H.264 + AAC',  'video/mp4; codecs="avc1.640028, mp4a.40.2"'],
+    ['H.264 + AC3',  'video/mp4; codecs="avc1.640028, ac-3"'],
+    ['H.264 + EAC3', 'video/mp4; codecs="avc1.640028, ec-3"'],
+    ['HEVC + AAC',   'video/mp4; codecs="hvc1.1.6.L93.B0, mp4a.40.2"'],
+    ['HEVC + AC3',   'video/mp4; codecs="hvc1.1.6.L93.B0, ac-3"'],
+    ['AV1 + AAC',    'video/mp4; codecs="av01.0.05M.08, mp4a.40.2"'],
+    ['Matroska',     'video/x-matroska; codecs="avc1.640028, ac-3"']
+  ];
+
+  var MS = window.MediaSource || window.WebKitMediaSource;
+  combos.forEach(function (c) {
+    var ok = false;
+    try { ok = !!(MS && MS.isTypeSupported && MS.isTypeSupported(c[1])); } catch (e) { ok = false; }
+    fila('mse', c[0], ok);
+  });
+
+  var v = document.createElement('video');
+  combos.forEach(function (c) {
+    var r = '';
+    try { r = v.canPlayType(c[1]) || ''; } catch (e) { r = ''; }
+    fila('directo', c[0], r === 'probably' || r === 'maybe', r === '' ? 'NO' : r);
+  });
+
+  document.getElementById('ua').textContent = navigator.userAgent;
+})();
+</script>
+</body>
+</html>
