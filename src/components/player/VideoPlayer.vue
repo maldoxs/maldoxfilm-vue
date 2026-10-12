@@ -97,6 +97,61 @@ const subtitles = useSubtitles({
   },
 });
 
+// ── PRUEBA TEMPORAL (2026-10-12) — seleccion de pista de audio en directa ──────
+// La reproduccion directa suena la PRIMERA pista del archivo y hoy no hay forma de
+// pedir otra, asi que las copias con latino en la 2da pista salen en ingles. Si la TV
+// deja CAMBIAR de pista (ya se comprobo que las ENUMERA), se podria tener latino y
+// reproduccion directa a la vez. Esto es solo para medirlo; se quita al confirmar.
+interface PistaAudio {
+  enabled: boolean;
+  language?: string;
+  label?: string;
+}
+interface ListaPistas {
+  length: number;
+  [i: number]: PistaAudio;
+}
+
+const pistasTexto = ref('');
+
+function leerPistas(): ListaPistas | null {
+  const v = videoRef.value as (HTMLVideoElement & { audioTracks?: ListaPistas }) | null;
+  return v && v.audioTracks ? v.audioTracks : null;
+}
+
+function refrescarPistas() {
+  const t = leerPistas();
+  if (!t) {
+    pistasTexto.value = 'audioTracks NO existe en esta TV';
+    return;
+  }
+  const items: string[] = [];
+  for (let i = 0; i < t.length; i++) {
+    items.push(`${i}:${t[i].language || t[i].label || '?'}${t[i].enabled ? ' <<ACTIVA' : ''}`);
+  }
+  pistasTexto.value = t.length ? `pistas ${t.length} | ${items.join(' | ')}` : 'audioTracks vacio (0 pistas)';
+}
+
+function cambiarPista() {
+  const t = leerPistas();
+  if (!t || !t.length) return;
+  let actual = 0;
+  for (let i = 0; i < t.length; i++) if (t[i].enabled) actual = i;
+  const siguiente = (actual + 1) % t.length;
+  for (let i = 0; i < t.length; i++) t[i].enabled = i === siguiente;
+  refrescarPistas();
+}
+
+watch(
+  () => videoRef.value,
+  (v) => {
+    if (!v) return;
+    v.addEventListener('loadedmetadata', refrescarPistas);
+    v.addEventListener('playing', refrescarPistas);
+  },
+  { immediate: true }
+);
+
 // ── Fullscreen custom ────────────────────────────────────────────────────────
 const fullscreen = useFullscreen({
   playerPageRef,
@@ -745,6 +800,12 @@ onBeforeUnmount(() => {
 
       <SubtitleOverlay :text="subtitles.activeCueText.value" :enabled="subtitles.enabled.value" />
 
+      <!-- PRUEBA TEMPORAL (2026-10-12) — pistas de audio en reproduccion directa. -->
+      <div v-if="deviceStore.isTV && pistasTexto" class="prueba-pistas">
+        <div>{{ pistasTexto }}</div>
+        <button class="prueba-pistas-btn" @click="cambiarPista">CAMBIAR PISTA DE AUDIO</button>
+      </div>
+
       <!-- Barra de controles custom — reemplaza #nfControls (líneas ~3751-3824) -->
       <div class="nf-controls" :class="{ hidden: controlsHidden }">
         <div class="nf-seek-wrap">
@@ -1018,6 +1079,33 @@ onBeforeUnmount(() => {
 }
 .playback-notice.hidden {
   opacity: 0;
+}
+
+/* PRUEBA TEMPORAL (2026-10-12) */
+.prueba-pistas {
+  position: absolute;
+  bottom: 100px;
+  left: 16px;
+  right: 16px;
+  z-index: 900;
+  background: rgba(0, 0, 0, 0.88);
+  border: 2px solid #4caf50;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #a5d6a7;
+}
+.prueba-pistas-btn {
+  margin-top: 8px;
+  background: #4caf50;
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 18px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .nf-controls {
