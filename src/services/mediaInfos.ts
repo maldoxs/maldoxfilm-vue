@@ -158,29 +158,6 @@ const isLatinoTrack = (t: { lang: string; token: string }): boolean =>
   /lat/i.test(t.token) || /latino|latin/i.test(t.lang);
 
 /**
- * directPlayWouldChangeAudioLanguage — ¿mandar este archivo a reproduccion directa
- * lo haria sonar en otro idioma del que corresponde?
- *
- * La reproduccion directa es `video.src = url`: el navegador reproduce la pista por
- * DEFECTO del contenedor, que es la primera, y NO hay forma de pedirle otra. El
- * pipeline /t/, en cambio, pide el token exacto, asi que siempre consigue el español.
- *
- * Bug real (2026-10-12, "Un lugar tranquilo 2"): el archivo trae eng1, spa1 y hin1.
- * Por /t/ sonaba en latino. Al habilitarse la reproduccion directa para AC3 empezo a
- * sonar en INGLES, porque eng1 es la primera pista. La fluidez se gano a costa del
- * idioma, en silencio.
- *
- * Devuelve true cuando hay español mas abajo en la lista pero la primera pista no lo
- * es: ese archivo tiene que seguir yendo por /t/, aunque eso signifique convertir.
- * El idioma manda sobre la fluidez; es la regla del proyecto desde el scoring.
- */
-export function directPlayWouldChangeAudioLanguage(info: MediaInfos): boolean {
-  if (info.audio.length < 2) return false; // una sola pista: no hay nada que elegir
-  if (isSpanishTrack(info.audio[0])) return false; // la primera ya es la correcta
-  return info.audio.some(isSpanishTrack);
-}
-
-/**
  * firstAudioTrackIsSpanish — que idioma va a sonar REALMENTE en reproduccion directa.
  * Es la primera pista del archivo, sin mas. Devuelve null si no hay datos de pistas,
  * para que el llamador caiga a la heuristica por nombre de siempre.

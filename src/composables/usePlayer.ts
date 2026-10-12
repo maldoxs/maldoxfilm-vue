@@ -52,7 +52,6 @@ import {
   pickSpanishAudioToken,
   hasNativeDecodableAudio,
   videoNeedsHevcSupport,
-  directPlayWouldChangeAudioLanguage,
   firstAudioTrackIsSpanish,
 } from '../services/mediaInfos';
 import {
@@ -1693,23 +1692,23 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // el comportamiento queda EXACTAMENTE como antes: heurística por nombre.
     let realAudioOk: boolean | null = null; // true = decodificable nativo · false = no · null = sin dato
     let realIsHevc: boolean | null = null; // true = el video ES HEVC · false = no lo es · null = sin dato
-    // La reproduccion directa no elige pista: suena la primera del archivo. Si el español
-    // esta mas abajo, hay que seguir yendo por /t/ aunque eso implique convertir — el
-    // idioma manda sobre la fluidez. Ver `directPlayWouldChangeAudioLanguage`.
-    let perderiaIdioma = false;
+    // Que idioma va a sonar en reproduccion directa: la PRIMERA pista del archivo.
+    // Solo se usa para informar bien (panel y subtitulos), NO para desviar a /t/:
+    // en TV no se convierte audio, aunque eso signifique quedarse en ingles.
     let primeraPistaEsEspanol: boolean | null = null;
     if (rdId) {
       try {
         const info = parseMediaInfos(await opts.rdClient.fetchMediaInfos(rdId));
         realAudioOk = hasNativeDecodableAudio(info, ac3Ok);
         realIsHevc = videoNeedsHevcSupport(info);
-        perderiaIdioma = directPlayWouldChangeAudioLanguage(info);
         primeraPistaEsEspanol = firstAudioTrackIsSpanish(info);
         console.warn(
           `[RD] mediaInfos (códec REAL) → video: ${info.videoCodec ?? 'desconocido'} | audio: ${
             info.audio.map((a) => `${a.token}=${a.codec}`).join(', ') || 'sin pistas'
           }${ac3Ok ? ' | este equipo decodifica AC3 directo' : ''}${
-            perderiaIdioma ? ' | hay español en otra pista → va por /t/ para no perder el idioma' : ''
+            primeraPistaEsEspanol === false && info.audio.length > 1
+              ? ' | la 1ra pista no es español → sonará en inglés con subtítulos'
+              : ''
           }`
         );
       } catch {
@@ -1764,7 +1763,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // que antes andaban (La Momia/Michael: su única versión cacheada es MKV). Si el directo
     // falla (p.ej. MKV no soportado), `tryHevcDirectPlay` devuelve false y cae al transcode.
     // El contenedor MP4 ya se prioriza en el SCORING (no hace falta bloquear acá).
-    const canTryDirect = videoSirve && audioSirve && !perderiaIdioma;
+    const canTryDirect = videoSirve && audioSirve;
     if (canTryDirect) {
       console.warn(
         `[RD] Direct Play: intentando — video ${realIsHevc !== null ? 'VERIFICADO' : 'por nombre'}, audio ${
