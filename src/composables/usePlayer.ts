@@ -510,12 +510,6 @@ export interface UsePlayerReturn {
   destroy(): void;
   /** ¿Está usando el pipeline /t/? Si true, el seek debe usar tpipelineSeekTo en vez del nativo. */
   isTpipeline: Ref<boolean>;
-  /**
-   * TEMPORAL (2026-10-12) — marcador visible en TV, donde no hay consola. Sirve para
-   * saber si la TV esta corriendo el bundle nuevo: si NO aparece, es caché de webOS.
-   * Muestra ademas que decidio el reproductor sobre el idioma. Se quita al confirmar.
-   */
-  tvDiag: Ref<string>;
   /** Duración total (seg) reportada por el pipeline /t/ (para la barra custom). */
   tpipelineDuration: Ref<number>;
   /** Offset del MPD actual (seg) — el tiempo real = offset + video.currentTime. */
@@ -537,7 +531,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
 
   // ── Pipeline /t/ state ──────────────────────────────────────────────────────
   const isTpipeline = ref(false);
-  const tvDiag = ref(''); // TEMPORAL — ver `tvDiag` en la interfaz
   const tpipelineDuration = ref(0);
   const tpipelineOffset = ref(0);
   const tpipelineSeeking = ref(false);
@@ -1807,11 +1800,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         // Sin datos de pistas se cae a la heurística por nombre, como siempre.
         const hasSpaDirect =
           primeraPistaEsEspanol !== null ? primeraPistaEsEspanol : isDualLatFilename(streamFn);
-        // TEMPORAL — marcador para la TV (no hay consola ahi).
-        tvDiag.value =
-          `BUILD-3 | 1ra pista: ${
-            primeraPistaEsEspanol === null ? 'sin dato (usa el nombre)' : primeraPistaEsEspanol ? 'español' : 'NO español'
-          } | panel: ${hasSpaDirect ? 'Español' : 'Inglés'}`;
         opts.onStreamReady?.({ selected, hasNativeSpanish: hasSpaDirect, spanishTrack: null });
         startStallMonitor(video, myGen, recoverReloadSrc(streamUrl));
         // Toast "Seek fluido" quitado (a pedido) — un solo mensaje "Cargando…", sin toasts.
@@ -2063,7 +2051,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   }
 
   return {
-    tvDiag,
     loadingMessage,
     isLoadingRd,
     dashBaseUrl,

@@ -745,9 +745,6 @@ onBeforeUnmount(() => {
 
       <SubtitleOverlay :text="subtitles.activeCueText.value" :enabled="subtitles.enabled.value" />
 
-      <!-- TEMPORAL (2026-10-12) — marcador de version + decision de idioma, solo TV. -->
-      <div v-if="deviceStore.isTV && player.tvDiag.value" class="tv-diag">{{ player.tvDiag.value }}</div>
-
       <!-- Barra de controles custom — reemplaza #nfControls (líneas ~3751-3824) -->
       <div class="nf-controls" :class="{ hidden: controlsHidden }">
         <div class="nf-seek-wrap">
@@ -1021,22 +1018,6 @@ onBeforeUnmount(() => {
 }
 .playback-notice.hidden {
   opacity: 0;
-}
-
-/* TEMPORAL (2026-10-12) — marcador de diagnostico en TV. */
-.tv-diag {
-  position: absolute;
-  bottom: 96px;
-  left: 16px;
-  z-index: 900;
-  background: rgba(0, 0, 0, 0.85);
-  border: 2px solid #ffb300;
-  border-radius: 8px;
-  padding: 8px 14px;
-  font-size: 1rem;
-  font-weight: 600;
-  color: #ffd54f;
-  pointer-events: none;
 }
 
 .nf-controls {
