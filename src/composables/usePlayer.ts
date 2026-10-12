@@ -47,7 +47,14 @@ import {
   type MediaSourceLike,
 } from '../services/playback';
 import { pickHlsFallbackFromTranscode, pickDashUrlFromTranscode } from '../services/realdebrid';
-import { parseMediaInfos, pickSpanishAudioToken, hasNativeDecodableAudio, videoNeedsHevcSupport } from '../services/mediaInfos';
+import {
+  parseMediaInfos,
+  pickSpanishAudioToken,
+  hasNativeDecodableAudio,
+  videoNeedsHevcSupport,
+  directPlayWouldChangeAudioLanguage,
+  firstAudioTrackIsSpanish,
+} from '../services/mediaInfos';
 import {
   resolveTpipeline,
   resolveRawToRdId,
@@ -1657,7 +1664,14 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // AC3/EAC3 por hardware: la TV los decodifica en reproduccion directa aunque
     // MediaSource diga que no (medido en LG webOS, ver `detectAc3Support`). Sin esto,
     // en la TV se mandaban a convertir archivos que ahi se reproducen directos.
-    const ac3Ok = detectAc3Support(video);
+    //
+    // Acotado a TV ADEMAS de la deteccion por capacidad (2026-10-12, a pedido). La
+    // capacidad sola bastaria en teoria —Chrome y Firefox de escritorio responden
+    // cadena vacia—, pero en MOVIL no se midio nunca: Safari de iOS podria declarar
+    // soporte AC3 y sonar mudo igual, y no hay ninguna red que detecte un video sin
+    // audio despues de arrancar. Hasta medirlo, escritorio y movil conservan la logica
+    // de siempre: AC3 va a conversion. Lo unico comprobado en vivo es la TV.
+    const ac3Ok = (opts.isTv?.() ?? false) && detectAc3Support(video);
     const { hasBadAudio } = checkBadAudioForDirectPlay(streamFn, !!rdId);
 
     // ── DECIDE EL CÓDEC REAL, NO EL NOMBRE (2026-08-02) ──────────────────────────────
@@ -1679,15 +1693,24 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // el comportamiento queda EXACTAMENTE como antes: heurística por nombre.
     let realAudioOk: boolean | null = null; // true = decodificable nativo · false = no · null = sin dato
     let realIsHevc: boolean | null = null; // true = el video ES HEVC · false = no lo es · null = sin dato
+    // La reproduccion directa no elige pista: suena la primera del archivo. Si el español
+    // esta mas abajo, hay que seguir yendo por /t/ aunque eso implique convertir — el
+    // idioma manda sobre la fluidez. Ver `directPlayWouldChangeAudioLanguage`.
+    let perderiaIdioma = false;
+    let primeraPistaEsEspanol: boolean | null = null;
     if (rdId) {
       try {
         const info = parseMediaInfos(await opts.rdClient.fetchMediaInfos(rdId));
         realAudioOk = hasNativeDecodableAudio(info, ac3Ok);
         realIsHevc = videoNeedsHevcSupport(info);
+        perderiaIdioma = directPlayWouldChangeAudioLanguage(info);
+        primeraPistaEsEspanol = firstAudioTrackIsSpanish(info);
         console.warn(
           `[RD] mediaInfos (códec REAL) → video: ${info.videoCodec ?? 'desconocido'} | audio: ${
             info.audio.map((a) => `${a.token}=${a.codec}`).join(', ') || 'sin pistas'
-          }${ac3Ok ? ' | este equipo decodifica AC3 directo' : ''}`
+          }${ac3Ok ? ' | este equipo decodifica AC3 directo' : ''}${
+            perderiaIdioma ? ' | hay español en otra pista → va por /t/ para no perder el idioma' : ''
+          }`
         );
       } catch {
         /* sin mediaInfos → heurística por nombre, como siempre */
@@ -1741,7 +1764,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // que antes andaban (La Momia/Michael: su única versión cacheada es MKV). Si el directo
     // falla (p.ej. MKV no soportado), `tryHevcDirectPlay` devuelve false y cae al transcode.
     // El contenedor MP4 ya se prioriza en el SCORING (no hace falta bloquear acá).
-    const canTryDirect = videoSirve && audioSirve;
+    const canTryDirect = videoSirve && audioSirve && !perderiaIdioma;
     if (canTryDirect) {
       console.warn(
         `[RD] Direct Play: intentando — video ${realIsHevc !== null ? 'VERIFICADO' : 'por nombre'}, audio ${
@@ -1756,7 +1779,12 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       if (playerStore.isStale(myGen)) return;
       const played = await tryHevcDirectPlay(video, streamUrl, params.startPositionSec);
       if (played) {
-        const hasSpaDirect = isDualLatFilename(streamFn);
+        // Que idioma suena DE VERDAD: la primera pista del archivo. El nombre no sirve
+        // acá — `...ENG.LATINO.HINDI...` decía que había latino mientras sonaba inglés,
+        // y con ese dato el panel mostraba "Español" y se apagaban los subtítulos.
+        // Sin datos de pistas se cae a la heurística por nombre, como siempre.
+        const hasSpaDirect =
+          primeraPistaEsEspanol !== null ? primeraPistaEsEspanol : isDualLatFilename(streamFn);
         opts.onStreamReady?.({ selected, hasNativeSpanish: hasSpaDirect, spanishTrack: null });
         startStallMonitor(video, myGen, recoverReloadSrc(streamUrl));
         // Toast "Seek fluido" quitado (a pedido) — un solo mensaje "Cargando…", sin toasts.

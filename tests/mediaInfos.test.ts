@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { parseMediaInfos, pickSpanishAudioToken, pickSpanishSubToken } from '../src/services/mediaInfos';
 import { detectAc3Support } from '../src/services/playback';
+import { directPlayWouldChangeAudioLanguage, firstAudioTrackIsSpanish } from '../src/services/mediaInfos';
 
 // Forma REAL observada en vivo (La Momia Dr4gon): solo ita/eng, sin español.
 const momiaRaw = {
@@ -219,5 +220,60 @@ describe('detectAc3Support — solo confia en "probably"', () => {
   test('sin elemento no rompe', () => {
     expect(detectAc3Support(null)).toBe(false);
     expect(detectAc3Support(undefined)).toBe(false);
+  });
+});
+
+// ── El idioma manda sobre la fluidez (2026-10-12) ────────────────────────────────
+// Bug real "Un lugar tranquilo 2": el archivo trae eng1, spa1 y hin1. Por /t/ sonaba
+// en latino; al habilitarse la reproduccion directa para AC3 empezo a sonar en INGLES,
+// porque directa reproduce la PRIMERA pista y no sabe elegir. Encima el panel decia
+// "Audio: Español" (lo leia del nombre `...ENG.LATINO.HINDI...`) y apagaba los
+// subtitulos, asi que quedaba ingles sin subtitular.
+describe('directPlayWouldChangeAudioLanguage', () => {
+  const info = (tokens: Array<[string, string, string]>) =>
+    ({
+      durationSec: 0,
+      videoCodec: 'h264',
+      audio: tokens.map(([token, lang, langIso]) => ({ token, lang, langIso, codec: 'ac3' })),
+      subtitles: [],
+    }) as unknown as Parameters<typeof directPlayWouldChangeAudioLanguage>[0];
+
+  test('caso real: eng1 primero y spa1 despues — NO puede ir a directa', () => {
+    const i = info([
+      ['eng1', 'English', 'eng'],
+      ['spa1', 'Spanish', 'spa'],
+      ['hin1', 'Hindi', 'hin'],
+    ]);
+    expect(directPlayWouldChangeAudioLanguage(i)).toBe(true);
+    expect(firstAudioTrackIsSpanish(i)).toBe(false);
+  });
+
+  test('una sola pista: no hay nada que elegir, directa es segura', () => {
+    const i = info([['eng1', 'English', 'eng']]);
+    expect(directPlayWouldChangeAudioLanguage(i)).toBe(false);
+    expect(firstAudioTrackIsSpanish(i)).toBe(false);
+  });
+
+  test('el español ya es la primera pista: directa suena en español', () => {
+    const i = info([
+      ['spa1', 'Spanish Latino', 'spa'],
+      ['eng1', 'English', 'eng'],
+    ]);
+    expect(directPlayWouldChangeAudioLanguage(i)).toBe(false);
+    expect(firstAudioTrackIsSpanish(i)).toBe(true);
+  });
+
+  test('sin español en el archivo: directa no cambia nada', () => {
+    const i = info([
+      ['eng1', 'English', 'eng'],
+      ['ita1', 'Italian', 'ita'],
+    ]);
+    expect(directPlayWouldChangeAudioLanguage(i)).toBe(false);
+  });
+
+  test('sin pistas: no se afirma nada, el llamador usa el nombre', () => {
+    const i = info([]);
+    expect(directPlayWouldChangeAudioLanguage(i)).toBe(false);
+    expect(firstAudioTrackIsSpanish(i)).toBe(null);
   });
 });
