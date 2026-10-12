@@ -58,6 +58,31 @@ export const hasEng = (s: TorrentioStream): boolean =>
 export const hasLatino = (s: TorrentioStream): boolean =>
   /\blatino\b|\blat\b|dual.?lat|\blatam\b|🇲🇽|🇦🇷|🇨🇴|cinecalidad/i.test(streamInfo(s));
 /**
+ * latinoListedFirst — ¿el nombre lista el español ANTES que el inglés?
+ *
+ * Importa desde que la TV reproduce AC3 sin convertir (2026-10-12): en reproduccion
+ * directa suena la PRIMERA pista del archivo, y no hay forma de pedir otra. El orden
+ * en que el release lista los idiomas suele ser el orden real de las pistas:
+ *
+ *   A.Quiet.Place.Part.II.2020.BluRay.ENG.LATINO.HINDI  -> ingles primero  -> suena ingles
+ *   A.Quiet.Place.Part.II.2021.1080P-Dual-Lat           -> latino primero  -> suena latino
+ *
+ * Es una pista, no una garantia: el orden real recien se conoce con `mediaInfos`, ya
+ * elegida la copia. Por eso el bonus que usa esto es chico y solo desempata entre
+ * copias que YA tienen latino (ver `scoreStream`).
+ */
+const SPA_MARK_RE = /\blatino\b|\blat\b|dual.?lat|\bspa\b|\bespañol\b|\bespanol\b|\bcastellano\b/i;
+const ENG_MARK_RE = /\beng\b|\benglish\b/i;
+
+export function latinoListedFirst(s: TorrentioStream): boolean {
+  const t = streamInfo(s);
+  const spa = t.search(SPA_MARK_RE);
+  if (spa < 0) return false;
+  const eng = t.search(ENG_MARK_RE);
+  return eng < 0 || spa < eng;
+}
+
+/**
  * audioLangRank — jerarquía de idioma de audio para NUNCA degradarlo al buscar
  * una versión "más fluida" (ver la ronda "upgrade a fluido" en resolveActiveStream).
  * La reproducción debe ser IGUAL en todos los dispositivos: si el mejor elegido es
@@ -371,8 +396,13 @@ export function scoreStream(s: TorrentioStream, isTv = false, ignorarIdioma = fa
   // Jerarquía: Latino (+200) > inglés+subs (+10). Castellano (España) NO tiene
   // bonus — se trata igual que inglés. Si no hay latino, preferimos inglés+subs
   // sobre castellano (regla del usuario).
-  if (hasLatino(s)) pts += 200;
-  else pts += directPlay ? 10 : 5;
+  if (hasLatino(s)) {
+    pts += 200;
+    // Desempate entre copias latinas: la que lista el español PRIMERO probablemente
+    // lo tenga como primera pista, y en reproduccion directa (TV) suena esa. Bonus
+    // chico a proposito: no debe pasar por encima de cacheado, tamaño ni codec.
+    if (latinoListedFirst(s)) pts += 60;
+  } else pts += directPlay ? 10 : 5;
 
   // ── P7 — Contenedor (BONUS MENOR; jamás criterio principal) ──
   if (isMp4(s)) pts += 8;

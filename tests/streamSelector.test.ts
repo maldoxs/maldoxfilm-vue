@@ -2,6 +2,7 @@ import { describe, test, expect } from 'vitest';
 import {
   scoreStream,
   rankStreams,
+  latinoListedFirst,
   selectBestStream,
   hasBadAudio,
   hasAAC,
@@ -1078,5 +1079,51 @@ describe('streamSelector — idioma extranjero por bandera o por "doblado"', () 
   test('las banderas de España y de países latinos NUNCA descartan', () => {
     expect(hasBadLang(stream({ title: 'Peli 2020 1080p Dual-Lat 💾 2 GB 🇲🇽' }))).toBe(false);
     expect(hasBadLang(stream({ title: 'Peli 2020 1080p Castellano 💾 2 GB 🇪🇸' }))).toBe(false);
+  });
+});
+
+// ── El latino tiene que SONAR, no solo estar (2026-10-12) ────────────────────────
+// Desde que la TV reproduce AC3 sin convertir, en reproduccion directa suena la
+// PRIMERA pista del archivo y no hay forma de pedir otra. Caso real "Un lugar
+// tranquilo 2": la copia elegida era `...ENG.LATINO.HINDI...`, tenia latino pero
+// sonaba en ingles. El orden en que el release lista los idiomas suele ser el orden
+// real de las pistas, asi que entre copias latinas gana la que lo lista primero.
+describe('latinoListedFirst — desempate entre copias latinas', () => {
+  const conLatinoSegundo = stream({
+    title: 'A.Quiet.Place.Part.II.2020.1080p.BluRay.ENG.LATINO.HINDI.DD5.1 💾 11 GB',
+    name: 'Torrentio\n[RD+]',
+    behaviorHints: { filename: 'A.Quiet.Place.Part.II.2020.1080p.BluRay.ENG.LATINO.HINDI.DD5.1.H264-BEN.THE.MEN.mkv' },
+  });
+  const conLatinoPrimero = stream({
+    title: 'A.Quiet.Place.Part.II.2021.1080P-Dual-Lat 💾 1.8 GB',
+    name: 'Torrentio\n[RD+]',
+    behaviorHints: { filename: 'A.Quiet.Place.Part.II.2021.1080P-Dual-Lat.mp4' },
+  });
+
+  test('ENG antes que LATINO: no se premia, en directa sonaria ingles', () => {
+    expect(latinoListedFirst(conLatinoSegundo)).toBe(false);
+  });
+
+  test('Dual-Lat sin ENG delante: se premia, en directa sonaria latino', () => {
+    expect(latinoListedFirst(conLatinoPrimero)).toBe(true);
+  });
+
+  test('sin español en el nombre: no aplica', () => {
+    expect(latinoListedFirst(stream({ title: 'A Quiet Place Part II 2020 1080p BluRay ENG 💾 2 GB' }))).toBe(false);
+  });
+
+  test('entre dos copias latinas iguales, gana la que lista el latino primero', () => {
+    expect(scoreStream(conLatinoPrimero)).toBeGreaterThan(scoreStream(conLatinoSegundo) - 200);
+    const soloPorOrden = scoreStream(conLatinoPrimero) - scoreStream(conLatinoSegundo);
+    expect(soloPorOrden).toBeGreaterThan(0);
+  });
+
+  test('el bonus NO da vuelta lo que manda: una cacheada le sigue ganando a una no cacheada', () => {
+    const latinoPrimeroNoCacheada = stream({
+      title: 'A.Quiet.Place.Part.II.2021.1080P-Dual-Lat 💾 1.8 GB',
+      name: 'Torrentio\n[RD download]',
+      behaviorHints: { filename: 'A.Quiet.Place.Part.II.2021.1080P-Dual-Lat.mp4' },
+    });
+    expect(scoreStream(conLatinoSegundo)).toBeGreaterThan(scoreStream(latinoPrimeroNoCacheada));
   });
 });
