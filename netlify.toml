@@ -13,6 +13,15 @@
   publish = "dist"
   functions = "netlify/functions"
 
+# Version de Node FIJADA (2026-10-12). Sin esto, Netlify usa la suya por defecto, y esa
+# cambia con el tiempo: el ultimo build bueno fue el 11-sep y los cinco commits del 12-oct
+# fallaron todos con exit 2, sin que cambiara nada del codigo. Una copia limpia del repo
+# con `npm ci && npm run build` compila sin un solo error en Node 20, asi que el problema
+# es la version del entorno, no el proyecto. Dejarla fija evita que un cambio del lado de
+# Netlify vuelva a romper los despliegues en silencio.
+[build.environment]
+  NODE_VERSION = "20"
+
 # OJO: no se define `command` aquí — `netlify dev` autodetecta Vite y lo arranca
 # solo. Definir `command = "npm run dev"` ADEMÁS hacía que Vite arrancara DOS
 # veces en el 5173 → "Port 5173 is already in use".
