@@ -181,16 +181,45 @@ describe('pickPreferredAudioTrack / applyPreferredAudioTrack', () => {
     return Object.assign(arr, { length: arr.length });
   };
 
-  test('caso real: eng activa, spa segunda — se elige la segunda', () => {
+  test('caso real "Un lugar tranquilo 2": pista "es" ambigua, el nombre dice LATINO', () => {
     const t = lista([
       { language: 'en', enabled: true },
       { language: 'es' },
       { language: 'hi' },
     ]);
-    expect(pickPreferredAudioTrack(t)).toBe(1);
-    expect(applyPreferredAudioTrack(t)).toBe(true);
+    // El nombre del release (`...ENG.LATINO.HINDI...`) confirma que ese "es" es latino.
+    expect(pickPreferredAudioTrack(t, true)).toBe(1);
+    expect(applyPreferredAudioTrack(t, true)).toBe(true);
     expect(t[1].enabled).toBe(true);
     expect(t[0].enabled).toBe(false);
+  });
+
+  test('pista "es" ambigua SIN señal de latino en el nombre: no se activa', () => {
+    const t = lista([
+      { language: 'en', enabled: true },
+      { language: 'es' },
+    ]);
+    expect(pickPreferredAudioTrack(t)).toBe(-1);
+    expect(applyPreferredAudioTrack(t)).toBe(false);
+    expect(t[0].enabled).toBe(true); // queda ingles, con subtitulos
+  });
+
+  test('castellano de España NUNCA se activa, ni con señal en el nombre', () => {
+    const t = lista([
+      { language: 'en', enabled: true },
+      { language: 'es', label: 'Castellano' },
+    ]);
+    expect(pickPreferredAudioTrack(t, true)).toBe(-1);
+    expect(applyPreferredAudioTrack(t, true)).toBe(false);
+    expect(t[0].enabled).toBe(true);
+  });
+
+  test('si el castellano ya venia activo, se informa como NO español', () => {
+    const t = lista([
+      { language: 'en' },
+      { language: 'es', label: 'Castellano', enabled: true },
+    ]);
+    expect(applyPreferredAudioTrack(t, true)).toBe(false); // subtitulos encendidos
   });
 
   test('con latino Y español, gana el latino', () => {
@@ -219,10 +248,10 @@ describe('pickPreferredAudioTrack / applyPreferredAudioTrack', () => {
     expect(t[0].enabled).toBe(true);
   });
 
-  test('el español ya esta activo: no se reescribe, pero se informa que si', () => {
+  test('el latino ya esta activo: no se reescribe, pero se informa que si', () => {
     const t = lista([
       { language: 'en' },
-      { language: 'es', enabled: true },
+      { language: 'es', label: 'Latino', enabled: true },
     ]);
     expect(pickPreferredAudioTrack(t)).toBe(-1);
     expect(applyPreferredAudioTrack(t)).toBe(true);

@@ -1809,7 +1809,15 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         // no la aplica, devuelve false y la reproduccion se sigue tratando como
         // no-español, con los subtitulos encendidos.
         const pistas = (video as HTMLVideoElement & { audioTracks?: AudioTrackListLike }).audioTracks;
-        const sonandoEnEspanol = pistas && pistas.length ? applyPreferredAudioTrack(pistas) : null;
+        // Una pista que solo dice "spa"/"es" no aclara si es latino o castellano. El
+        // NOMBRE del release si: `...ENG.LATINO.HINDI...` o `Dual-Lat` estan diciendo
+        // que ese "spa" es latino. Sin esa señal, una pista ambigua no se activa, por
+        // la regla de siempre: mejor ingles con subtitulos que castellano.
+        const nombreDiceLatino =
+          /\blatino\b|\blat\b|dual.?lat|cinecalidad/i.test(streamFn || '') &&
+          !/castellano/i.test(streamFn || '');
+        const sonandoEnEspanol =
+          pistas && pistas.length ? applyPreferredAudioTrack(pistas, nombreDiceLatino) : null;
         if (sonandoEnEspanol !== null) {
           console.warn(
             `[RD] Direct Play: ${pistas!.length} pistas de audio → ${

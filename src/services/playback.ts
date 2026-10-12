@@ -301,6 +301,7 @@ export interface AudioTrackListLike {
 }
 
 const LATINO_RE = /\blat\b|latino|latin|mx|mex/i;
+const CASTELLANO_RE = /castellano|castilian|\bes-es\b|\bspain\b|españa|espana/i;
 const SPANISH_RE = /^(es|spa|esl)\b|^(es|spa)$|spanish|español|espanol|castellano/i;
 
 const textoDePista = (t: AudioTrackLike): string => `${t.language || ''} ${t.label || ''}`.trim();
@@ -308,20 +309,29 @@ const textoDePista = (t: AudioTrackLike): string => `${t.language || ''} ${t.lab
 /**
  * pickPreferredAudioTrack — indice de la pista a activar, o -1 si no hay que tocar nada.
  *
- * Preferencia del proyecto: latino primero; si no hay, cualquier español; si tampoco,
- * no se toca y suena la que el navegador eligio. Devuelve -1 tambien cuando la pista
- * preferida YA es la activa, para no reescribir sin motivo.
+ * Preferencia del proyecto: LATINO. El castellano de España NUNCA se activa — regla del
+ * usuario, la misma que aplica `pickSpanishAudioToken`: mejor ingles con subtitulos que
+ * castellano. Las pistas que solo dicen "es"/"spa", sin aclarar cual es, se activan solo
+ * si `aceptarEspanolAmbiguo`, que el llamador deduce del NOMBRE del release (un
+ * `...ENG.LATINO.HINDI...` o un `Dual-Lat` estan diciendo que ese "spa" es latino).
+ *
+ * Devuelve -1 cuando no hay que tocar nada, incluido el caso de que la pista preferida
+ * YA sea la activa.
  */
-export function pickPreferredAudioTrack(tracks: AudioTrackListLike | null | undefined): number {
+export function pickPreferredAudioTrack(
+  tracks: AudioTrackListLike | null | undefined,
+  aceptarEspanolAmbiguo = false
+): number {
   if (!tracks || tracks.length < 2) return -1;
   let latino = -1;
-  let espanol = -1;
+  let ambiguo = -1;
   for (let i = 0; i < tracks.length; i++) {
     const texto = textoDePista(tracks[i]);
+    if (CASTELLANO_RE.test(texto)) continue; // castellano de España: nunca
     if (latino < 0 && LATINO_RE.test(texto)) latino = i;
-    if (espanol < 0 && SPANISH_RE.test(texto)) espanol = i;
+    if (ambiguo < 0 && SPANISH_RE.test(texto)) ambiguo = i;
   }
-  const elegida = latino >= 0 ? latino : espanol;
+  const elegida = latino >= 0 ? latino : aceptarEspanolAmbiguo ? ambiguo : -1;
   if (elegida < 0) return -1;
   return tracks[elegida].enabled ? -1 : elegida;
 }
@@ -334,15 +344,21 @@ export function pickPreferredAudioTrack(tracks: AudioTrackListLike | null | unde
  * que seguir tratando la reproduccion como "no está en español" para que los subtitulos
  * queden encendidos. Nunca lanza: si algo falla, se comporta como si no hubiera pistas.
  */
-export function applyPreferredAudioTrack(tracks: AudioTrackListLike | null | undefined): boolean {
+export function applyPreferredAudioTrack(
+  tracks: AudioTrackListLike | null | undefined,
+  aceptarEspanolAmbiguo = false
+): boolean {
   try {
     if (!tracks || !tracks.length) return false;
-    const objetivo = pickPreferredAudioTrack(tracks);
+    const objetivo = pickPreferredAudioTrack(tracks, aceptarEspanolAmbiguo);
     if (objetivo >= 0) {
       for (let i = 0; i < tracks.length; i++) tracks[i].enabled = i === objetivo;
     }
     for (let i = 0; i < tracks.length; i++) {
-      if (tracks[i].enabled) return SPANISH_RE.test(textoDePista(tracks[i])) || LATINO_RE.test(textoDePista(tracks[i]));
+      if (!tracks[i].enabled) continue;
+      const texto = textoDePista(tracks[i]);
+      if (CASTELLANO_RE.test(texto)) return false; // suena castellano: tratar como no-español
+      return LATINO_RE.test(texto) || SPANISH_RE.test(texto);
     }
     return false;
   } catch {
