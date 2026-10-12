@@ -445,6 +445,12 @@ export interface UsePlayerOptions {
    * video HEVC por MSE → audio sin imagen). Default false (escritorio/móvil).
    */
   isTv?: () => boolean;
+  /**
+   * Token de Real-Debrid vigente. Solo se usa para DISTINGUIR el mensaje cuando no
+   * hay candidatos: sin token el sintoma es el mismo que "no esta en RD", pero la
+   * causa es que falta la variable de entorno. No se usa para nada mas.
+   */
+  rdToken?: string;
   /** ¿Es anime? Si RD devuelve audio sin ENG/SPA → fallback inmediato a iframe (que trae subs integrados). */
   isAnime?: () => boolean;
   /** Callback: ocultar overlay de carga + arrancar tracking de progreso (equiv. `hideLoadingAndStart`). */
@@ -504,6 +510,12 @@ export interface UsePlayerReturn {
   destroy(): void;
   /** ¿Está usando el pipeline /t/? Si true, el seek debe usar tpipelineSeekTo en vez del nativo. */
   isTpipeline: Ref<boolean>;
+  /**
+   * TEMPORAL (2026-10-12) — marcador visible en TV, donde no hay consola. Sirve para
+   * saber si la TV esta corriendo el bundle nuevo: si NO aparece, es caché de webOS.
+   * Muestra ademas que decidio el reproductor sobre el idioma. Se quita al confirmar.
+   */
+  tvDiag: Ref<string>;
   /** Duración total (seg) reportada por el pipeline /t/ (para la barra custom). */
   tpipelineDuration: Ref<number>;
   /** Offset del MPD actual (seg) — el tiempo real = offset + video.currentTime. */
@@ -525,6 +537,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
 
   // ── Pipeline /t/ state ──────────────────────────────────────────────────────
   const isTpipeline = ref(false);
+  const tvDiag = ref(''); // TEMPORAL — ver `tvDiag` en la interfaz
   const tpipelineDuration = ref(0);
   const tpipelineOffset = ref(0);
   const tpipelineSeeking = ref(false);
@@ -1613,7 +1626,17 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     }
 
     if (!streamUrl) {
-      opts.onToast('⚡ Sin resultados en RD — cambiando de reproductor');
+      // Distinguir "esta pelicula no esta en RD" de "RD no esta configurado". Sin token,
+      // Torrentio no puede consultar la cuenta y devuelve CERO candidatos para TODAS las
+      // peliculas: el sintoma es identico, pero la causa y el arreglo no tienen nada que
+      // ver. Caso real (2026-10-12): la function `rd-token` empezo a devolver cadena
+      // vacia en produccion y el mensaje decia "Sin resultados en RD", mandando a buscar
+      // el problema en la seleccion de copias cuando faltaba la variable de entorno.
+      opts.onToast(
+        opts.rdToken
+          ? '⚡ Sin resultados en RD — cambiando de reproductor'
+          : '⚠️ Falta el token de Real-Debrid (RD_TOKEN) — revisar variables de entorno'
+      );
       opts.onFallbackToNextSource();
       return;
     }
@@ -1784,6 +1807,11 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         // Sin datos de pistas se cae a la heurística por nombre, como siempre.
         const hasSpaDirect =
           primeraPistaEsEspanol !== null ? primeraPistaEsEspanol : isDualLatFilename(streamFn);
+        // TEMPORAL — marcador para la TV (no hay consola ahi).
+        tvDiag.value =
+          `BUILD-3 | 1ra pista: ${
+            primeraPistaEsEspanol === null ? 'sin dato (usa el nombre)' : primeraPistaEsEspanol ? 'español' : 'NO español'
+          } | panel: ${hasSpaDirect ? 'Español' : 'Inglés'}`;
         opts.onStreamReady?.({ selected, hasNativeSpanish: hasSpaDirect, spanishTrack: null });
         startStallMonitor(video, myGen, recoverReloadSrc(streamUrl));
         // Toast "Seek fluido" quitado (a pedido) — un solo mensaje "Cargando…", sin toasts.
@@ -2035,6 +2063,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   }
 
   return {
+    tvDiag,
     loadingMessage,
     isLoadingRd,
     dashBaseUrl,

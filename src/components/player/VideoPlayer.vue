@@ -32,6 +32,7 @@ import { useNetflixControls, formatNfTime } from '../../composables/useNetflixCo
 import { useToast } from '../../composables/useToast';
 import { usePlayerStore } from '../../stores/player';
 import { useDeviceStore } from '../../stores/device';
+import { useAppServices } from '../../composables/useAppServices';
 import type { RdStreamResolver } from '../../services/rdStream';
 import type { RealDebridClient } from '../../services/realdebrid';
 
@@ -75,6 +76,8 @@ const emit = defineEmits<{
 
 const playerStore = usePlayerStore();
 const deviceStore = useDeviceStore();
+// Solo para avisar en pantalla cuando falta el token (ver `rdToken` en usePlayer).
+const appServices = useAppServices();
 const { show: showToast } = useToast();
 
 const videoRef = ref<HTMLVideoElement | null>(null);
@@ -120,6 +123,7 @@ const player: UsePlayerReturn = usePlayer({
   // En TV: preferir H264 1080p y tratar HEVC como no soportado (el navegador de la
   // smart-TV no renderiza HEVC por MSE → audio sin imagen, caso Deadpool 4K x265).
   isTv: () => deviceStore.isTV,
+  rdToken: appServices.rdToken,
   isAnime: () => playerStore.current.isAnime ?? false,
   // ADR-006 — borrar en RD el torrent creado por rd-stream al cerrar/cambiar.
   // sendBeacon sobrevive al cierre/descarga de la página (mejor que fetch aquí).
@@ -741,6 +745,9 @@ onBeforeUnmount(() => {
 
       <SubtitleOverlay :text="subtitles.activeCueText.value" :enabled="subtitles.enabled.value" />
 
+      <!-- TEMPORAL (2026-10-12) — marcador de version + decision de idioma, solo TV. -->
+      <div v-if="deviceStore.isTV && player.tvDiag.value" class="tv-diag">{{ player.tvDiag.value }}</div>
+
       <!-- Barra de controles custom — reemplaza #nfControls (líneas ~3751-3824) -->
       <div class="nf-controls" :class="{ hidden: controlsHidden }">
         <div class="nf-seek-wrap">
@@ -1014,6 +1021,22 @@ onBeforeUnmount(() => {
 }
 .playback-notice.hidden {
   opacity: 0;
+}
+
+/* TEMPORAL (2026-10-12) — marcador de diagnostico en TV. */
+.tv-diag {
+  position: absolute;
+  bottom: 96px;
+  left: 16px;
+  z-index: 900;
+  background: rgba(0, 0, 0, 0.85);
+  border: 2px solid #ffb300;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #ffd54f;
+  pointer-events: none;
 }
 
 .nf-controls {
