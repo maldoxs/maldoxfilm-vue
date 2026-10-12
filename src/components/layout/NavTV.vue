@@ -37,6 +37,15 @@ const emit = defineEmits<{
 // que `_tvTopNavIds`, línea ~8407, que incluye 'tnSearch').
 const buttonRefs = ref<(HTMLElement | null)[]>([]);
 const totalButtons = computed(() => NAV_ITEMS_TV.length + 2); // + Buscar + Fullscreen
+
+// Indices de los dos botones que viven FUERA del v-for, calculados aca y no en la
+// plantilla. `NAV_ITEMS_TV.length` escrito directamente en el template hace fallar a
+// vue-tsc con "Property 'value' does not exist on type 'NavItem[]'": el chequeo de tipos
+// de la plantilla intenta desenvolver la constante importada como si fuera un ref. No
+// pasa con la version instalada en local pero si con la de Netlify, y por eso los builds
+// automaticos fallaban desde el 11-sep mientras en la maquina compilaba limpio.
+const SEARCH_INDEX = NAV_ITEMS_TV.length;
+const FULLSCREEN_INDEX = NAV_ITEMS_TV.length + 1;
 const focusedIndex = ref(0);
 
 function setButtonRef(el: Element | { $el?: Element } | null, index: number) {
@@ -116,12 +125,12 @@ function onFullscreenClick() {
     <!-- Buscar + Fullscreen FUERA de `.tv-topnav-items` → con `flex:1` en los
          items, estos quedan empujados a la DERECHA (preserva el original ~2558). -->
     <button
-      :ref="(el) => setButtonRef(el, NAV_ITEMS_TV.length)"
+      :ref="(el) => setButtonRef(el, SEARCH_INDEX)"
       class="tv-topnav-search"
-      :tabindex="tabIndexFor(NAV_ITEMS_TV.length)"
+      :tabindex="tabIndexFor(SEARCH_INDEX)"
       title="Buscar"
       @click="onSearchClick"
-      @keydown="onTopnavKeydown($event, NAV_ITEMS_TV.length)"
+      @keydown="onTopnavKeydown($event, SEARCH_INDEX)"
     >
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" />
@@ -130,12 +139,12 @@ function onFullscreenClick() {
     </button>
 
     <button
-      :ref="(el) => setButtonRef(el, NAV_ITEMS_TV.length + 1)"
+      :ref="(el) => setButtonRef(el, FULLSCREEN_INDEX)"
       class="tv-topnav-fullscreen"
-      :tabindex="tabIndexFor(NAV_ITEMS_TV.length + 1)"
+      :tabindex="tabIndexFor(FULLSCREEN_INDEX)"
       title="Pantalla completa"
       @click="onFullscreenClick"
-      @keydown="onTopnavKeydown($event, NAV_ITEMS_TV.length + 1)"
+      @keydown="onTopnavKeydown($event, FULLSCREEN_INDEX)"
     >
       <svg v-if="!isFullscreen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
