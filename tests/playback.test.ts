@@ -12,6 +12,8 @@ import {
   SPANISH_TRACK_CANDIDATES,
   MIN_VALID_DURATION_SEC,
   PLAYBACK_STARTED_THRESHOLD_SEC,
+  pickPreferredAudioTrack,
+  applyPreferredAudioTrack,
 } from '../src/services/playback';
 
 describe('applyTranscodeQuality — pedir transcode en 720p (seek fluido)', () => {
@@ -166,5 +168,68 @@ describe('isDashManifest — distingue DASH (Shaka) de HLS (hls.js)', () => {
   });
   test('.m3u8 → no es DASH (HLS)', () => {
     expect(isDashManifest('https://x.com/t/full.m3u8')).toBe(false);
+  });
+});
+
+// ── Pista de audio en reproduccion directa (2026-10-12) ─────────────────────────
+// Comprobado en vivo en un LG webOS: la TV expone `audioTracks` y deja cambiarla.
+// Con "Un lugar tranquilo 2" (eng/spa/hin) el audio paso a español manteniendo la
+// reproduccion directa, que es lo que permite tener latino SIN convertir.
+describe('pickPreferredAudioTrack / applyPreferredAudioTrack', () => {
+  const lista = (ts: Array<{ language?: string; label?: string; enabled?: boolean }>) => {
+    const arr = ts.map((t) => ({ enabled: !!t.enabled, language: t.language, label: t.label }));
+    return Object.assign(arr, { length: arr.length });
+  };
+
+  test('caso real: eng activa, spa segunda — se elige la segunda', () => {
+    const t = lista([
+      { language: 'en', enabled: true },
+      { language: 'es' },
+      { language: 'hi' },
+    ]);
+    expect(pickPreferredAudioTrack(t)).toBe(1);
+    expect(applyPreferredAudioTrack(t)).toBe(true);
+    expect(t[1].enabled).toBe(true);
+    expect(t[0].enabled).toBe(false);
+  });
+
+  test('con latino Y español, gana el latino', () => {
+    const t = lista([
+      { language: 'en', enabled: true },
+      { language: 'es', label: 'Castellano' },
+      { language: 'es', label: 'Latino' },
+    ]);
+    expect(pickPreferredAudioTrack(t)).toBe(2);
+  });
+
+  test('una sola pista: no se toca nada', () => {
+    const t = lista([{ language: 'en', enabled: true }]);
+    expect(pickPreferredAudioTrack(t)).toBe(-1);
+    expect(applyPreferredAudioTrack(t)).toBe(false);
+    expect(t[0].enabled).toBe(true);
+  });
+
+  test('sin pista en español: no se toca y se informa que no es español', () => {
+    const t = lista([
+      { language: 'en', enabled: true },
+      { language: 'it' },
+    ]);
+    expect(pickPreferredAudioTrack(t)).toBe(-1);
+    expect(applyPreferredAudioTrack(t)).toBe(false);
+    expect(t[0].enabled).toBe(true);
+  });
+
+  test('el español ya esta activo: no se reescribe, pero se informa que si', () => {
+    const t = lista([
+      { language: 'en' },
+      { language: 'es', enabled: true },
+    ]);
+    expect(pickPreferredAudioTrack(t)).toBe(-1);
+    expect(applyPreferredAudioTrack(t)).toBe(true);
+  });
+
+  test('sin lista no rompe', () => {
+    expect(pickPreferredAudioTrack(null)).toBe(-1);
+    expect(applyPreferredAudioTrack(undefined)).toBe(false);
   });
 });

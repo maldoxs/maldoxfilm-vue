@@ -278,3 +278,74 @@ export const HLS_CONFIG = {
  * `hlsUrl.includes('.mpd')` (línea ~7967).
  */
 export const isDashManifest = (url: string): boolean => url.includes('.mpd');
+
+// ── Seleccion de pista de audio en reproduccion directa (2026-10-12) ─────────────
+// La reproduccion directa es `video.src = url`: el navegador arranca con la PRIMERA
+// pista del contenedor. Hasta ahora eso dejaba sin latino a toda copia que lo trajera
+// en la 2da o 3ra pista, y por eso la mayoria de las peliculas en TV salian en ingles
+// con subtitulos desde que el AC3 dejo de ir a conversion.
+//
+// Comprobado en vivo en un LG webOS: la TV expone `video.audioTracks`, informa el
+// idioma de cada pista y DEJA CAMBIARLA. Con "Un lugar tranquilo 2" (eng/spa/hin) el
+// audio paso a español al activar la segunda. Asi se consigue latino SIN convertir.
+
+export interface AudioTrackLike {
+  enabled: boolean;
+  language?: string;
+  label?: string;
+}
+
+export interface AudioTrackListLike {
+  readonly length: number;
+  [index: number]: AudioTrackLike;
+}
+
+const LATINO_RE = /\blat\b|latino|latin|mx|mex/i;
+const SPANISH_RE = /^(es|spa|esl)\b|^(es|spa)$|spanish|español|espanol|castellano/i;
+
+const textoDePista = (t: AudioTrackLike): string => `${t.language || ''} ${t.label || ''}`.trim();
+
+/**
+ * pickPreferredAudioTrack — indice de la pista a activar, o -1 si no hay que tocar nada.
+ *
+ * Preferencia del proyecto: latino primero; si no hay, cualquier español; si tampoco,
+ * no se toca y suena la que el navegador eligio. Devuelve -1 tambien cuando la pista
+ * preferida YA es la activa, para no reescribir sin motivo.
+ */
+export function pickPreferredAudioTrack(tracks: AudioTrackListLike | null | undefined): number {
+  if (!tracks || tracks.length < 2) return -1;
+  let latino = -1;
+  let espanol = -1;
+  for (let i = 0; i < tracks.length; i++) {
+    const texto = textoDePista(tracks[i]);
+    if (latino < 0 && LATINO_RE.test(texto)) latino = i;
+    if (espanol < 0 && SPANISH_RE.test(texto)) espanol = i;
+  }
+  const elegida = latino >= 0 ? latino : espanol;
+  if (elegida < 0) return -1;
+  return tracks[elegida].enabled ? -1 : elegida;
+}
+
+/**
+ * applyPreferredAudioTrack — activa la pista preferida y COMPRUEBA que haya quedado.
+ *
+ * Devuelve true solo si al terminar esta sonando una pista en español. La comprobacion
+ * importa: un navegador puede aceptar la asignacion y no aplicarla, y en ese caso hay
+ * que seguir tratando la reproduccion como "no está en español" para que los subtitulos
+ * queden encendidos. Nunca lanza: si algo falla, se comporta como si no hubiera pistas.
+ */
+export function applyPreferredAudioTrack(tracks: AudioTrackListLike | null | undefined): boolean {
+  try {
+    if (!tracks || !tracks.length) return false;
+    const objetivo = pickPreferredAudioTrack(tracks);
+    if (objetivo >= 0) {
+      for (let i = 0; i < tracks.length; i++) tracks[i].enabled = i === objetivo;
+    }
+    for (let i = 0; i < tracks.length; i++) {
+      if (tracks[i].enabled) return SPANISH_RE.test(textoDePista(tracks[i])) || LATINO_RE.test(textoDePista(tracks[i]));
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}

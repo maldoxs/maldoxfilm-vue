@@ -30,6 +30,8 @@ import { ref, type Ref } from 'vue';
 import {
   detectHevcSupport,
   detectAc3Support,
+  applyPreferredAudioTrack,
+  type AudioTrackListLike,
   checkBadAudioForDirectPlay,
   isDualLatFilename,
   MIN_VALID_DURATION_SEC,
@@ -1794,12 +1796,39 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       if (playerStore.isStale(myGen)) return;
       const played = await tryHevcDirectPlay(video, streamUrl, params.startPositionSec);
       if (played) {
-        // Que idioma suena DE VERDAD: la primera pista del archivo. El nombre no sirve
-        // acá — `...ENG.LATINO.HINDI...` decía que había latino mientras sonaba inglés,
-        // y con ese dato el panel mostraba "Español" y se apagaban los subtítulos.
-        // Sin datos de pistas se cae a la heurística por nombre, como siempre.
+        // ── Elegir la pista de audio (2026-10-12) ───────────────────────────────
+        // La reproduccion directa arranca con la PRIMERA pista del contenedor, asi que
+        // una copia con el latino en la 2da sonaba en ingles. Comprobado en vivo en un
+        // LG webOS: la TV expone `audioTracks` y DEJA cambiarla; con "Un lugar tranquilo
+        // 2" el audio paso a español manteniendo la reproduccion directa. Asi se
+        // consigue latino SIN convertir, que era el unico caso que quedaba condenado a
+        // pasar por /t/ y a cortarse.
+        //
+        // `applyPreferredAudioTrack` activa latino, o español si no hay latino, y
+        // COMPRUEBA que haya quedado activa: si el navegador acepta la asignacion pero
+        // no la aplica, devuelve false y la reproduccion se sigue tratando como
+        // no-español, con los subtitulos encendidos.
+        const pistas = (video as HTMLVideoElement & { audioTracks?: AudioTrackListLike }).audioTracks;
+        const sonandoEnEspanol = pistas && pistas.length ? applyPreferredAudioTrack(pistas) : null;
+        if (sonandoEnEspanol !== null) {
+          console.warn(
+            `[RD] Direct Play: ${pistas!.length} pistas de audio → ${
+              sonandoEnEspanol ? 'activada la de español' : 'sin pista en español, queda el idioma original'
+            }`
+          );
+        }
+
+        // Que idioma suena DE VERDAD. Manda lo que informa el propio <video>; si no
+        // expone pistas, el dato de mediaInfos sobre la primera; y recien sin nada de
+        // eso, el nombre. El nombre miente: `...ENG.LATINO.HINDI...` decia que habia
+        // latino mientras sonaba ingles, y con ese dato el panel mostraba "Español" y
+        // apagaba los subtitulos.
         const hasSpaDirect =
-          primeraPistaEsEspanol !== null ? primeraPistaEsEspanol : isDualLatFilename(streamFn);
+          sonandoEnEspanol !== null
+            ? sonandoEnEspanol
+            : primeraPistaEsEspanol !== null
+              ? primeraPistaEsEspanol
+              : isDualLatFilename(streamFn);
         opts.onStreamReady?.({ selected, hasNativeSpanish: hasSpaDirect, spanishTrack: null });
         startStallMonitor(video, myGen, recoverReloadSrc(streamUrl));
         // Toast "Seek fluido" quitado (a pedido) — un solo mensaje "Cargando…", sin toasts.
