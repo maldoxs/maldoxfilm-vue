@@ -1759,6 +1759,11 @@ html.tv-mode .source-btn:focus {
   position: absolute;
   inset: 0;
 }
+/* Negro de base: entre una fuente y otra el iframe pasa por `about:blank`, que sin
+   esto se pinta BLANCO. Es el otro fogonazo del cambio de reproductor. */
+.player-frame {
+  background: #000;
+}
 /* Captador de actividad sobre el iframe — transparente, solo visible (v-show) cuando
    los controles están ocultos. Al moverse el mouse revela los controles y desaparece,
    dejando el iframe interactivo. */
