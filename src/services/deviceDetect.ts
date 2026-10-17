@@ -14,6 +14,12 @@ export interface DeviceDetectInput {
   screenWidth: number;
   screenHeight: number;
   hasTouch: boolean;
+  /**
+   * Modo que este MISMO equipo ya se había detectado en una visita anterior
+   * (lo guarda el store en `localStorage`). Solo se usa el valor `'tv'`: ver
+   * la nota de `esTelevisorRecordado` más abajo.
+   */
+  modoRecordado?: 'tv' | null;
 }
 
 export interface DeviceDetectResult {
@@ -25,7 +31,13 @@ export interface DeviceDetectResult {
   mode: 'tv' | 'desktop' | 'mobile';
 }
 
-const TV_UA_RE = /smart-tv|smarttv|googletv|appletv|hbbtv|webos|tizen|netcast|viera|bravia|roku|lgtv/;
+// `web0s` (con CERO, no con "o") no es un error de tipeo: es como se identifica el
+// navegador de los televisores LG desde webOS 4 — `Mozilla/5.0 (Web0S; Linux/SmartTV)`.
+// Sin esa variante, la TV del usuario nunca calzaba por marca y quedaba dependiendo
+// SOLO de la heurística de tamaño/táctil de abajo, que es la que a veces falla y la
+// hace pasar por móvil (barra inferior "Inicio / Buscar / Mi Netflix" y layout roto).
+const TV_UA_RE =
+  /smart-tv|smarttv|smart_tv|googletv|appletv|hbbtv|webos|web0s|tizen|netcast|viera|bravia|roku|lgtv/;
 
 /**
  * detectDevice — replica EXACTAMENTE las condiciones originales (líneas
@@ -46,8 +58,22 @@ export function detectDevice(input: DeviceDetectInput): DeviceDetectResult {
   const isAndroid = /android/.test(ua);
   const isIOS = /iphone|ipad|ipod/.test(ua);
   const isMobileUA = /mobile|tablet/.test(ua);
+
+  // Un equipo que YA se identificó como televisor no se degrada a móvil en una
+  // carga posterior. La heurística de abajo depende de `hasTouch`, `screen.*` y
+  // `devicePixelRatio`, y en webOS esos tres valores no siempre son los mismos en
+  // cada carga (el puntero del Magic Remote llega a reportar soporte táctil, y en
+  // pantalla completa el navegador devuelve medidas degeneradas). Cuando eso pasa
+  // la misma TV se detecta como móvil: aparece la barra inferior de teléfono y el
+  // CSS de móvil descuadra la grilla. El recuerdo solo se honra si el navegador no
+  // dice ser un teléfono, así que no puede "pegarse" en un equipo que sí lo es.
+  const esTelevisorRecordado =
+    input.modoRecordado === 'tv' && !isAndroid && !isIOS && !/mobile|tablet/.test(ua);
+
   const isTV =
-    TV_UA_RE.test(ua) || (!hasTouch && !isAndroid && w >= 1280 && w / h > 1.6 && dpr <= 1.5);
+    TV_UA_RE.test(ua) ||
+    esTelevisorRecordado ||
+    (!hasTouch && !isAndroid && w >= 1280 && w / h > 1.6 && dpr <= 1.5);
   const isDesktop = !hasTouch && !isAndroid && !isIOS && !isMobileUA && !isTV;
 
   const mode: DeviceDetectResult['mode'] = isTV ? 'tv' : isDesktop ? 'desktop' : 'mobile';

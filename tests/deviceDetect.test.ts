@@ -17,6 +17,35 @@ describe('detectDevice — heurística de plataforma (TV / Desktop / Mobile)', (
     expect(detectDevice(base({ userAgent: 'Roku/DVP-9.10' })).mode).toBe('tv');
   });
 
+  test('la TV LG sigue siendo TV aunque reporte touch y medidas raras (UA Web0S con cero)', () => {
+    // webOS llega a reportar soporte táctil (puntero del Magic Remote) y, en
+    // pantalla completa, medidas de pantalla degeneradas. Con eso la heurística
+    // de tamaño no alcanza y antes la TV terminaba en modo móvil.
+    const r = detectDevice(
+      base({
+        userAgent: 'Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 Chrome/87 Safari/537.36',
+        hasTouch: true,
+        screenWidth: 0,
+        screenHeight: 0,
+        devicePixelRatio: 2,
+      })
+    );
+    expect(r.mode).toBe('tv');
+  });
+
+  test('un equipo ya reconocido como TV no se degrada a móvil en la carga siguiente', () => {
+    const entrada = base({ userAgent: 'Mozilla/5.0 (Linux)', hasTouch: true, screenWidth: 0, screenHeight: 0 });
+    expect(detectDevice(entrada).mode).toBe('mobile');
+    expect(detectDevice({ ...entrada, modoRecordado: 'tv' }).mode).toBe('tv');
+  });
+
+  test('el recuerdo de TV NO se aplica a un teléfono', () => {
+    const iphone = base({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Mobile', hasTouch: true, modoRecordado: 'tv' });
+    expect(detectDevice(iphone).mode).toBe('mobile');
+    const android = base({ userAgent: 'Mozilla/5.0 (Linux; Android 13) Mobile', hasTouch: true, modoRecordado: 'tv' });
+    expect(detectDevice(android).mode).toBe('mobile');
+  });
+
   test('detecta TVs sin UA reconocible por heurística de pantalla (sin touch, ancho>=1280, aspect>1.6, dpr<=1.5)', () => {
     const r = detectDevice(base({ userAgent: 'Mozilla/5.0 (X11; Linux)', screenWidth: 1920, screenHeight: 1080, hasTouch: false, devicePixelRatio: 1 }));
     expect(r.isTV).toBe(true);

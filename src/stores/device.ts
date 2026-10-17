@@ -23,6 +23,25 @@ export interface DeviceStateShape {
   detected: boolean;
 }
 
+/** Clave de `localStorage` donde queda anotado que este equipo es un televisor. */
+const CLAVE_MODO = 'mf-modo-dispositivo';
+
+function leerModoRecordado(): 'tv' | null {
+  try {
+    return localStorage.getItem(CLAVE_MODO) === 'tv' ? 'tv' : null;
+  } catch {
+    return null; // almacenamiento bloqueado: se sigue con la detección normal
+  }
+}
+
+function recordarModoTv() {
+  try {
+    localStorage.setItem(CLAVE_MODO, 'tv');
+  } catch {
+    /* almacenamiento bloqueado: no es motivo para fallar el arranque */
+  }
+}
+
 export const useDeviceStore = defineStore('device', {
   state: (): DeviceStateShape => ({
     mode: 'desktop',
@@ -42,17 +61,23 @@ export const useDeviceStore = defineStore('device', {
      */
     detect() {
       if (this.detected) return;
+      const hasTouch =
+        'ontouchstart' in window ||
+        navigator.maxTouchPoints > 0 ||
+        // @ts-expect-error — msMaxTouchPoints es un vendor-prefix legado de IE/Edge viejo
+        (navigator.msMaxTouchPoints || 0) > 0;
       const result = detectDevice({
         userAgent: navigator.userAgent,
         devicePixelRatio: window.devicePixelRatio || 1,
         screenWidth: screen.width,
         screenHeight: screen.height,
-        hasTouch:
-          'ontouchstart' in window ||
-          navigator.maxTouchPoints > 0 ||
-          // @ts-expect-error — msMaxTouchPoints es un vendor-prefix legado de IE/Edge viejo
-          (navigator.msMaxTouchPoints || 0) > 0,
+        hasTouch,
+        modoRecordado: leerModoRecordado(),
       });
+      // Una vez que un equipo se identifica como televisor, queda anotado: las
+      // cargas siguientes no vuelven a depender de valores que en webOS cambian
+      // entre una carga y otra (ver la nota de `esTelevisorRecordado`).
+      if (result.mode === 'tv') recordarModoTv();
 
       this.mode = result.mode;
       this.isTV = result.isTV;
@@ -86,17 +111,28 @@ export const useDeviceStore = defineStore('device', {
       // que diagnosticar se quedaba mudo: el usuario reporta que a veces, en su TV,
       // aparecen los iconos de la barra inferior de movil. Si eso ocurre, la app creyo
       // ser un celular y antes dejaba de enviar logs justo en esa corrida.
-      const pareceTv = /netcast|smarttv|smart-tv|webos|tizen|viera|bravia|lgtv/i.test(navigator.userAgent);
-      if (result.mode === 'tv' || pareceTv) {
+      const pareceTv = /netcast|smarttv|smart-tv|webos|web0s|tizen|viera|bravia|lgtv/i.test(
+        navigator.userAgent
+      );
+      if (result.mode === 'tv' || pareceTv || leerModoRecordado() === 'tv') {
         void import('../services/tvLog')
           .then((m) => {
             m.engancharLogsDeTv();
+            // Cómo llegó la página: "reload" significa que el navegador volvió a
+            // cargar la app por su cuenta (en la TV pasa cuando se queda sin memoria
+            // con el reproductor abierto). Eso reinicia el reproductor desde RD y es
+            // lo que se ve como "cambia de RD a UnlimPlay y vuelve a RD".
+            const nav = performance.getEntriesByType?.('navigation')?.[0] as
+              | PerformanceNavigationTiming
+              | undefined;
+            console.warn(
+              `[RD] Arranque → carga:${nav?.type ?? '?'} modo:${result.mode} ` +
+                `touch:${hasTouch ? 'si' : 'no'}/${navigator.maxTouchPoints} ` +
+                `pantalla:${screen.width}x${screen.height} dpr:${window.devicePixelRatio} ` +
+                `ruta:${location.pathname} ua:${navigator.userAgent}`
+            );
             if (result.mode !== 'tv') {
-              console.warn(
-                `[RD] ATENCION: parece un televisor pero se detecto modo "${result.mode}" — ` +
-                  `touch:${navigator.maxTouchPoints} pantalla:${screen.width}x${screen.height} ` +
-                  `dpr:${window.devicePixelRatio} ua:${navigator.userAgent}`
-              );
+              console.warn(`[RD] ATENCION: parece un televisor pero se detecto modo "${result.mode}"`);
             }
           })
           .catch(() => {});
