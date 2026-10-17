@@ -77,6 +77,12 @@ export const useDeviceStore = defineStore('device', {
       if (result.mode === 'tv' && screen.width >= 1280) {
         root.style.setProperty('--tv-screen-w', `${screen.width}px`);
       }
+
+      // En TV no hay consola accesible, asi que los logs del reproductor se espejan a
+      // una function para poder leerlos. Ver `services/tvLog.ts`.
+      if (result.mode === 'tv') {
+        void import('../services/tvLog').then((m) => m.engancharLogsDeTv()).catch(() => {});
+      }
       if (result.mode === 'mobile') {
         const style = document.createElement('style');
         style.textContent = MOBILE_OVERRIDE_CSS;
