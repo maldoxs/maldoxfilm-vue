@@ -1776,8 +1776,21 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     const audioSirve = realAudioOk !== null ? realAudioOk : !hasBadAudio;
     const videoSirve =
       !videoNoReproducible && (realIsHevc !== null ? !realIsHevc || hevcOk : !streamIsX265 || hevcOk);
+    // Formato que el navegador no puede mostrar: se cambia de reproductor, igual que
+    // cuando RD no tiene la pelicula. Caso real "Scrapbook" (2026-10-17): `Scrapbook
+    // 2000.avi`, unica copia del catalogo, con video MPEG-4 Parte 2. Convertirlo es
+    // posible pero el resultado salio distorsionado, asi que quedarse en RD no aporta.
+    // Los reproductores de respaldo traen su propia copia ya convertida a formato web.
+    //
+    // Es una clase acotada y detectable: formatos de los 2000 (mpeg4 de .avi, wmv, vc1,
+    // mpeg2, theora, realvideo, flash). El usuario siempre puede volver a RD con el
+    // boton de la barra superior.
     if (videoNoReproducible) {
-      console.warn('[RD] El códec de video no se reproduce en navegador → va a conversión');
+      console.warn('[RD] Códec de video que el navegador no muestra → cambiando de reproductor');
+      opts.onToast('⚠️ Copia en formato antiguo — cambiando de reproductor');
+      opts.onFallbackToNextSource();
+      isLoadingRd.value = false;
+      return;
     }
 
     // ── rdId NULL → derivar download id del link crudo y correr /t/ (AAC) ────────────
