@@ -139,6 +139,36 @@ export function hasNativeDecodableAudio(info: MediaInfos, ac3Ok = false): boolea
  * la heurística por nombre lo mandaba a transcodificar, cuando RD reporta que por
  * dentro es h264 + aac — o sea, reproducible directo sin conversión alguna.
  */
+/**
+ * Codecs de video que NINGUN navegador reproduce de forma nativa. Son formatos de los
+ * 2000 que todavia circulan en archivos .avi: MPEG-4 Parte 2 (el DivX/Xvid de la epoca),
+ * MPEG-1/2, WMV, VC-1, Theora, RealVideo, Flash.
+ *
+ * OJO con `mpeg4`: NO es H.264. H.264 es MPEG-4 Parte 10 y se reporta como `h264`. Un
+ * `mpeg4` a secas es Parte 2, que el navegador no decodifica.
+ */
+const UNPLAYABLE_VIDEO_RE = /^(mpeg4|mpeg-4|msmpeg|divx|xvid|mpeg2|mpeg1|mpegvideo|wmv|wmv\d|vc-?1|theora|rv\d|flv|svq)/i;
+
+/**
+ * videoCodecUnplayableInBrowser — ¿el video es de un formato que el navegador NO puede
+ * reproducir, haya o no soporte HEVC?
+ *
+ * Caso real "Scrapbook" (2026-10-17): `Scrapbook 2000.avi`, unica copia disponible, con
+ * `video: mpeg4 | audio: und1=ac3`. `videoNeedsHevcSupport` solo distingue HEVC de H264
+ * y para `mpeg4` devuelve null, asi que el reproductor lo daba por bueno e intentaba
+ * reproducirlo directo. En escritorio no se notaba porque el AC3 lo desviaba a
+ * conversion; en TV, desde que el AC3 se reproduce directo, el intento llegaba hasta el
+ * final y la imagen salia distorsionada.
+ *
+ * Sin dato de codec devuelve false: no se afirma nada y el comportamiento queda como
+ * estaba.
+ */
+export function videoCodecUnplayableInBrowser(info: MediaInfos): boolean {
+  const c = info.videoCodec;
+  if (!c) return false;
+  return UNPLAYABLE_VIDEO_RE.test(c);
+}
+
 export function videoNeedsHevcSupport(info: MediaInfos): boolean | null {
   const c = info.videoCodec;
   if (!c) return null;

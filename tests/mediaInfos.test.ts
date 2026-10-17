@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { parseMediaInfos, pickSpanishAudioToken, pickSpanishSubToken } from '../src/services/mediaInfos';
 import { detectAc3Support } from '../src/services/playback';
-import { firstAudioTrackIsSpanish } from '../src/services/mediaInfos';
+import { firstAudioTrackIsSpanish, videoCodecUnplayableInBrowser } from '../src/services/mediaInfos';
 
 // Forma REAL observada en vivo (La Momia Dr4gon): solo ita/eng, sin español.
 const momiaRaw = {
@@ -262,5 +262,39 @@ describe('firstAudioTrackIsSpanish', () => {
 
   test('sin pistas: no se afirma nada, el llamador usa el nombre', () => {
     expect(firstAudioTrackIsSpanish(info([]))).toBe(null);
+  });
+});
+
+// ── Codecs que el navegador no reproduce (2026-10-17) ───────────────────────────
+// Caso real "Scrapbook": `Scrapbook 2000.avi`, unica copia disponible, con
+// `video: mpeg4 | audio: und1=ac3`. Como `videoNeedsHevcSupport` solo distingue HEVC de
+// H264, para mpeg4 devolvia null y el reproductor lo daba por bueno: intentaba
+// reproducirlo directo y la imagen salia distorsionada. En escritorio no se notaba
+// porque el AC3 lo desviaba a conversion; en TV, desde que el AC3 va directo, el intento
+// llegaba hasta el final.
+describe('videoCodecUnplayableInBrowser', () => {
+  const conCodec = (videoCodec: string | null) =>
+    ({ durationSec: 0, videoCodec, audio: [], subtitles: [] }) as unknown as Parameters<
+      typeof videoCodecUnplayableInBrowser
+    >[0];
+
+  test('caso real: mpeg4 (el DivX/Xvid de los .avi) no se reproduce', () => {
+    expect(videoCodecUnplayableInBrowser(conCodec('mpeg4'))).toBe(true);
+  });
+
+  test('h264 y hevc SI se reproducen: no se tocan', () => {
+    expect(videoCodecUnplayableInBrowser(conCodec('h264'))).toBe(false);
+    expect(videoCodecUnplayableInBrowser(conCodec('hevc'))).toBe(false);
+    expect(videoCodecUnplayableInBrowser(conCodec('av1'))).toBe(false);
+  });
+
+  test('otros formatos viejos que tampoco se reproducen', () => {
+    for (const c of ['wmv3', 'vc1', 'mpeg2video', 'theora', 'rv40', 'msmpeg4v3']) {
+      expect(videoCodecUnplayableInBrowser(conCodec(c))).toBe(true);
+    }
+  });
+
+  test('sin dato de codec no se afirma nada: queda como antes', () => {
+    expect(videoCodecUnplayableInBrowser(conCodec(null))).toBe(false);
   });
 });

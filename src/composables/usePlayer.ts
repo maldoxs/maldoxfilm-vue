@@ -54,6 +54,7 @@ import {
   pickSpanishAudioToken,
   hasNativeDecodableAudio,
   videoNeedsHevcSupport,
+  videoCodecUnplayableInBrowser,
   firstAudioTrackIsSpanish,
 } from '../services/mediaInfos';
 import {
@@ -1747,12 +1748,16 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // Solo se usa para informar bien (panel y subtitulos), NO para desviar a /t/:
     // en TV no se convierte audio, aunque eso signifique quedarse en ingles.
     let primeraPistaEsEspanol: boolean | null = null;
+    // Formatos que el navegador no decodifica (mpeg4 de .avi, wmv, vc1...). Sin esto se
+    // intentaba reproducirlos directo y la imagen salia distorsionada.
+    let videoNoReproducible = false;
     if (rdId) {
       try {
         const info = parseMediaInfos(await opts.rdClient.fetchMediaInfos(rdId));
         realAudioOk = hasNativeDecodableAudio(info, ac3Ok);
         realIsHevc = videoNeedsHevcSupport(info);
         primeraPistaEsEspanol = firstAudioTrackIsSpanish(info);
+        videoNoReproducible = videoCodecUnplayableInBrowser(info);
         console.warn(
           `[RD] mediaInfos (códec REAL) → video: ${info.videoCodec ?? 'desconocido'} | audio: ${
             info.audio.map((a) => `${a.token}=${a.codec}`).join(', ') || 'sin pistas'
@@ -1769,7 +1774,11 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     }
     // El dato real manda; el nombre solo decide cuando no hay dato.
     const audioSirve = realAudioOk !== null ? realAudioOk : !hasBadAudio;
-    const videoSirve = realIsHevc !== null ? !realIsHevc || hevcOk : !streamIsX265 || hevcOk;
+    const videoSirve =
+      !videoNoReproducible && (realIsHevc !== null ? !realIsHevc || hevcOk : !streamIsX265 || hevcOk);
+    if (videoNoReproducible) {
+      console.warn('[RD] El códec de video no se reproduce en navegador → va a conversión');
+    }
 
     // ── rdId NULL → derivar download id del link crudo y correr /t/ (AAC) ────────────
     // Bug real "El Padrino" (confirmado con el reproductor OFICIAL de RD: Audio=aac,
