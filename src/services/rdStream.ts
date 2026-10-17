@@ -240,6 +240,7 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
       let selected = buildSelectedStream({
         best,
         withUrl,
+        pool,
         resolvedUrl,
         streamFilename,
         infoHash,
@@ -293,6 +294,7 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
               selected = buildSelectedStream({
                 best,
                 withUrl: merged.withUrl,
+                pool: merged.pool,
                 resolvedUrl,
                 streamFilename,
                 infoHash,

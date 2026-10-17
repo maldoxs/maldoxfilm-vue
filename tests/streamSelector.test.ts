@@ -3,6 +3,7 @@ import {
   scoreStream,
   rankStreams,
   latinoListedFirst,
+  pickOtroCandidatoAbrible,
   selectBestStream,
   hasBadAudio,
   hasAAC,
@@ -1125,5 +1126,52 @@ describe('latinoListedFirst — desempate entre copias latinas', () => {
       behaviorHints: { filename: 'A.Quiet.Place.Part.II.2021.1080P-Dual-Lat.mp4' },
     });
     expect(scoreStream(conLatinoSegundo)).toBeGreaterThan(scoreStream(latinoPrimeroNoCacheada));
+  });
+});
+
+// ── Reintento cuando el archivo no se puede abrir (2026-10-17) ──────────────────
+// Caso real "Frontier(s)", leido en el log de la TV: la copia elegida era un MKV y el
+// navegador del televisor la rechazo con error a los 2 s. En el mismo pool habia un MP4
+// con H264 + AC3 que esa TV reproduce directo, pero la pelicula terminaba en conversion.
+describe('pickOtroCandidatoAbrible', () => {
+  const mkvElegido = stream({
+    title: 'Frontier(s).(2007).1080p.BrRip.5.1.x264.DTS 💾 3.2 GB',
+    name: 'Torrentio\n[RD+]',
+    behaviorHints: { filename: 'Frontier(s).(2007).1080p.BrRip.5.1.x264.DTS.mkv' },
+  });
+  const mp4Alterno = stream({
+    title: 'Frontier(s).2007.1080p.BluRay.H264.AC3.DD5.1 💾 4 GB',
+    name: 'Torrentio\n[RD+]',
+    behaviorHints: { filename: 'Frontier(s).2007.1080p.BluRay.H264.AC3.DD5.1.mp4' },
+  });
+
+  test('si falla un MKV, ofrece el MP4 cacheado aunque tenga menos puntaje', () => {
+    const pool = [
+      { s: mkvElegido, pts: 467 },
+      { s: mp4Alterno, pts: -99 },
+    ];
+    expect(pickOtroCandidatoAbrible(mkvElegido, pool)).toBe(mp4Alterno);
+  });
+
+  test('no ofrece otro del MISMO contenedor: si no pudo con un MKV, otro MKV tampoco', () => {
+    const otroMkv = stream({
+      title: 'Frontiers.2007.FRENCH.1080p.BluRay 💾 2 GB',
+      name: 'Torrentio\n[RD+]',
+      behaviorHints: { filename: 'Frontiers.2007.FRENCH.1080p.BluRay.mkv' },
+    });
+    expect(pickOtroCandidatoAbrible(mkvElegido, [{ s: mkvElegido, pts: 467 }, { s: otroMkv, pts: 100 }])).toBe(null);
+  });
+
+  test('no ofrece copias sin cachear: no se puede reproducir lo que RD no tiene', () => {
+    const mp4SinCachear = stream({
+      title: 'Frontier(s).2007.1080p.BluRay.H264.AC3 💾 4 GB',
+      name: 'Torrentio\n[RD download]',
+      behaviorHints: { filename: 'Frontier(s).2007.1080p.BluRay.H264.AC3.mp4' },
+    });
+    expect(pickOtroCandidatoAbrible(mkvElegido, [{ s: mkvElegido, pts: 467 }, { s: mp4SinCachear, pts: 50 }])).toBe(null);
+  });
+
+  test('sin alternativa, devuelve null y todo queda como antes', () => {
+    expect(pickOtroCandidatoAbrible(mkvElegido, [{ s: mkvElegido, pts: 467 }])).toBe(null);
   });
 });

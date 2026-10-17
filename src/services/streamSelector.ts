@@ -812,9 +812,35 @@ export function resolveActiveStream(
  * buildSelectedStream — ensambla el resultado final {@link SelectedStream}
  * exactamente como lo hace `rdGetStream` al final (línea ~4907-4917).
  */
+/**
+ * pickOtroCandidatoAbrible — la siguiente copia cacheada para reintentar cuando el
+ * archivo elegido NO SE PUEDE ABRIR (el `<video>` devuelve error, no un timeout).
+ *
+ * Caso real "Frontier(s)" (2026-10-17, log de la TV): la copia elegida era un MKV y el
+ * navegador del televisor la rechazo a los 2 s con error. En el mismo pool habia un MP4
+ * con H264 + AC3 que esa TV reproduce directo sin problema, pero quedaba descartado por
+ * puntaje y la pelicula terminaba en conversion, cortandose.
+ *
+ * Se prefiere un CONTENEDOR distinto al que acaba de fallar: si el navegador no pudo con
+ * un MKV, reintentar con otro MKV no tiene sentido. Devuelve null cuando no hay nada
+ * razonable que probar, y entonces el comportamiento queda igual que antes.
+ */
+export function pickOtroCandidatoAbrible(
+  elegido: TorrentioStream,
+  pool: ScoredStream[]
+): TorrentioStream | null {
+  const elegidoEsMkv = isMkv(elegido);
+  const alternativa = pool.find(
+    (p) => p.s !== elegido && !!p.s.url && isCachedStream(p.s) && isMkv(p.s) !== elegidoEsMkv
+  );
+  return alternativa ? alternativa.s : null;
+}
+
 export function buildSelectedStream(params: {
   best: TorrentioStream;
   withUrl: TorrentioStream[];
+  /** Pool ordenado, para poder ofrecer una alternativa si el archivo no abre. */
+  pool?: ScoredStream[];
   resolvedUrl: string;
   streamFilename: string;
   infoHash: string;
@@ -831,7 +857,7 @@ export function buildSelectedStream(params: {
   // en el ensamblado final: el original también solo usa `activeFilename`
   // (semilla = `streamFilename`, ya resuelta en `resolveActiveStream`/`active`)
   // — se omite del destructuring para no disparar `noUnusedLocals`/TS6133.
-  const { best, withUrl, resolvedUrl, infoHash, imdbId, active } = params;
+  const { best, withUrl, pool, resolvedUrl, infoHash, imdbId, active } = params;
   const bestFinal = active.activeBest;
   const resolvedUrlFinal = active.activeUrl;
   const streamFilenameFinal = active.activeFilename;
@@ -840,6 +866,7 @@ export function buildSelectedStream(params: {
   let finalUrl: string | null = resolvedUrlFinal !== bestFinal.url ? resolvedUrlFinal : (bestFinal.url || resolvedUrl);
   const finalHash = extractInfoHash(bestFinal) || infoHash || '';
   const fallbackUrl = pickFallbackUrl(best, withUrl);
+  const otroAbrible = pool ? pickOtroCandidatoAbrible(active.activeBest, pool) : null;
 
   // GUARD anti-basura final: si el stream que quedó elegido es un sample/test
   // (no se encontró alternativa real), NO entregar su URL → evita que se
@@ -868,7 +895,9 @@ export function buildSelectedStream(params: {
     infoHash: finalHash,
     unavailableInRd: active.unavailableInRd,
     hasLatinoTag: hasLatino(bestFinal),
-  };
+      /** Otra copia cacheada, en distinto contenedor, para reintentar si el archivo no abre. */
+    altOpenableUrl: otroAbrible?.url || null,
+};
 }
 
 /**

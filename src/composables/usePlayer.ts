@@ -715,6 +715,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         'error',
         () => {
           limpiar();
+          motivoFalloDirecto = 'este reproductor no pudo abrir el archivo';
           console.warn(`[RD] Direct Play: error del <video> tras ${((Date.now() - desde) / 1000).toFixed(1)}s — se descarta`);
           video.src = '';
           resolve();
@@ -1826,6 +1827,14 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // esté perfecto. Se espera a que suelte el elemento antes de tocarlo.
       await _shakaDetachAndWait();
       if (playerStore.isStale(myGen)) return;
+      // Una pista que solo dice "spa"/"es" no aclara si es latino o castellano. El
+      // NOMBRE del release si: `...ENG.LATINO.HINDI...` o `Dual-Lat` estan diciendo que
+      // ese "spa" es latino. Sin esa señal, una pista ambigua no se activa, por la regla
+      // de siempre: mejor ingles con subtitulos que castellano.
+      const nombreDiceLatino =
+        /\blatino\b|\blat\b|dual.?lat|cinecalidad/i.test(streamFn || '') &&
+        !/castellano/i.test(streamFn || '');
+
       motivoFalloDirecto = '';
       const played = await tryHevcDirectPlay(video, streamUrl, params.startPositionSec);
       if (played) {
@@ -1842,13 +1851,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         // no la aplica, devuelve false y la reproduccion se sigue tratando como
         // no-español, con los subtitulos encendidos.
         const pistas = (video as HTMLVideoElement & { audioTracks?: AudioTrackListLike }).audioTracks;
-        // Una pista que solo dice "spa"/"es" no aclara si es latino o castellano. El
-        // NOMBRE del release si: `...ENG.LATINO.HINDI...` o `Dual-Lat` estan diciendo
-        // que ese "spa" es latino. Sin esa señal, una pista ambigua no se activa, por
-        // la regla de siempre: mejor ingles con subtitulos que castellano.
-        const nombreDiceLatino =
-          /\blatino\b|\blat\b|dual.?lat|cinecalidad/i.test(streamFn || '') &&
-          !/castellano/i.test(streamFn || '');
         const sonandoEnEspanol =
           pistas && pistas.length ? applyPreferredAudioTrack(pistas, nombreDiceLatino) : null;
         if (sonandoEnEspanol !== null) {
@@ -1876,6 +1878,39 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         isLoadingRd.value = false;
         return;
       }
+      // ── Reintento con otra copia cuando el archivo NO SE PUEDE ABRIR (2026-10-17) ──
+      // Caso real "Frontier(s)", leido en el log de la TV: la copia elegida era un MKV y
+      // el navegador del televisor la rechazo con error a los 2 s. En el mismo pool habia
+      // un MP4 con H264 + AC3 que esa TV reproduce directo, pero la pelicula terminaba en
+      // conversion y cortandose.
+      //
+      // Esto NO es el Plan B que se elimino en ADR-010: aquel cambiaba de copia EN MEDIO
+      // de la reproduccion por sospecha de lentitud. Esto ocurre ANTES de reproducir
+      // nada, disparado por un error concreto del <video>, y se intenta UNA sola vez. Si
+      // la alternativa tampoco abre, se sigue al mismo camino de siempre, asi que el peor
+      // resultado posible es el comportamiento actual.
+      const otraCopia = selected.altOpenableUrl;
+      if (!played && motivoFalloDirecto && otraCopia) {
+        console.warn('[RD] El archivo no abrió — probando otra copia cacheada antes de convertir');
+        await _shakaDetachAndWait();
+        if (playerStore.isStale(myGen)) return;
+        motivoFalloDirecto = '';
+        const played2 = await tryHevcDirectPlay(video, otraCopia, params.startPositionSec);
+        if (played2) {
+          const pistas2 = (video as HTMLVideoElement & { audioTracks?: AudioTrackListLike }).audioTracks;
+          const enEspanol2 = pistas2 && pistas2.length ? applyPreferredAudioTrack(pistas2, nombreDiceLatino) : null;
+          console.warn('[RD] ✅ La otra copia SÍ abrió — reproducción directa, sin convertir');
+          opts.onStreamReady?.({
+            selected,
+            hasNativeSpanish: enEspanol2 ?? false,
+            spanishTrack: null,
+          });
+          startStallMonitor(video, myGen, recoverReloadSrc(otraCopia));
+          isLoadingRd.value = false;
+          return;
+        }
+      }
+
       // Avisar POR QUE se deja la reproduccion directa. Antes pasaba en silencio a
       // conversion y el usuario solo notaba que esa pelicula se pausaba, sin forma de
       // saber si fue porque el archivo no abrio o porque de entrada habia que

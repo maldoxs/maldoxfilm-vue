@@ -39,6 +39,14 @@ export interface SelectedStream {
   rdId: string | null;
   isX265: boolean;
   fallbackUrl: string | null;
+  /**
+   * altOpenableUrl — otra copia cacheada, en distinto contenedor, para reintentar UNA vez
+   * si el archivo elegido no se puede abrir. Caso real "Frontier(s)" (2026-10-17): el
+   * navegador de la TV rechazo el MKV con error a los 2 s y la pelicula termino en
+   * conversion, cortandose, habiendo un MP4 en el mismo pool que reproduce directo.
+   * null cuando no hay alternativa razonable.
+   */
+  altOpenableUrl?: string | null;
   imdbId: string | null;
   streamFilename: string | null;
   hasAAC: boolean;
