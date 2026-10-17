@@ -32,7 +32,7 @@
  * coexistían siempre en el DOM original con `display:none/block` alternado;
  * evita el costo de remount/lifecycle al cambiar de fuente a mitad de sesión.
  */
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import VideoPlayer from '../components/player/VideoPlayer.vue';
 import EpisodePanel from '../components/player/EpisodePanel.vue';
@@ -128,6 +128,35 @@ const isRdSource = computed(() => playerStore.sourceIndex === RD_SRC_IDX);
 const iframeLoading = ref(true);
 const iframeLoadingText = ref('🔌 Conectando con el servidor...');
 
+// ── Cadena de fuentes: cada una se intenta UNA sola vez por título ───────────
+// Antes, cuando RD no podía con una copia, mandaba a la fuente 0 (UnlimPlay) y
+// si esa tampoco servía se volvía a empezar: RD → UnlimPlay → RD → ... sin fin,
+// con el título girando entre reproductores. Acá se anota qué fuentes ya se
+// probaron para el título actual (`RD_SRC_IDX` incluido) para que el salto
+// automático siempre avance — RD → UnlimPlay → vidlink — y, cuando no queda
+// ninguna, se DETENGA con un cartel en vez de volver a la primera.
+// Se vacía en `init()` (título nuevo) y cuando el usuario elige una fuente a mano.
+const fuentesYaIntentadas = new Set<number>();
+const sinFuentes = ref(false);
+const botonSinFuentesRef = ref<HTMLButtonElement | null>(null);
+
+/**
+ * reiniciarCadenaDeFuentes — el conteo de fuentes probadas es POR TÍTULO (y por
+ * episodio): que una fuente no tuviera el capítulo 1 no dice nada del capítulo 2.
+ */
+function reiniciarCadenaDeFuentes() {
+  fuentesYaIntentadas.clear();
+  sinFuentes.value = false;
+}
+
+/** Primera fuente de `SOURCES` que todavía no se probó para este título. */
+function primeraFuenteSinProbar(): number | null {
+  for (let i = 0; i < SOURCES.length; i++) {
+    if (!fuentesYaIntentadas.has(i)) return i;
+  }
+  return null;
+}
+
 // ── Selector de fuentes (#sourceSelector) ────────────────────────────────────
 interface SourceButton {
   idx: number;
@@ -216,6 +245,7 @@ function onPanelPlay({ season, episode }: { season: number; episode: number }) {
   }
   playerStore.setEpisode(season, episode);
   fetchEpisodeRuntime(season, episode);
+  reiniciarCadenaDeFuentes();
   loadActiveSource();
   flashControlsOnEpChange();
 }
@@ -644,6 +674,7 @@ async function goToNextEpisode() {
   if (cur.episode < cur.totalEpisodes) {
     playerStore.setEpisode(cur.season, cur.episode + 1);
     fetchEpisodeRuntime(cur.season, cur.episode + 1);
+    reiniciarCadenaDeFuentes();
     loadActiveSource();
   } else if (cur.season < cur.totalSeasons) {
     const newSeason = cur.season + 1;
@@ -658,6 +689,7 @@ async function goToNextEpisode() {
       playerStore.setTotals(playerStore.current.totalSeasons, 20);
     }
     fetchEpisodeRuntime(newSeason, 1);
+    reiniciarCadenaDeFuentes();
     loadActiveSource();
     showToast(`▶ Temporada ${newSeason}`);
   }
@@ -857,6 +889,7 @@ function loadIframeSource(srcIdx: number, myGen: number) {
   );
 
   playerStore.setSourceIndex(srcIdx);
+  fuentesYaIntentadas.add(srcIdx);
 
   iframeLoadingText.value =
     srcIdx === 0 ? '🔌 Conectando con el servidor...' : `🔄 Probando ${SOURCES[srcIdx]?.name ?? 'siguiente fuente'}...`;
@@ -864,7 +897,7 @@ function loadIframeSource(srcIdx: number, myGen: number) {
   const frame = frameRef.value;
   if (!frame) return;
 
-  frame.onload = () => {
+  const alCargar = () => {
     if (iframeOnloadFired) return;
     iframeOnloadFired = true;
     if (iframeAutoFallbackTimer) {
@@ -874,10 +907,30 @@ function loadIframeSource(srcIdx: number, myGen: number) {
     setTimeout(hideLoadingAndStart, isTV ? 600 : 0);
   };
 
+  // El reseteo a `about:blank` TAMBIÉN dispara `onload`, y antes el handler ya
+  // estaba puesto cuando ocurría: esa página en blanco se tomaba por "la fuente
+  // cargó", se ocultaba el cartel y se cancelaba el temporizador de respaldo. Por
+  // eso la cadena nunca pasaba de UnlimPlay a vidlink aunque UnlimPlay no trajera
+  // nada. El handler ahora se instala junto con la URL real.
+  frame.onload = null;
   frame.src = 'about:blank';
   setTimeout(() => {
     if (playerStore.isStale(myGen)) return;
-    if (frameRef.value) frameRef.value.src = srcUrl;
+    const f = frameRef.value;
+    if (!f) return;
+    f.onload = alCargar;
+    // `location.replace` sobre el `about:blank` del propio iframe (que hereda
+    // nuestro origen, así que es accesible) NO agrega entrada al historial, a
+    // diferencia de asignar `src`. Esas entradas de más son las que hacían que la
+    // X de salir pareciera pegada: el "volver" caía en una copia de la ruta del
+    // reproductor en vez de en el detalle, y había que apretar varias veces.
+    try {
+      const win = f.contentWindow;
+      if (win) win.location.replace(srcUrl);
+      else f.src = srcUrl;
+    } catch {
+      f.src = srcUrl;
+    }
   }, 50);
 
   // Fuente 0 (UnlimPlay) tarda ~15s en scraping; las demás son más rápidas (línea ~8243-8245)
@@ -887,15 +940,16 @@ function loadIframeSource(srcIdx: number, myGen: number) {
     if (playerStore.isStale(myGen)) return;
     clearIframeMsgTimers();
     if (!iframeOnloadFired) {
-      const nextIdx = srcIdx + 1;
-      if (nextIdx < SOURCES.length) {
-        loadIframeSource(nextIdx, myGen);
+      const siguiente = primeraFuenteSinProbar();
+      if (siguiente != null) {
+        loadIframeSource(siguiente, myGen);
         return;
       }
-      iframeOnloadFired = true;
-    
-      startProgressTracking();
-      if (playerStore.current.type === 'tv') scheduleAutoNext();
+      // Ninguna fuente respondió: se corta acá. Antes se daba por cargada igual
+      // (se ocultaba el cartel sobre un iframe vacío y arrancaba el seguimiento
+      // de progreso de algo que no se estaba reproduciendo).
+      detenerPorFaltaDeFuentes();
+      return;
     }
     iframeLoading.value = false;
   }, timeoutMs);
@@ -963,6 +1017,10 @@ function loadActiveSource() {
 /** switchSource — preserva líneas ~8557-8565 (clic MANUAL del usuario en un botón de fuente). */
 function switchSource(idx: number) {
   if (!playerStore.current.id) return;
+  // Elección manual: esta fuente vuelve a estar disponible aunque ya se haya
+  // probado sola, y se levanta el cartel de "no se encontró".
+  sinFuentes.value = false;
+  fuentesYaIntentadas.delete(idx);
   playerStore.setSourceIndex(idx);
   loadActiveSource();
   showToast(sourceToastLabel(SOURCES, idx));
@@ -984,8 +1042,41 @@ function switchSource(idx: number) {
  */
 function fallbackToFirstSource() {
   if (!playerStore.current.id) return;
-  playerStore.setSourceIndex(0);
+  if (sinFuentes.value) return; // ya se recorrieron todas: no volver a empezar
+  // Solo el reproductor de RD emite este evento. Si ya no estamos en RD, es un
+  // aviso tardío de la carga anterior y haría saltar una fuente de más.
+  if (!isRdSource.value) return;
+  // RD queda marcado como probado: si más adelante alguna fuente de iframe falla,
+  // la cadena sigue hacia adelante en vez de devolver el título a RD (el ida y
+  // vuelta RD → UnlimPlay → RD que no terminaba nunca).
+  fuentesYaIntentadas.add(RD_SRC_IDX);
+  const siguiente = primeraFuenteSinProbar();
+  if (siguiente == null) {
+    detenerPorFaltaDeFuentes();
+    return;
+  }
+  playerStore.setSourceIndex(siguiente);
   loadActiveSource();
+}
+
+/**
+ * detenerPorFaltaDeFuentes — fin de la cadena: ni Real-Debrid ni los iframes
+ * pudieron con este título. Se apaga todo y queda un cartel fijo. Es la
+ * alternativa a lo que hacía antes, que era volver a la primera fuente y girar
+ * indefinidamente entre reproductores sin reproducir nada.
+ */
+function detenerPorFaltaDeFuentes() {
+  sinFuentes.value = true;
+  cancelAutoNext();
+  stopProgressTracking();
+  stopRdPlayback();
+  stopIframePlayback();
+  clearIframeMsgTimers();
+  iframeLoading.value = false;
+  controlsHidden.value = false; // que la X de salir quede a la vista
+  // En la TV se navega con el control remoto: el botón del cartel tiene que
+  // quedar enfocado solo, si no "Aceptar" no se puede apretar sin puntero.
+  void nextTick(() => botonSinFuentesRef.value?.focus());
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1064,7 +1155,11 @@ function closePlayer(forceDetail = false) {
   const cameFromDetail =
     typeof prevEntry === 'string' && (prevEntry.startsWith('/pelicula/') || prevEntry.startsWith('/serie/'));
   if (isRdSource.value && cameFromDetail) router.back();
-  else if (cur.id != null) router.push(detailRoute);
+  // Camino iframe: `replace` en vez de `push`. Con `push`, la entrada del detalle
+  // quedaba ARRIBA de las que dejó el iframe, así que el "Volver" del detalle caía
+  // de nuevo en el reproductor y parecía que la salida no respondía. Con `replace`
+  // la entrada del reproductor se pisa y el stack no sigue creciendo.
+  else if (cur.id != null) router.replace(detailRoute);
   else router.back();
   // ── TV: ocultar la BARRA DEL NAVEGADOR (webOS) al volver ─────────────────────
   // Tras el ciclo de reproducción, webOS re-muestra su barra (URL/controles) y tapa
@@ -1161,6 +1256,9 @@ async function init() {
       playerStore.setTotals(totalSeasons, 20);
     }
   }
+
+  // Título nuevo: la cadena de fuentes arranca limpia (ver `fuentesYaIntentadas`).
+  reiniciarCadenaDeFuentes();
 
   // Anime: precargar selector mostrando StreamiX inmediatamente (preserva línea ~7589-7593)
   if (isAnime.value) {
@@ -1284,10 +1382,21 @@ onBeforeUnmount(() => {
 
     <div class="player-frame-wrap">
       <!-- Overlay de carga del camino iframe — preserva #playerLoading (línea ~3740) -->
-      <div v-show="iframeLoading && !isRdSource" class="player-loading">
+      <div v-show="iframeLoading && !isRdSource && !sinFuentes" class="player-loading">
         <div class="spinner"></div>
         <p class="player-loading-text">{{ iframeLoadingText }}</p>
         <p class="player-loading-hint">El servidor obtiene el contenido en tiempo real.<br />Puede tardar hasta 15 segundos.</p>
+      </div>
+
+      <!-- Fin de la cadena de fuentes: ni RD ni los iframes pudieron con el título.
+           Un cartel con botón, en vez de dejar el reproductor girando de una fuente
+           a otra o colgado sobre una pantalla negra. -->
+      <div v-if="sinFuentes" class="sin-fuentes">
+        <div class="sin-fuentes-caja">
+          <p class="sin-fuentes-titulo">Película no encontrada</p>
+          <p class="sin-fuentes-texto">No está disponible en ninguno de los reproductores.</p>
+          <button ref="botonSinFuentesRef" class="sin-fuentes-btn" @click="closePlayer()">Aceptar</button>
+        </div>
       </div>
 
       <!-- Real-Debrid — siempre montado, mostrado vía v-show -->
@@ -1641,6 +1750,51 @@ html.tv-mode .source-btn:focus {
   background: rgba(0, 0, 0, 0.92);
   z-index: 5;
   transition: opacity 0.25s ease;
+}
+.sin-fuentes {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.92);
+}
+.sin-fuentes-caja {
+  max-width: 420px;
+  padding: 28px 32px;
+  border-radius: 10px;
+  background: #1b1b1b;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  text-align: center;
+}
+.sin-fuentes-titulo {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 8px;
+}
+.sin-fuentes-texto {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.45;
+  margin-bottom: 20px;
+}
+.sin-fuentes-btn {
+  min-width: 140px;
+  padding: 10px 24px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent, #3d5afe);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sin-fuentes-btn:focus,
+.sin-fuentes-btn:hover {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 .player-loading-text {
   color: var(--text-muted, #9a9a9a);
