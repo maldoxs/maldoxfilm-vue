@@ -126,6 +126,24 @@ const MAX_STALL_RECOVERIES = 4; // recuperaciones sin éxito → cambiar de fuen
  */
 const DIRECT_PLAY_MAX_WAIT_MS = 30000;
 
+/**
+ * DIRECT_PLAY_MAX_WAIT_TV_MS — el mismo tope, pero en TV (2026-10-17).
+ *
+ * Caso real "Frontier(s)" (MKV de 3,2 GB con DTS): en escritorio el `<video>` abrio el
+ * archivo en 3,5 s y reprodujo directo; en la TV no llego a tiempo, se abandono el
+ * intento y cayo a conversion, que es lo unico que se pausa. Esperar mas solo cuesta
+ * un arranque mas lento; rendirse cuesta que toda la pelicula se corte, asi que en TV
+ * el intercambio favorece la paciencia.
+ *
+ * No afloja el corte rapido: el plazo se renueva SOLO mientras el navegador reporte que
+ * esta bajando datos (`progress`). Si no llega nada, se aborta a los
+ * `HEVC_DIRECT_PLAY_TIMEOUT_MS` de siempre, sin importar este tope.
+ */
+const DIRECT_PLAY_MAX_WAIT_TV_MS = 45000;
+
+/** Por que se abandono el ultimo intento de reproduccion directa (para avisar en pantalla). */
+let motivoFalloDirecto = '';
+
 // ── LATIDO (heartbeat) continuo de RD (2026-07-12) ───────────────────────────
 // EVIDENCIA: en la pestaña de red del reproductor OFICIAL de RD, el player manda
 // `streaming/ping/{mediaId}/{pos}` cada ~6-10s DE FORMA CONTINUA (no solo al saltar) →
@@ -603,7 +621,9 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // Ahora: si el navegador reporta que está bajando data (`progress`), se le renueva
       // el plazo; si no llega NADA, se aborta igual de rápido que antes. Tope duro para
       // no colgar el arranque cuando el archivo simplemente no se puede abrir.
-      const topeDuro = Date.now() + DIRECT_PLAY_MAX_WAIT_MS;
+      const esTv = opts.isTv?.() ?? false;
+      const topeDuro = Date.now() + (esTv ? DIRECT_PLAY_MAX_WAIT_TV_MS : DIRECT_PLAY_MAX_WAIT_MS);
+      let huboDatos = false;
       const desde = Date.now();
       let tmo: ReturnType<typeof setTimeout>;
       const limpiar = () => {
@@ -613,7 +633,18 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       const abortar = () => {
         if (played) return;
         limpiar();
-        console.warn(`[RD] Direct Play: sin metadatos tras ${((Date.now() - desde) / 1000).toFixed(1)}s — se descarta`);
+        const seg = ((Date.now() - desde) / 1000).toFixed(1);
+        // Se distinguen los dos motivos, que llevan a arreglos distintos: si NUNCA llego
+        // data, el navegador no puede con ese archivo y esperar mas no sirve; si llego
+        // pero no alcanzo, el problema es de tiempo y el tope es lo que hay que mover.
+        motivoFalloDirecto = huboDatos
+          ? `el archivo tardó más de ${seg}s en abrir`
+          : 'este reproductor no pudo abrir el archivo';
+        console.warn(
+          `[RD] Direct Play: sin metadatos tras ${seg}s — ${
+            huboDatos ? 'llegaba data pero no alcanzó el tiempo' : 'NUNCA llegó data'
+          } — se descarta`
+        );
         video.src = '';
         resolve();
       };
@@ -622,6 +653,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         tmo = setTimeout(abortar, ms);
       };
       const onProgress = () => {
+        huboDatos = true;
         const restante = topeDuro - Date.now();
         if (restante > 0) armar(Math.min(HEVC_DIRECT_PLAY_TIMEOUT_MS, restante));
       };
@@ -1794,6 +1826,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // esté perfecto. Se espera a que suelte el elemento antes de tocarlo.
       await _shakaDetachAndWait();
       if (playerStore.isStale(myGen)) return;
+      motivoFalloDirecto = '';
       const played = await tryHevcDirectPlay(video, streamUrl, params.startPositionSec);
       if (played) {
         // ── Elegir la pista de audio (2026-10-12) ───────────────────────────────
@@ -1842,6 +1875,13 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         // Toast "Seek fluido" quitado (a pedido) — un solo mensaje "Cargando…", sin toasts.
         isLoadingRd.value = false;
         return;
+      }
+      // Avisar POR QUE se deja la reproduccion directa. Antes pasaba en silencio a
+      // conversion y el usuario solo notaba que esa pelicula se pausaba, sin forma de
+      // saber si fue porque el archivo no abrio o porque de entrada habia que
+      // convertirla. En TV no hay consola, asi que el unico canal es la pantalla.
+      if (motivoFalloDirecto) {
+        opts.onToast(`⚠️ Sin reproducción directa: ${motivoFalloDirecto} — puede cortarse`);
       }
       // Directo falló. Si era HEVC sin rdId → contenido bloqueado/no disponible (líneas ~7905-7911).
       // (Para H264 que falla —p.ej. MKV no reproducible directo— simplemente seguimos al transcode.)
