@@ -209,6 +209,11 @@ function onSetSpeed(value: number) {
         <button class="sp-offset-btn" @click="emit('adjust-offset', 1000)">+1s</button>
         <button class="sp-offset-btn" @click="emit('adjust-offset', 5000)">+5s</button>
       </div>
+      <!-- Qué botón usar no era evidente: con el subtítulo atrasado se tiende a
+           apretar el "+", que lo atrasa todavía más. -->
+      <div class="sp-offset-hint">
+        Si el subtítulo va atrasado, restá. Si se adelanta a las voces, sumá.
+      </div>
     </div>
 
     <!-- Vista: Velocidad (preserva `#nfPanelSpeed`, líneas ~3653-3672) -->
@@ -353,7 +358,13 @@ function onSetSpeed(value: number) {
 .sp-offset-btns {
   display: flex;
   gap: 7px;
-  padding: 0 24px 16px; /* ocupa todo el ancho de la fila */
+  padding: 0 24px 8px; /* ocupa todo el ancho de la fila */
+}
+.sp-offset-hint {
+  font-size: 0.6rem;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.35);
+  padding: 0 24px 14px;
 }
 .sp-offset-btn {
   flex: 1; /* los 5 botones se reparten TODO el ancho de abajo */

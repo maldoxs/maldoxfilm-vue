@@ -208,12 +208,31 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
   }
 
   // ── Ajuste de offset — reemplaza `_adjustSubOffset` (líneas ~5192-5212) ──
+  /**
+   * Tope del ajuste manual, hacia adelante y hacia atrás.
+   *
+   * En la TV el botón se dispara varias veces por pulsación (el control remoto
+   * repite mientras se mantiene apretado). Medido el 17-10-2026 con *Ghostland*:
+   * el log registró más de veinte saltos de +5 s seguidos, y el subtítulo terminó
+   * dos minutos tarde, guardado así para la próxima vez. Un desfase real nunca
+   * llega a un minuto: lo que pasa ese valor es siempre un accidente.
+   */
+  const TOPE_OFFSET_MS = 60000;
+  /** Espera antes de publicar el ajuste al servidor compartido (ver abajo). */
+  const ESPERA_GUARDADO_MS = 1500;
+  let guardadoRemotoTimer: ReturnType<typeof setTimeout> | null = null;
+
   function adjustOffset(deltaMs: number) {
     if (!srtRaw.value) {
       status.value = 'Sin subtítulos cargados';
       return;
     }
-    const next = offsetMs.value + deltaMs;
+    const pedido = offsetMs.value + deltaMs;
+    const next = Math.max(-TOPE_OFFSET_MS, Math.min(TOPE_OFFSET_MS, pedido));
+    if (next === offsetMs.value) {
+      status.value = `✅ ES | offset: ${next >= 0 ? '+' : ''}${(next / 1000).toFixed(1)}s (tope)`;
+      return; // ya en el tope: ni reparsear ni volver a guardar
+    }
     inject(srtRaw.value, next);
     const sign = next >= 0 ? '+' : '';
     const label = sign + (next / 1000).toFixed(1) + 's';
@@ -223,12 +242,19 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
       const key = 'sub_off_' + (subImdbId.includes('.') ? subImdbId.replace(/\.[^.]+$/, '') : subImdbId);
       safeStorage.setItem(key, String(next));
     }
+    // El envío al servidor (que comparte el ajuste con los demás) espera a que el
+    // usuario deje de tocar el botón. Sin esto, una pulsación sostenida publicaba
+    // una veintena de valores intermedios, todos equivocados menos el último.
     if (subInfoHash && subFileId) {
-      fetchImpl('/.netlify/functions/offset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ infoHash: subInfoHash, fileId: subFileId, offset: next }),
-      }).catch(() => {});
+      if (guardadoRemotoTimer) clearTimeout(guardadoRemotoTimer);
+      guardadoRemotoTimer = setTimeout(() => {
+        guardadoRemotoTimer = null;
+        fetchImpl('/.netlify/functions/offset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ infoHash: subInfoHash, fileId: subFileId, offset: offsetMs.value }),
+        }).catch(() => {});
+      }, ESPERA_GUARDADO_MS);
     }
   }
 
@@ -355,9 +381,18 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
             { signal }
           ).then((r) => r.json());
           if (shared.offset !== null && shared.offset !== undefined) {
-            offsetMs.value = shared.offset;
-            // Log de diagnóstico — preserva índex.html línea 5322 (1:1).
-            console.warn('[SUB] Offset compartido encontrado:', offsetMs.value + 'ms');
+            const compartido = Number(shared.offset);
+            // El mismo tope que el ajuste manual, también de este lado: un valor
+            // desmedido guardado por accidente (pulsación sostenida en el control
+            // remoto) volvería a aplicarse en cada reproducción, incluso después de
+            // haberlo puesto en cero acá.
+            if (Number.isFinite(compartido) && Math.abs(compartido) <= TOPE_OFFSET_MS) {
+              offsetMs.value = compartido;
+              // Log de diagnóstico — preserva índex.html línea 5322 (1:1).
+              console.warn('[SUB] Offset compartido encontrado:', offsetMs.value + 'ms');
+            } else {
+              console.warn('[SUB] Offset compartido descartado por desmedido:', shared.offset);
+            }
           }
         } catch {
           /* no crítico */
