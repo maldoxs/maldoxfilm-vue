@@ -56,6 +56,23 @@ watch(
   },
   { immediate: true }
 );
+/**
+ * enReproductor — true mientras la ruta es la del reproductor, se sepa o no todavía
+ * qué componente la atiende.
+ *
+ * El reproductor viaja en un trozo de código aparte, así que al RECARGAR la página
+ * sobre `/ver/...` el navegador primero pinta la cáscara de la app (la barra de
+ * navegación) y recién después, cuando termina de bajar ese trozo, aparece el
+ * reproductor. Eso es el pestañazo de "pantalla de inicio" que se ve al pasar de un
+ * reproductor a otro, porque la página embebida recarga la app. Ocultando la barra
+ * POR RUTA (que se conoce desde el primer pintado, a diferencia del componente) el
+ * hueco queda en negro y la secuencia se ve continua.
+ *
+ * No afecta al reproductor ya montado: `.player-page` es `position: fixed; inset: 0`,
+ * así que la barra nunca le aportó espacio.
+ */
+const enReproductor = computed(() => route.path.startsWith('/ver/'));
+
 const activeKey = computed<RouteKey>(() => {
   const name = String(route.name ?? '');
   return ROUTE_NAME_TO_KEY[name] ?? lastSection.value;
@@ -139,9 +156,11 @@ onMounted(() => {
 
 <template>
   <div id="app-shell">
-    <NavDesktop v-if="deviceStore.mode === 'desktop'" :active="activeKey" @navigate="onNavigate" @search="onSearch" />
-    <NavMobile v-else-if="deviceStore.mode === 'mobile'" :active="activeKey" @navigate="onNavigate" @open-search="onOpenSearch" />
-    <NavTV v-else :active="activeKey" @navigate="onNavigate" @open-search="onOpenSearch" @toggle-fullscreen="onToggleAppFullscreen" />
+    <template v-if="!enReproductor">
+      <NavDesktop v-if="deviceStore.mode === 'desktop'" :active="activeKey" @navigate="onNavigate" @search="onSearch" />
+      <NavMobile v-else-if="deviceStore.mode === 'mobile'" :active="activeKey" @navigate="onNavigate" @open-search="onOpenSearch" />
+      <NavTV v-else :active="activeKey" @navigate="onNavigate" @open-search="onOpenSearch" @toggle-fullscreen="onToggleAppFullscreen" />
+    </template>
 
     <main class="app-main" :class="`mode-${deviceStore.mode}`">
       <router-view />
