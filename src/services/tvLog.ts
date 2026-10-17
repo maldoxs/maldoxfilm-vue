@@ -20,6 +20,14 @@ const PREFIJOS = ['[RD]', '[/t/]', '[PLAYER]', '[SUB]'];
 
 let enganchado = false;
 let cola: string[] = [];
+/**
+ * Ultima linea enviada, para no repetir. Un reproductor en PAUSA late cada pocos
+ * segundos con el mismo texto; una sola pestaña olvidada asi llenaba el log y tapaba
+ * la reproduccion que se queria diagnosticar (visto el 2026-10-17 buscando el caso de
+ * "Scrapbook"). Las lineas repetidas consecutivas no aportan nada.
+ */
+let ultima = '';
+let repetidas = 0;
 let temporizador: ReturnType<typeof setInterval> | null = null;
 const sesion = Math.random().toString(36).slice(2, 8);
 
@@ -71,6 +79,15 @@ export function engancharLogsDeTv(fetchImpl: typeof fetch = fetch): () => void {
     try {
       const texto = formatearArgumentos(args);
       if (!esLineaDelReproductor(texto)) return;
+      if (texto === ultima) {
+        repetidas++;
+        return;
+      }
+      if (repetidas > 0) {
+        cola.push(`(la línea anterior se repitió ${repetidas} veces)`);
+        repetidas = 0;
+      }
+      ultima = texto;
       cola.push(texto);
       if (cola.length > MAX_EN_COLA) cola = cola.slice(-MAX_EN_COLA);
     } catch {
@@ -88,5 +105,7 @@ export function engancharLogsDeTv(fetchImpl: typeof fetch = fetch): () => void {
     temporizador = null;
     enganchado = false;
     cola = [];
+    ultima = '';
+    repetidas = 0;
   };
 }
