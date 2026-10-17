@@ -140,6 +140,45 @@ const fuentesYaIntentadas = new Set<number>();
 const sinFuentes = ref(false);
 const botonSinFuentesRef = ref<HTMLButtonElement | null>(null);
 
+// Las fuentes que ya fallaron se recuerdan unos minutos en `sessionStorage`, no
+// solo en memoria. Motivo medido en la TV el 17-10-2026: la página embebida
+// recargaba la app entera cada ~6 segundos, y cada recarga arrancaba el título
+// otra vez desde RD, así que el recorrido volvía a empezar de cero una y otra vez.
+// El `sandbox` del iframe corta esa recarga; esto es la red de abajo, para que
+// ninguna recarga (venga de donde venga) reinicie el recorrido.
+const CLAVE_FUENTES_FALLIDAS = 'mf-fuentes-fallidas';
+/** Tres minutos: suficiente para cortar un bucle, corto para no castigar un fallo pasajero. */
+const VIDA_FUENTES_FALLIDAS_MS = 3 * 60 * 1000;
+
+function claveDelTitulo(): string {
+  const c = playerStore.current;
+  return `${c.type}:${c.id}:${c.season}:${c.episode}`;
+}
+
+function leerFuentesFallidas(): number[] {
+  try {
+    const crudo = sessionStorage.getItem(CLAVE_FUENTES_FALLIDAS);
+    if (!crudo) return [];
+    const dato = JSON.parse(crudo) as { clave?: string; ts?: number; fuentes?: unknown };
+    if (dato.clave !== claveDelTitulo()) return [];
+    if (!dato.ts || Date.now() - dato.ts > VIDA_FUENTES_FALLIDAS_MS) return [];
+    return Array.isArray(dato.fuentes) ? dato.fuentes.filter((f): f is number => typeof f === 'number') : [];
+  } catch {
+    return [];
+  }
+}
+
+function guardarFuentesFallidas() {
+  try {
+    sessionStorage.setItem(
+      CLAVE_FUENTES_FALLIDAS,
+      JSON.stringify({ clave: claveDelTitulo(), ts: Date.now(), fuentes: [...fuentesYaIntentadas] })
+    );
+  } catch {
+    /* almacenamiento bloqueado: se sigue con el recuerdo en memoria */
+  }
+}
+
 /**
  * reiniciarCadenaDeFuentes — el conteo de fuentes probadas es POR TÍTULO (y por
  * episodio): que una fuente no tuviera el capítulo 1 no dice nada del capítulo 2.
@@ -147,6 +186,11 @@ const botonSinFuentesRef = ref<HTMLButtonElement | null>(null);
 function reiniciarCadenaDeFuentes() {
   fuentesYaIntentadas.clear();
   sinFuentes.value = false;
+  try {
+    sessionStorage.removeItem(CLAVE_FUENTES_FALLIDAS);
+  } catch {
+    /* almacenamiento bloqueado */
+  }
 }
 
 /** Primera fuente de `SOURCES` que todavía no se probó para este título. */
@@ -890,6 +934,7 @@ function loadIframeSource(srcIdx: number, myGen: number) {
 
   playerStore.setSourceIndex(srcIdx);
   fuentesYaIntentadas.add(srcIdx);
+  guardarFuentesFallidas();
 
   iframeLoadingText.value =
     srcIdx === 0 ? '🔌 Conectando con el servidor...' : `🔄 Probando ${SOURCES[srcIdx]?.name ?? 'siguiente fuente'}...`;
@@ -1021,6 +1066,7 @@ function switchSource(idx: number) {
   // probado sola, y se levanta el cartel de "no se encontró".
   sinFuentes.value = false;
   fuentesYaIntentadas.delete(idx);
+  guardarFuentesFallidas();
   playerStore.setSourceIndex(idx);
   loadActiveSource();
   showToast(sourceToastLabel(SOURCES, idx));
@@ -1050,6 +1096,7 @@ function fallbackToFirstSource() {
   // la cadena sigue hacia adelante en vez de devolver el título a RD (el ida y
   // vuelta RD → UnlimPlay → RD que no terminaba nunca).
   fuentesYaIntentadas.add(RD_SRC_IDX);
+  guardarFuentesFallidas();
   const siguiente = primeraFuenteSinProbar();
   if (siguiente == null) {
     detenerPorFaltaDeFuentes();
@@ -1257,8 +1304,22 @@ async function init() {
     }
   }
 
-  // Título nuevo: la cadena de fuentes arranca limpia (ver `fuentesYaIntentadas`).
+  // Título nuevo: la cadena de fuentes arranca limpia (ver `fuentesYaIntentadas`),
+  // salvo lo que haya quedado anotado hace menos de tres minutos para ESTE mismo
+  // título: si el navegador recargó la página sola, el recorrido sigue donde iba
+  // en vez de volver a empezar por RD. El anime no usa esta cadena.
+  const yaFallaron = isAnime.value ? [] : leerFuentesFallidas();
   reiniciarCadenaDeFuentes();
+  for (const f of yaFallaron) fuentesYaIntentadas.add(f);
+  if (yaFallaron.length) {
+    guardarFuentesFallidas();
+    const pendiente = primeraFuenteSinProbar();
+    if (pendiente == null) {
+      detenerPorFaltaDeFuentes(); // ninguna quedó por probar: el cartel, no otra vuelta
+      return;
+    }
+    if (fuentesYaIntentadas.has(RD_SRC_IDX)) playerStore.setSourceIndex(pendiente);
+  }
 
   // Anime: precargar selector mostrando StreamiX inmediatamente (preserva línea ~7589-7593)
   if (isAnime.value) {
@@ -1411,7 +1472,14 @@ onBeforeUnmount(() => {
         </VideoPlayer>
       </div>
 
-      <!-- Iframe (UnlimPlay/vidlink/Anime1V) — siempre montado, mostrado vía v-show -->
+      <!-- Iframe (UnlimPlay/vidlink/Anime1V) — siempre montado, mostrado vía v-show.
+           `sandbox` SIN `allow-top-navigation` a propósito: medido en la TV el
+           17-10-2026, la página embebida navegaba la ventana de arriba y recargaba
+           la app entera cada ~6 s (el log mostraba `carga:reload` en bucle sobre
+           /ver/movie/59317). Cada recarga reiniciaba el reproductor desde RD, de ahí
+           el ida y vuelta entre reproductores que no paraba nunca. Lo que la página
+           necesita para reproducir (scripts, su propio origen, formularios, pantalla
+           completa en otro dispositivo) sigue permitido. -->
       <iframe
         v-show="!isRdSource"
         ref="frameRef"
@@ -1419,6 +1487,7 @@ onBeforeUnmount(() => {
         tabindex="0"
         allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
         referrerpolicy="no-referrer"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
       ></iframe>
 
       <!-- Captador de actividad sobre el iframe (cross-origin no manda mousemove al padre).
