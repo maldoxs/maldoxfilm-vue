@@ -80,8 +80,26 @@ export const useDeviceStore = defineStore('device', {
 
       // En TV no hay consola accesible, asi que los logs del reproductor se espejan a
       // una function para poder leerlos. Ver `services/tvLog.ts`.
-      if (result.mode === 'tv') {
-        void import('../services/tvLog').then((m) => m.engancharLogsDeTv()).catch(() => {});
+      //
+      // Se engancha tambien cuando el identificador del navegador PARECE de un televisor
+      // aunque la deteccion no haya dado 'tv'. Sin eso, el unico caso que de verdad hay
+      // que diagnosticar se quedaba mudo: el usuario reporta que a veces, en su TV,
+      // aparecen los iconos de la barra inferior de movil. Si eso ocurre, la app creyo
+      // ser un celular y antes dejaba de enviar logs justo en esa corrida.
+      const pareceTv = /netcast|smarttv|smart-tv|webos|tizen|viera|bravia|lgtv/i.test(navigator.userAgent);
+      if (result.mode === 'tv' || pareceTv) {
+        void import('../services/tvLog')
+          .then((m) => {
+            m.engancharLogsDeTv();
+            if (result.mode !== 'tv') {
+              console.warn(
+                `[RD] ATENCION: parece un televisor pero se detecto modo "${result.mode}" — ` +
+                  `touch:${navigator.maxTouchPoints} pantalla:${screen.width}x${screen.height} ` +
+                  `dpr:${window.devicePixelRatio} ua:${navigator.userAgent}`
+              );
+            }
+          })
+          .catch(() => {});
       }
       if (result.mode === 'mobile') {
         const style = document.createElement('style');
