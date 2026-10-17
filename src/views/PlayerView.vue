@@ -144,8 +144,11 @@ const botonSinFuentesRef = ref<HTMLButtonElement | null>(null);
 // solo en memoria. Motivo medido en la TV el 17-10-2026: la página embebida
 // recargaba la app entera cada ~6 segundos, y cada recarga arrancaba el título
 // otra vez desde RD, así que el recorrido volvía a empezar de cero una y otra vez.
-// El `sandbox` del iframe corta esa recarga; esto es la red de abajo, para que
-// ninguna recarga (venga de donde venga) reinicie el recorrido.
+// La recarga en sí no se puede impedir: el `sandbox` del iframe la bloquearía,
+// pero vidlink se niega a cargar con ese atributo (ver la nota en la plantilla).
+// Entonces lo que se corta es el bucle: con esto, una recarga retoma el recorrido
+// donde iba en vez de volver a empezar por RD, y a lo sumo quedan dos rebotes
+// antes del cartel.
 const CLAVE_FUENTES_FALLIDAS = 'mf-fuentes-fallidas';
 /** Tres minutos: suficiente para cortar un bucle, corto para no castigar un fallo pasajero. */
 const VIDA_FUENTES_FALLIDAS_MS = 3 * 60 * 1000;
@@ -1473,13 +1476,14 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Iframe (UnlimPlay/vidlink/Anime1V) — siempre montado, mostrado vía v-show.
-           `sandbox` SIN `allow-top-navigation` a propósito: medido en la TV el
-           17-10-2026, la página embebida navegaba la ventana de arriba y recargaba
-           la app entera cada ~6 s (el log mostraba `carga:reload` en bucle sobre
-           /ver/movie/59317). Cada recarga reiniciaba el reproductor desde RD, de ahí
-           el ida y vuelta entre reproductores que no paraba nunca. Lo que la página
-           necesita para reproducir (scripts, su propio origen, formularios, pantalla
-           completa en otro dispositivo) sigue permitido. -->
+           NO PONER `sandbox` ACÁ. Se probó el 17-10-2026 para impedir que la página
+           embebida recargue la app (ver `fuentesYaIntentadas`): vidlink detecta el
+           atributo y se niega a cargar, muestra "Please Disable Sandbox". Verificado
+           con cuatro combinaciones de tokens (base, +popups, +popups-to-escape +
+           modals): las cuatro rechazadas; solo carga sin el atributo. Que la página
+           embebida navegue la ventana de arriba no se puede bloquear de otra forma,
+           así que el bucle se corta recordando las fuentes ya fallidas entre
+           recargas, no impidiendo la recarga. -->
       <iframe
         v-show="!isRdSource"
         ref="frameRef"
@@ -1487,7 +1491,6 @@ onBeforeUnmount(() => {
         tabindex="0"
         allow="autoplay; fullscreen; encrypted-media; picture-in-picture; accelerometer; gyroscope"
         referrerpolicy="no-referrer"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
       ></iframe>
 
       <!-- Captador de actividad sobre el iframe (cross-origin no manda mousemove al padre).
