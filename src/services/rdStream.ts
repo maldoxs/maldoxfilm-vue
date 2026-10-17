@@ -210,7 +210,7 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
       // ── Selección + scoring (líneas ~4731-4809) — función pura ya testeada ──
       // `isTv` ajusta el scoring para preferir H264 1080p en TV (evita HEVC/4K que
       // el navegador de la smart-TV no renderiza → audio sin imagen).
-      const selection = selectBestStream(streams, isTv);
+      const selection = selectBestStream(streams, isTv, originalLanguage);
       if (!selection.best || !selection.best.url) return emptySelectedStream();
 
       const { best, withUrl, scored, pool, streamFilename, infoHash } = selection;
@@ -277,7 +277,7 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
           const nuevos = (streams2 || []).filter((s) => s.url && !known.has(s.url));
           if (nuevos.length) {
             console.warn('[RD] Pool sin versión fluida — re-fetch trajo', nuevos.length, 'streams nuevos');
-            const merged = selectBestStream([...streams, ...nuevos], isTv);
+            const merged = selectBestStream([...streams, ...nuevos], isTv, originalLanguage);
             const active2 = resolveActiveStream(
               best,
               resolvedUrl,

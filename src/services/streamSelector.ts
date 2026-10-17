@@ -181,6 +181,44 @@ export const hasNonLatinTitle = (s: TorrentioStream): boolean => NON_LATIN_SCRIP
 const FOREIGN_FLAG_RE = /🇵🇹|🇧🇷|🇮🇹|🇫🇷|🇷🇺|🇰🇷|🇩🇪|🇵🇱|🇹🇷|🇯🇵|🇨🇳/;
 const FOREIGN_DUB_WORD_RE = /\bdublado\b|\bdublada\b|\bdoppiato\b|\blektor\b|\bnapisy\b|\bvostfr\b|\btruefrench\b/i;
 
+/**
+ * ORIGINAL_LANG_MARKS — como declara cada release el idioma, por codigo ISO de TMDB.
+ *
+ * Sirve para NO descartar una copia que esta en el idioma ORIGINAL de la pelicula. Caso
+ * real "Frontier(s)" (2026-10-17, log de la TV): pelicula francesa, TMDB informa `fr`, y
+ * las copias francesas se tiraban por "idioma incompatible" como si fueran un doblaje no
+ * deseado. Quedaba una sola copia cacheada, un MKV con DTS que el televisor no puede
+ * abrir, y la pelicula terminaba en conversion cortandose. Entre las descartadas habia
+ * un MP4 cacheado en frances, que es el audio que corresponde.
+ *
+ * El dato del idioma original ya se consultaba desde julio, pero solo para avisar al
+ * usuario; nunca se uso para dejar de descartar.
+ */
+const ORIGINAL_LANG_MARKS: Record<string, RegExp> = {
+  fr: /\bfra\b|\bfre\b|\bfrench\b|\bvff\b|\bvf\b|\btruefrench\b|\bvostfr\b|🇫🇷/i,
+  it: /\bita\b|\bitalian\b|\bdoppiato\b|🇮🇹/i,
+  ko: /\bkor\b|\bkorean\b|🇰🇷/i,
+  ru: /\brus\b|\brussian\b|🇷🇺/i,
+  ja: /\bjpn\b|\bjap\b|\bjapanese\b|🇯🇵/i,
+  de: /\bger\b|\bgerman\b|\bdeutsch\b|🇩🇪/i,
+  pt: /\bpor\b|\bportuguese\b|\bdublado\b|\bdublada\b|🇵🇹|🇧🇷/i,
+  zh: /\bchi\b|\bchinese\b|\bmandarin\b|🇨🇳/i,
+  pl: /\bpol\b|\bpolish\b|\blektor\b|\bnapisy\b|🇵🇱/i,
+  tr: /\btur\b|\bturkish\b|🇹🇷/i,
+  uk: /\bukr\b|\bukrainian\b/i,
+};
+
+/**
+ * isOriginalLanguageCopy — ¿esta copia esta en el idioma ORIGINAL de la pelicula?
+ * `originalIso` es el codigo que devuelve TMDB (`fr`, `ko`, `it`...). Devuelve false
+ * para ingles y español, que nunca se descartan y por lo tanto no necesitan excepcion.
+ */
+export function isOriginalLanguageCopy(s: TorrentioStream, originalIso: string | null | undefined): boolean {
+  if (!originalIso) return false;
+  const re = ORIGINAL_LANG_MARKS[originalIso.toLowerCase()];
+  return re ? re.test(streamInfo(s)) || re.test(s.title || '') : false;
+}
+
 export const hasBadLang = (s: TorrentioStream): boolean => {
   const t = streamInfo(s);
   const bad =
@@ -339,7 +377,12 @@ export const isCinemaLeakSource = (s: TorrentioStream): boolean => CINEMA_LEAK_R
  * una TV; pero cualquier cambio ahí es inerte hasta que alguien vuelva a pasar `true`.
  * No inventar comportamiento distinto por dispositivo sin revisar esa decisión primero.
  */
-export function scoreStream(s: TorrentioStream, isTv = false, ignorarIdioma = false): number {
+export function scoreStream(
+  s: TorrentioStream,
+  isTv = false,
+  ignorarIdioma = false,
+  idiomaOriginal: string | null = null
+): number {
   // ── Descartes automáticos ──
   if (isJunkStream(s)) return -10000; // sample/trailer/test → nunca
   // `ignorarIdioma` SOLO lo usa `rankStreams` cuando el filtro de idioma dejó CERO
@@ -347,7 +390,11 @@ export function scoreStream(s: TorrentioStream, isTv = false, ignorarIdioma = fa
   // Ahí descartar por idioma ya no distingue nada —todas están en el mismo idioma— y
   // lo único que hace es tirar a la basura el resto de los criterios. Default `false`:
   // el comportamiento normal no cambia en ningún caso.
-  if (!ignorarIdioma && hasBadLang(s)) return -10000; // idioma incompatible sin ENG/SPA
+  // El idioma ORIGINAL de la pelicula no es un idioma "incompatible": es el audio que
+  // corresponde. Descartarlo dejaba a las peliculas extranjeras con las peores copias.
+  if (!ignorarIdioma && !isOriginalLanguageCopy(s, idiomaOriginal) && hasBadLang(s)) {
+    return -10000; // idioma incompatible sin ENG/SPA
+  }
 
   let pts = 0;
 
@@ -508,7 +555,8 @@ const porClaseYPuntaje = (a: ScoredStream, b: ScoredStream): number =>
  */
 export function rankStreams(
   streams: TorrentioStream[],
-  isTv = false
+  isTv = false,
+  idiomaOriginal: string | null = null
 ): {
   withUrl: TorrentioStream[];
   scored: ScoredStream[];
@@ -516,14 +564,14 @@ export function rankStreams(
 } {
   const withUrl = streams.filter((s) => !!s.url);
   const scored = withUrl
-    .map((s) => ({ s, pts: scoreStream(s, isTv) }))
+    .map((s) => ({ s, pts: scoreStream(s, isTv, false, idiomaOriginal) }))
     .filter((x) => x.pts > -5000)
     .sort(porClaseYPuntaje);
 
   if (scored.length) return { withUrl, scored, pool: scored };
 
   const sinFiltroDeIdioma = withUrl
-    .map((s) => ({ s, pts: scoreStream(s, isTv, true) }))
+    .map((s) => ({ s, pts: scoreStream(s, isTv, true, idiomaOriginal) }))
     .filter((x) => x.pts > -5000) // la basura (sample/trailer) sigue fuera
     .sort(porClaseYPuntaje);
   const pool = sinFiltroDeIdioma.length ? sinFiltroDeIdioma : withUrl.map((s) => ({ s, pts: 0 }));
@@ -910,7 +958,8 @@ export function buildSelectedStream(params: {
  */
 export function selectBestStream(
   streams: TorrentioStream[],
-  isTv = false
+  isTv = false,
+  idiomaOriginal: string | null = null
 ): {
   best: TorrentioStream | null;
   withUrl: TorrentioStream[];
@@ -920,7 +969,7 @@ export function selectBestStream(
   streamFilename: string;
   infoHash: string;
 } {
-  const { withUrl, scored, pool } = rankStreams(streams, isTv);
+  const { withUrl, scored, pool } = rankStreams(streams, isTv, idiomaOriginal);
   const best = pool[0]?.s || withUrl[0] || streams[0] || null;
 
   if (!best || !best.url) {

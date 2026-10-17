@@ -4,6 +4,7 @@ import {
   rankStreams,
   latinoListedFirst,
   pickOtroCandidatoAbrible,
+  isOriginalLanguageCopy,
   selectBestStream,
   hasBadAudio,
   hasAAC,
@@ -1173,5 +1174,59 @@ describe('pickOtroCandidatoAbrible', () => {
 
   test('sin alternativa, devuelve null y todo queda como antes', () => {
     expect(pickOtroCandidatoAbrible(mkvElegido, [{ s: mkvElegido, pts: 467 }])).toBe(null);
+  });
+});
+
+// ── El idioma ORIGINAL no es "incompatible" (2026-10-17) ────────────────────────
+// Caso real "Frontier(s)", leido en el log de la TV: pelicula francesa (TMDB informa
+// `fr`) cuyas copias francesas se descartaban por "idioma incompatible", como si fueran
+// un doblaje no deseado. Quedaba una sola copia cacheada, un MKV con DTS que el televisor
+// no puede abrir, y la pelicula terminaba en conversion cortandose. Entre las descartadas
+// habia un MP4 cacheado en frances, que es el audio que corresponde.
+describe('isOriginalLanguageCopy — excepcion para el idioma original', () => {
+  const copiaFrancesa = stream({
+    title: 'Frontiers.2007.FRENCH.UNCUT.1080p.BluRay.x265-VXT 💾 1.68 GB 🇫🇷',
+    name: 'Torrentio\n[RD+]',
+    behaviorHints: { filename: 'Frontiers.2007.FRENCH.UNCUT.1080p.BluRay.x265-VXT.mp4' },
+  });
+
+  test('sin saber el idioma original, la copia francesa se descarta (como siempre)', () => {
+    expect(scoreStream(copiaFrancesa)).toBe(-10000);
+  });
+
+  test('si TMDB dice que la pelicula es francesa, deja de descartarse', () => {
+    expect(scoreStream(copiaFrancesa, false, false, 'fr')).toBeGreaterThan(0);
+    expect(isOriginalLanguageCopy(copiaFrancesa, 'fr')).toBe(true);
+  });
+
+  test('la excepcion es SOLO del idioma original: una copia italiana sigue fuera', () => {
+    const copiaItaliana = stream({
+      title: 'Frontiers 2007 1080p ITA AC3 💾 2 GB 🇮🇹',
+      name: 'Torrentio\n[RD+]',
+      behaviorHints: { filename: 'Frontiers.2007.1080p.ITA.mkv' },
+    });
+    expect(isOriginalLanguageCopy(copiaItaliana, 'fr')).toBe(false);
+    expect(scoreStream(copiaItaliana, false, false, 'fr')).toBe(-10000);
+  });
+
+  test('una pelicula en ingles no cambia en nada', () => {
+    const inglesa = stream({
+      title: 'A Quiet Place Part II 2020 1080p BluRay x264 ENG 💾 2 GB',
+      name: 'Torrentio\n[RD+]',
+      behaviorHints: { filename: 'A.Quiet.Place.Part.II.2020.1080p.BluRay.x264.mkv' },
+    });
+    expect(scoreStream(inglesa)).toBe(scoreStream(inglesa, false, false, 'en'));
+  });
+
+  test('en el ranking, la copia francesa cacheada pasa a competir', () => {
+    const mkvDts = stream({
+      title: 'Frontier(s).(2007).1080p.BrRip.5.1.x264.DTS 💾 3.2 GB',
+      name: 'Torrentio\n[RD+]',
+      behaviorHints: { filename: 'Frontier(s).(2007).1080p.BrRip.5.1.x264.DTS.mkv' },
+    });
+    const sinIdioma = rankStreams([mkvDts, copiaFrancesa]);
+    expect(sinIdioma.scored.length).toBe(1); // la francesa queda fuera
+    const conIdioma = rankStreams([mkvDts, copiaFrancesa], false, 'fr');
+    expect(conIdioma.scored.length).toBe(2); // ahora compite
   });
 });
