@@ -61,6 +61,45 @@ async function pedirRango(url, desde, hasta) {
   return { bytes: new Uint8Array(await r.arrayBuffer()), total };
 }
 
+/**
+ * enlaceDirectoDeRd — pide a Real-Debrid el enlace de descarga del archivo.
+ *
+ * El token vive solo acá (variable de entorno del sitio), nunca viaja al
+ * navegador ni aparece en los registros. Devuelve null ante cualquier problema:
+ * el que llama se queda con el enlace que ya tenía.
+ */
+async function enlaceDirectoDeRd(rdId, nombre) {
+  const token = process.env.RD_TOKEN || '';
+  if (!token) return null;
+  const auth = { Authorization: `Bearer ${token}` };
+  try {
+    const info = await fetch(`https://api.real-debrid.com/rest/1.0/torrents/info/${rdId}`, {
+      headers: auth,
+    }).then((r) => (r.ok ? r.json() : null));
+    const enlaces = info?.links || [];
+    // `links` viene en el mismo orden que los archivos SELECCIONADOS del torrent.
+    // En una serie eso importa: el capítulo que se está viendo no tiene por qué
+    // ser el primero.
+    const elegidos = (info?.files || []).filter((f) => f.selected);
+    let i = 0;
+    if (nombre) {
+      const pos = elegidos.findIndex((f) => String(f.path || '').endsWith(nombre));
+      if (pos >= 0) i = pos;
+    }
+    const enlace = enlaces[i] || enlaces[0];
+    if (!enlace) return null;
+    const suelto = await fetch('https://api.real-debrid.com/rest/1.0/unrestrict/link', {
+      method: 'POST',
+      headers: { ...auth, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ link: enlace }).toString(),
+    }).then((r) => (r.ok ? r.json() : null));
+    const descarga = suelto?.download;
+    return typeof descarga === 'string' && hostPermitido(descarga) ? descarga : null;
+  } catch {
+    return null;
+  }
+}
+
 export const handler = async (event) => {
   const cors = {
     'Access-Control-Allow-Origin': '*',
@@ -73,10 +112,26 @@ export const handler = async (event) => {
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers: cors, body: '{"error":"method"}' };
 
   let url = '';
+  let rdId = '';
+  let nombre = '';
   try {
-    url = JSON.parse(event.body || '{}').url || '';
+    const cuerpo = JSON.parse(event.body || '{}');
+    url = cuerpo.url || '';
+    rdId = typeof cuerpo.rdId === 'string' && /^[A-Z0-9]{1,30}$/i.test(cuerpo.rdId) ? cuerpo.rdId : '';
+    nombre = typeof cuerpo.nombre === 'string' ? cuerpo.nombre.slice(0, 300) : '';
   } catch {
     return { statusCode: 400, headers: cors, body: '{"error":"body"}' };
+  }
+
+  // El enlace que usa el reproductor es el de Torrentio, que redirige al de
+  // Real-Debrid. A nuestro servidor, Torrentio le responde 403: bloquea centros
+  // de datos y solo atiende navegadores (medido el 18-10-2026; desde una máquina
+  // común el mismo enlace responde 302). Así que cuando viene el identificador
+  // del archivo en Real-Debrid, se le pide el enlace a Real-Debrid y se saltea
+  // el intermediario.
+  if (rdId) {
+    const directo = await enlaceDirectoDeRd(rdId, nombre);
+    if (directo) url = directo;
   }
   // El enlace puede llevar credenciales del usuario en la ruta: no se registra
   // nunca, ni siquiera en los mensajes de error.

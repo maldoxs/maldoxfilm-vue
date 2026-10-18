@@ -82,6 +82,8 @@ export interface UseSubtitlesReturn {
     infoHash: string | null;
     /** Enlace directo del archivo, para buscar por huella (ver `pedirHuella`). */
     streamUrl?: string | null;
+    /** Identificador del archivo en Real-Debrid, para resolver el enlace sin intermediarios. */
+    rdId?: string | null;
   }): Promise<void>;
   /** Ajusta el offset +/- delta ms, re-renderiza y persiste (local + crowdsourcing). */
   adjustOffset(deltaMs: number): void;
@@ -274,7 +276,12 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
    * Nunca hace fallar la búsqueda de subtítulos: si tarda, falla o no hay enlace,
    * devuelve null y se sigue con la búsqueda por texto de siempre.
    */
-  async function pedirHuella(streamUrl: string | null | undefined, signal: AbortSignal): Promise<string | null> {
+  async function pedirHuella(
+    streamUrl: string | null | undefined,
+    rdId: string | null | undefined,
+    nombre: string | null | undefined,
+    signal: AbortSignal
+  ): Promise<string | null> {
     // Cada salida escribe su propia línea. La primera versión solo registraba el
     // caso bueno, así que cuando la huella no salía no quedaba ni rastro y no se
     // podía saber si el problema era el enlace, la function o el tiempo.
@@ -291,7 +298,7 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
       const r = await fetchImpl('/.netlify/functions/moviehash', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: streamUrl }),
+        body: JSON.stringify({ url: streamUrl, rdId: rdId || '', nombre: nombre || '' }),
         signal: corte.signal,
       }).then((x) => x.json());
       const tardanza = ((Date.now() - arranque) / 1000).toFixed(1);
@@ -323,9 +330,10 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
     streamFilename: string | null;
     infoHash: string | null;
     streamUrl?: string | null;
+    rdId?: string | null;
   }) {
     status.value = '🔍 Buscando subtítulos ES...';
-    const { imdbId, type, season, episode, streamFilename, infoHash, streamUrl } = params;
+    const { imdbId, type, season, episode, streamFilename, infoHash, streamUrl, rdId } = params;
 
     activeAbort?.abort(); // cancelar una búsqueda anterior en vuelo (cambio de peli)
     const ac = new AbortController();
@@ -365,7 +373,7 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
       // "se parece" y cae seguido en otra edición con el intro de distinta
       // duración. Si la huella no sale (el enlace no responde, el archivo es
       // chico, la function falla), no pasa nada: sigue la búsqueda de siempre.
-      const huella = await pedirHuella(streamUrl, signal);
+      const huella = await pedirHuella(streamUrl, rdId, streamFilename, signal);
       /**
        * Nombre del release al que pertenece de verdad el archivo, según quien
        * reconoció su huella. Vale aunque el subtítulo que la reconoce esté en
