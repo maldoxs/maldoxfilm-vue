@@ -68,32 +68,19 @@ async function pedirRango(url, desde, hasta) {
  * navegador ni aparece en los registros. Devuelve null ante cualquier problema:
  * el que llama se queda con el enlace que ya tenía.
  */
-async function enlaceDirectoDeRd(rdId, nombre) {
+async function enlaceDirectoDeRd(rdId) {
   const token = process.env.RD_TOKEN || '';
   if (!token) return null;
-  const auth = { Authorization: `Bearer ${token}` };
   try {
-    const info = await fetch(`https://api.real-debrid.com/rest/1.0/torrents/info/${rdId}`, {
-      headers: auth,
+    // `rdId` es el identificador de una DESCARGA de Real-Debrid (el mismo que
+    // usa `streaming/mediaInfos`), no el de un torrent: pedirlo como torrent
+    // devuelve 404. La lista de descargas trae el enlace directo de cada una.
+    const lista = await fetch('https://api.real-debrid.com/rest/1.0/downloads?limit=100', {
+      headers: { Authorization: `Bearer ${token}` },
     }).then((r) => (r.ok ? r.json() : null));
-    const enlaces = info?.links || [];
-    // `links` viene en el mismo orden que los archivos SELECCIONADOS del torrent.
-    // En una serie eso importa: el capítulo que se está viendo no tiene por qué
-    // ser el primero.
-    const elegidos = (info?.files || []).filter((f) => f.selected);
-    let i = 0;
-    if (nombre) {
-      const pos = elegidos.findIndex((f) => String(f.path || '').endsWith(nombre));
-      if (pos >= 0) i = pos;
-    }
-    const enlace = enlaces[i] || enlaces[0];
-    if (!enlace) return null;
-    const suelto = await fetch('https://api.real-debrid.com/rest/1.0/unrestrict/link', {
-      method: 'POST',
-      headers: { ...auth, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ link: enlace }).toString(),
-    }).then((r) => (r.ok ? r.json() : null));
-    const descarga = suelto?.download;
+    if (!Array.isArray(lista)) return null;
+    const suyo = lista.find((x) => x?.id === rdId);
+    const descarga = suyo?.download;
     return typeof descarga === 'string' && hostPermitido(descarga) ? descarga : null;
   } catch {
     return null;
@@ -113,12 +100,10 @@ export const handler = async (event) => {
 
   let url = '';
   let rdId = '';
-  let nombre = '';
   try {
     const cuerpo = JSON.parse(event.body || '{}');
     url = cuerpo.url || '';
     rdId = typeof cuerpo.rdId === 'string' && /^[A-Z0-9]{1,30}$/i.test(cuerpo.rdId) ? cuerpo.rdId : '';
-    nombre = typeof cuerpo.nombre === 'string' ? cuerpo.nombre.slice(0, 300) : '';
   } catch {
     return { statusCode: 400, headers: cors, body: '{"error":"body"}' };
   }
@@ -130,7 +115,7 @@ export const handler = async (event) => {
   // del archivo en Real-Debrid, se le pide el enlace a Real-Debrid y se saltea
   // el intermediario.
   if (rdId) {
-    const directo = await enlaceDirectoDeRd(rdId, nombre);
+    const directo = await enlaceDirectoDeRd(rdId);
     if (directo) url = directo;
   }
   // El enlace puede llevar credenciales del usuario en la ruta: no se registra
