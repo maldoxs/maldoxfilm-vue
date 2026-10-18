@@ -87,6 +87,10 @@ export interface UseSubtitlesReturn {
   }): Promise<void>;
   /** Ajusta el offset +/- delta ms, re-renderiza y persiste (local + crowdsourcing). */
   adjustOffset(deltaMs: number): void;
+  /** Estado del ajuste automático contra el audio: nada · midiendo · sin_senal · error. */
+  estadoAlineacion: Ref<'nada' | 'midiendo' | 'sin_senal' | 'error'>;
+  /** Dispara la medición contra el audio y aplica el resultado cuando llega. */
+  alinearAlAudio(): Promise<void>;
   /**
    * refresh — recalcula el cue con la base de tiempo ACTUAL. Necesario cuando esa base
    * cambia sin que el `<video>` emita ningún evento: en `/t/`, la recarga del MPD pausa
@@ -117,6 +121,7 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
   let subImdbId: string | null = null;
   let subFileId: number | null = null;
   let subInfoHash: string | null = null;
+  let subRdId: string | null = null;
   // Cancela los fetch de subtítulo en vuelo (OpenSubtitles/subhash/offset/descarga)
   // si se cierra el player o se cambia de película antes de que terminen.
   let activeAbort: AbortController | null = null;
@@ -502,6 +507,7 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
       );
       subFileId = fileId;
       subInfoHash = infoHash;
+      subRdId = rdId || null;
 
       // ⚠️ SEGURIDAD: `infoHash`/`fileId`/`candidateId` van interpolados en
       // querystrings hacia las Netlify Functions `offset`/`subhash`. En la
@@ -626,9 +632,100 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
     if (cues.value.length) attachVideoListeners();
   });
 
-  onBeforeUnmount(clear);
+  onBeforeUnmount(() => {
+    detenerConsulta();
+    clear();
+  });
 
   const hasSubtitleData = computed(() => srtRaw.value !== null);
+
+  // ── Ajuste automático contra el audio ───────────────────────────────────────
+  // El botón "ajustar al audio" del panel. La medición la hace el servidor
+  // (`alinear-background`): escucha ocho tramos de la película, ve cuándo se
+  // habla y calcula cuánto hay que correr el subtítulo. Tarda alrededor de
+  // minuto y medio, así que acá solo se dispara y se pregunta por el resultado.
+  const estadoAlineacion = ref<'nada' | 'midiendo' | 'sin_senal' | 'error'>('nada');
+  let relojConsulta: ReturnType<typeof setTimeout> | null = null;
+  const ESPERA_MAXIMA_MS = 240000;
+  const CADA_MS = 4000;
+
+  function detenerConsulta() {
+    if (relojConsulta) {
+      clearTimeout(relojConsulta);
+      relojConsulta = null;
+    }
+  }
+
+  async function alinearAlAudio() {
+    if (estadoAlineacion.value === 'midiendo') return;
+    if (!srtRaw.value || !subInfoHash || !subFileId || !subRdId) {
+      estadoAlineacion.value = 'error';
+      return;
+    }
+    estadoAlineacion.value = 'midiendo';
+    const infoHash = subInfoHash;
+    const fileId = subFileId;
+    try {
+      await fetchImpl('/.netlify/functions/alinear-background', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rdId: subRdId,
+          infoHash,
+          fileId,
+          duracionSeg: Math.round(opts.videoRef.value?.duration || 0),
+          // Se mandan los tiempos, no el texto: es lo único que hace falta para
+          // medir y pesa una décima parte.
+          cues: cues.value.map((c) => [c.s - offsetMs.value, c.e - offsetMs.value]),
+        }),
+      });
+    } catch {
+      estadoAlineacion.value = 'error';
+      return;
+    }
+
+    const limite = Date.now() + ESPERA_MAXIMA_MS;
+    const preguntar = async () => {
+      if (Date.now() > limite) {
+        estadoAlineacion.value = 'error';
+        return;
+      }
+      try {
+        const r = await fetchImpl(
+          `/.netlify/functions/alinear-estado?infoHash=${encodeURIComponent(infoHash)}&fileId=${encodeURIComponent(String(fileId))}`
+        ).then((x) => x.json());
+        if (r?.estado === 'listo' && typeof r.offsetMs === 'number') {
+          console.warn('[SUB] Ajuste al audio:', r.offsetMs + 'ms | ventaja:', r.ventaja);
+          aplicarOffset(r.offsetMs);
+          estadoAlineacion.value = 'nada';
+          return;
+        }
+        if (r?.estado === 'sin_senal' || r?.estado === 'error') {
+          console.warn('[SUB] Ajuste al audio sin resultado:', r.estado, r.motivo ?? '');
+          estadoAlineacion.value = r.estado;
+          return;
+        }
+      } catch {
+        /* una consulta fallida no corta la espera */
+      }
+      relojConsulta = setTimeout(preguntar, CADA_MS);
+    };
+    relojConsulta = setTimeout(preguntar, CADA_MS);
+  }
+
+  /** Aplica un ajuste absoluto (lo usa el ajuste automático) y lo guarda. */
+  function aplicarOffset(ms: number) {
+    if (!srtRaw.value) return;
+    const limitado = Math.max(-TOPE_OFFSET_MS, Math.min(TOPE_OFFSET_MS, Math.round(ms)));
+    inject(srtRaw.value, limitado);
+    const sign = limitado >= 0 ? '+' : '';
+    status.value = `✅ ES | offset: ${sign}${(limitado / 1000).toFixed(1)}s`;
+    if (subImdbId) {
+      const key = 'sub_off_' + (subImdbId.includes('.') ? subImdbId.replace(/\.[^.]+$/, '') : subImdbId);
+      safeStorage.setItem(key, String(limitado));
+    }
+    // No se vuelve a publicar al servidor: el valor ya lo guardó la medición.
+  }
 
   return {
     activeCueText,
@@ -640,6 +737,8 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
     adjustOffset,
     clear,
     cues,
+    estadoAlineacion,
+    alinearAlAudio,
     /**
      * refresh — recalcula el cue con la base de tiempo ACTUAL. Lo usa el reproductor
      * cuando cambia `tpipelineOffset` con el video detenido, momento en el que ningún

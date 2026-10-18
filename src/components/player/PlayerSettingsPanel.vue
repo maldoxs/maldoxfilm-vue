@@ -51,6 +51,8 @@ const props = defineProps<{
   canSwitchAudio: boolean;
   /** ¿Subtítulos activos? (`_subsEnabled`). */
   subsEnabled: boolean;
+  /** Estado del ajuste automático: 'nada' | 'midiendo' | 'sin_senal' | 'error'. */
+  estadoAlineacion?: string;
   /** Offset de sincronización de subtítulos en ms (`_subOffsetMs`) — para `#spOffsetDisplay`. */
   offsetMs: number;
   /** Velocidad de reproducción activa — uno de {@link SPEEDS} (`_playerSpeed`). */
@@ -62,6 +64,7 @@ const emit = defineEmits<{
   (e: 'toggle-subs'): void;
   (e: 'adjust-offset', deltaMs: number): void;
   (e: 'reset-offset'): void;
+  (e: 'alinear-al-audio'): void;
   (e: 'set-speed', value: number): void;
   (e: 'mouseenter'): void;
   (e: 'mouseleave'): void;
@@ -201,7 +204,14 @@ function onSetSpeed(value: number) {
     <!-- Sincronización a TODO EL ANCHO, debajo de las dos columnas (antes quedaba apretada
          dentro de la columna de Subtítulos). Solo visible con subtítulos activos. -->
     <div v-if="mode === 'audiosubs' && subsEnabled" class="sp-offset-row">
-      <div class="sp-offset-head">Sincronización · <span class="sp-offset-display">{{ offsetLabel }}</span></div>
+      <div class="sp-offset-head">
+        <span>Sincronización · <span class="sp-offset-display">{{ offsetLabel }}</span></span>
+        <!-- Mide contra el audio de la película y pone el número solo, para no
+             tener que adivinar con los botones de abajo. -->
+        <button class="sp-offset-auto" :disabled="estadoAlineacion === 'midiendo'" @click="emit('alinear-al-audio')">
+          {{ estadoAlineacion === 'midiendo' ? 'midiendo…' : 'ajustar al audio' }}
+        </button>
+      </div>
       <div class="sp-offset-btns">
         <button class="sp-offset-btn" @click="emit('adjust-offset', -5000)">−5s</button>
         <button class="sp-offset-btn" @click="emit('adjust-offset', -1000)">−1s</button>
@@ -212,7 +222,9 @@ function onSetSpeed(value: number) {
       <!-- Qué botón usar no era evidente: con el subtítulo atrasado se tiende a
            apretar el "+", que lo atrasa todavía más. -->
       <div class="sp-offset-hint">
-        Si el subtítulo va atrasado, restá. Si se adelanta a las voces, sumá.
+        <template v-if="estadoAlineacion === 'midiendo'">Escuchando la película, tarda alrededor de un minuto y medio. Podés seguir viendo.</template>
+        <template v-else-if="estadoAlineacion === 'sin_senal' || estadoAlineacion === 'error'">No se pudo medir en esta película. Ajustá a mano: si va atrasado, restá.</template>
+        <template v-else>Si el subtítulo va atrasado, restá. Si se adelanta a las voces, sumá.</template>
       </div>
     </div>
 
@@ -346,6 +358,10 @@ function onSetSpeed(value: number) {
   border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 .sp-offset-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   font-size: 0.62rem;
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -359,6 +375,26 @@ function onSetSpeed(value: number) {
   display: flex;
   gap: 7px;
   padding: 0 24px 8px; /* ocupa todo el ancho de la fila */
+}
+/* Botón discreto, en la misma línea del título: no agrega filas ni mueve nada. */
+.sp-offset-auto {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: #3d5afe;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sp-offset-auto:hover:not(:disabled),
+.sp-offset-auto:focus:not(:disabled) {
+  text-decoration: underline;
+}
+.sp-offset-auto:disabled {
+  color: rgba(61, 90, 254, 0.5);
+  cursor: default;
 }
 .sp-offset-hint {
   font-size: 0.6rem;

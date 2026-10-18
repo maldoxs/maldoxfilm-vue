@@ -20,21 +20,13 @@
  * ESM porque package.json declara "type":"module".
  */
 
+import { hostPermitido, enlaceDirectoDeRd } from '../lib/rd.js';
+
+// Se reexporta para las pruebas, que verifican acá la lista de hosts aceptados.
+export { hostPermitido };
+
 const TROZO = 65536; // 64 KB, lo que define el algoritmo OSDb
 const MASCARA = (1n << 64n) - 1n;
-
-/** Solo se aceptan enlaces de Real-Debrid y de quien los resuelve. */
-const HOSTS_PERMITIDOS = [/(^|\.)real-debrid\.com$/i, /(^|\.)strem\.fun$/i];
-
-export function hostPermitido(url) {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== 'https:') return false;
-    return HOSTS_PERMITIDOS.some((re) => re.test(u.hostname));
-  } catch {
-    return false;
-  }
-}
 
 /** Suma las palabras de 64 bits (little-endian) de un bloque de bytes. */
 export function sumarBloque(bytes) {
@@ -59,32 +51,6 @@ async function pedirRango(url, desde, hasta) {
   const rango = r.headers.get('content-range') || '';
   const total = Number(rango.split('/')[1] || 0);
   return { bytes: new Uint8Array(await r.arrayBuffer()), total };
-}
-
-/**
- * enlaceDirectoDeRd — pide a Real-Debrid el enlace de descarga del archivo.
- *
- * El token vive solo acá (variable de entorno del sitio), nunca viaja al
- * navegador ni aparece en los registros. Devuelve null ante cualquier problema:
- * el que llama se queda con el enlace que ya tenía.
- */
-async function enlaceDirectoDeRd(rdId) {
-  const token = process.env.RD_TOKEN || '';
-  if (!token) return null;
-  try {
-    // `rdId` es el identificador de una DESCARGA de Real-Debrid (el mismo que
-    // usa `streaming/mediaInfos`), no el de un torrent: pedirlo como torrent
-    // devuelve 404. La lista de descargas trae el enlace directo de cada una.
-    const lista = await fetch('https://api.real-debrid.com/rest/1.0/downloads?limit=100', {
-      headers: { Authorization: `Bearer ${token}` },
-    }).then((r) => (r.ok ? r.json() : null));
-    if (!Array.isArray(lista)) return null;
-    const suyo = lista.find((x) => x?.id === rdId);
-    const descarga = suyo?.download;
-    return typeof descarga === 'string' && hostPermitido(descarga) ? descarga : null;
-  } catch {
-    return null;
-  }
 }
 
 export const handler = async (event) => {
