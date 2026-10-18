@@ -121,10 +121,6 @@ onBeforeUnmount(clearTimer);
         <line x1="6" y1="6" x2="18" y2="18" />
         <line x1="18" y1="6" x2="6" y2="18" />
       </svg>
-      <!-- La palabra solo se muestra en TV (ver SearchView): a tres metros una
-           equis sola no se lee, y con el control remoto hay que saber dónde se
-           está apuntando. -->
-      <span class="search-clear-texto">Limpiar</span>
     </button>
   </div>
 </template>
@@ -183,9 +179,7 @@ onBeforeUnmount(clearTimer);
   height: 14px;
   flex: 0 0 auto;
 }
-.search-clear-texto {
-  display: none;
-}
+
 .search-clear:hover,
 .search-clear:focus {
   background: rgba(255, 255, 255, 0.2);

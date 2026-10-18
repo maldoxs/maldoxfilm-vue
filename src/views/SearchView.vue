@@ -235,22 +235,19 @@ function focusSearchInput() {
   height: 100%; /* el input ocupa todo el alto → click target grande y fácil en TV */
   font-size: 1.1rem;
   font-weight: 400;
-  padding: 0 150px 0 44px;
+  padding: 0 64px 0 44px;
   caret-color: var(--accent, #3d5afe);
 }
 .tv-search-bar :deep(.search-clear) {
-  /* Blanco de toque grande y con la palabra escrita: en TV se apunta con el
-     control remoto desde tres metros, donde una equis sola no se lee. */
-  width: auto;
+  /* Solo la equis, pero grande: en TV se apunta con el control remoto, no con
+     un dedo, así que el blanco tiene que ser cómodo. */
+  width: 44px;
   height: 44px;
-  gap: 8px;
-  padding: 0 18px;
-  border-radius: 999px;
   right: 10px;
-  font-size: 0.95rem;
 }
-.tv-search-bar :deep(.search-clear-texto) {
-  display: inline;
+.tv-search-bar :deep(.search-clear) svg {
+  width: 20px;
+  height: 20px;
 }
 .tv-search-bar :deep(.search-clear) svg {
   width: 20px;
