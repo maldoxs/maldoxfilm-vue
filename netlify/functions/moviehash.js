@@ -53,9 +53,12 @@ export function calcularHuella(tamano, inicio, final) {
 }
 
 async function pedirRango(url, desde, hasta) {
-  const r = await fetch(url, { headers: { Range: `bytes=${desde}-${hasta}` } });
+  const r = await fetch(url, { headers: { Range: `bytes=${desde}-${hasta}` }, redirect: 'follow' });
   if (!r.ok && r.status !== 206) throw new Error(`rango ${desde}-${hasta}: ${r.status}`);
-  return new Uint8Array(await r.arrayBuffer());
+  // `Content-Range: bytes 0-65535/1363773830` trae el tamaño total del archivo.
+  const rango = r.headers.get('content-range') || '';
+  const total = Number(rango.split('/')[1] || 0);
+  return { bytes: new Uint8Array(await r.arrayBuffer()), total };
 }
 
 export const handler = async (event) => {
@@ -80,24 +83,29 @@ export const handler = async (event) => {
   if (!hostPermitido(url)) return { statusCode: 400, headers: cors, body: '{"error":"host"}' };
 
   try {
-    const cabeza = await fetch(url, { method: 'HEAD', redirect: 'follow' });
-    const tamano = Number(cabeza.headers.get('content-length') || 0);
+    // El tamaño sale del PRIMER pedido de rango, no de un HEAD.
+    //
+    // Por qué: el enlace que manda el reproductor es el de Torrentio, que
+    // redirige al de Real-Debrid. A un HEAD sobre ese enlace no vuelve el tamaño
+    // del archivo, así que la primera versión se rendía al instante con
+    // "motivo: tamaño" (medido en la TV el 18-10-2026). La cabecera
+    // `Content-Range` de un pedido parcial sí lo trae, y de paso es un viaje
+    // menos.
+    const primero = await pedirRango(url, 0, TROZO - 1);
+    const tamano = primero.total;
     if (!tamano || tamano < TROZO * 2) {
       return { statusCode: 200, headers: cors, body: JSON.stringify({ hash: null, motivo: 'tamaño' }) };
     }
 
-    const [inicio, final] = await Promise.all([
-      pedirRango(url, 0, TROZO - 1),
-      pedirRango(url, tamano - TROZO, tamano - 1),
-    ]);
-    if (inicio.byteLength < TROZO || final.byteLength < TROZO) {
+    const ultimo = await pedirRango(url, tamano - TROZO, tamano - 1);
+    if (primero.bytes.byteLength < TROZO || ultimo.bytes.byteLength < TROZO) {
       return { statusCode: 200, headers: cors, body: JSON.stringify({ hash: null, motivo: 'rango' }) };
     }
 
     return {
       statusCode: 200,
       headers: cors,
-      body: JSON.stringify({ hash: calcularHuella(tamano, inicio, final), size: tamano }),
+      body: JSON.stringify({ hash: calcularHuella(tamano, primero.bytes, ultimo.bytes), size: tamano }),
     };
   } catch {
     // Que no se pueda calcular la huella no es un error para el reproductor:
