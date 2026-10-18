@@ -107,9 +107,12 @@ export const handler = async (event) => {
       headers: cors,
       body: JSON.stringify({ hash: calcularHuella(tamano, primero.bytes, ultimo.bytes), size: tamano }),
     };
-  } catch {
+  } catch (e) {
     // Que no se pueda calcular la huella no es un error para el reproductor:
-    // sigue la búsqueda por texto de siempre.
-    return { statusCode: 200, headers: cors, body: JSON.stringify({ hash: null, motivo: 'fallo' }) };
+    // sigue la búsqueda por texto de siempre. Se devuelve el detalle para poder
+    // distinguir un bloqueo del intermediario de un problema nuestro; el mensaje
+    // no incluye el enlace, que puede llevar credenciales.
+    const detalle = (e?.message || String(e)).slice(0, 120);
+    return { statusCode: 200, headers: cors, body: JSON.stringify({ hash: null, motivo: detalle }) };
   }
 };
