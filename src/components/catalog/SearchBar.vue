@@ -80,6 +80,22 @@ function onEnter() {
   inputRef.value?.blur();
 }
 
+/**
+ * limpiar — vacía el buscador y vuelve a enfocarlo.
+ *
+ * En la TV se escribe con el teclado en pantalla y borrar letra por letra con el
+ * control remoto es un suplicio: el botón hace en un toque lo que antes eran
+ * veinte. Emite `clear`, igual que cuando el input se vacía escribiendo, así que
+ * la vista vuelve al estado inicial sin ninguna lógica nueva.
+ */
+function limpiar() {
+  clearTimer();
+  value.value = '';
+  emit('update:modelValue', '');
+  emit('clear');
+  inputRef.value?.focus();
+}
+
 onBeforeUnmount(clearTimer);
 </script>
 
@@ -99,6 +115,17 @@ onBeforeUnmount(clearTimer);
       @input="onInput"
       @keydown.enter="onEnter"
     />
+    <!-- Solo aparece cuando hay algo escrito: con el buscador vacío no cambia nada. -->
+    <button v-if="value" type="button" class="search-clear" aria-label="Limpiar búsqueda" @click="limpiar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <line x1="6" y1="6" x2="18" y2="18" />
+        <line x1="18" y1="6" x2="6" y2="18" />
+      </svg>
+      <!-- La palabra solo se muestra en TV (ver SearchView): a tres metros una
+           equis sola no se lee, y con el control remoto hay que saber dónde se
+           está apuntando. -->
+      <span class="search-clear-texto">Limpiar</span>
+    </button>
   </div>
 </template>
 
@@ -135,6 +162,36 @@ onBeforeUnmount(clearTimer);
   background: rgba(255, 255, 255, 0.1);
   border-color: var(--accent, #3d5afe);
 }
+/* Botón de limpiar: a la derecha, dentro de la barra. */
+.search-clear {
+  position: absolute;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-muted, #9a9a9a);
+  cursor: pointer;
+}
+.search-clear svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+.search-clear-texto {
+  display: none;
+}
+.search-clear:hover,
+.search-clear:focus {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--text, #f0f0f0);
+}
+
 /* Oculta el ícono nativo de "limpiar" de Safari/Chrome para no duplicar con el propio diseño */
 .search-input::-webkit-search-cancel-button {
   -webkit-appearance: none;
