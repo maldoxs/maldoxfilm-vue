@@ -29,3 +29,9 @@
   framework = "vite"
   targetPort = 5173
   port = 8888
+
+# El binario de ffmpeg (paquete `ffmpeg-static`) lo usa la function que mide el
+# desfase de los subtitulos contra el audio. El empaquetador de Netlify no lo
+# incluye solo, porque no es un `import`: hay que nombrarlo explicitamente.
+[functions]
+  included_files = ["node_modules/ffmpeg-static/ffmpeg"]
