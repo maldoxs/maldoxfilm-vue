@@ -309,7 +309,15 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
           console.warn('[SUB] Búsqueda por release falló:', (e as Error)?.message, '— usando IMDB fallback');
         }
       }
-      if (!data.data?.length) {
+      // Se consulta por IMDB no solo cuando la búsqueda por release vino VACÍA,
+      // sino también cuando trajo muy poco. Con uno o dos candidatos la elección
+      // es casi forzada, y un .srt de otra edición entra desfasado respecto de la
+      // copia que se está reproduciendo. Caso real (Ghostland, 17-10-2026): un
+      // único resultado, de un rip distinto, y el subtítulo salía muy atrasado.
+      // Los dos listados se funden y decide el puntaje de siempre, así que el
+      // candidato que ya estaba nunca se pierde: solo gana competencia.
+      const POCOS_CANDIDATOS = 4;
+      if (!data.data?.length || data.data.length < POCOS_CANDIDATOS) {
         try {
           const typeQs =
             type === 'tv' ? `&type=episode&season_number=${season}&episode_number=${episode}` : '&type=movie';
@@ -317,7 +325,11 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
           const r2 = await fetchImpl(q2, { headers, signal }).then((r) => r.json());
           // Log de diagnóstico — preserva índex.html línea 5258 (1:1).
           console.warn('[SUB] Búsqueda por IMDB ID:', r2.total_count, 'resultados');
-          data = r2;
+          const previos = data.data ?? [];
+          const idDeArchivo = (s: OpenSubtitle) => s.attributes?.files?.[0]?.file_id;
+          const yaEstan = new Set(previos.map(idDeArchivo).filter((v) => v != null));
+          const sumados = ((r2.data ?? []) as OpenSubtitle[]).filter((s) => !yaEstan.has(idDeArchivo(s)));
+          data = { data: [...previos, ...sumados] };
         } catch (e) {
           // Log de diagnóstico — preserva índex.html línea 5260 (1:1).
           console.warn('[SUB] Búsqueda por IMDB ID falló:', (e as Error)?.message);
