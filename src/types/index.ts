@@ -127,6 +127,12 @@ export interface OpenSubtitleFile {
 
 export interface OpenSubtitleAttributes {
   release: string;
+  /**
+   * true cuando OpenSubtitles reconoció la huella del archivo que se está
+   * reproduciendo: el subtítulo fue subido para ESA copia exacta, así que viene
+   * sincronizado. Solo aparece en las búsquedas que mandan `moviehash`.
+   */
+  moviehash_match?: boolean;
   language: string;
   fps: number;
   hd: boolean;

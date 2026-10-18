@@ -170,6 +170,12 @@ export function scoreSubtitle(s: OpenSubtitle, hints: VideoHints, _vidDurationSe
   const fps = Number(s.attributes.fps) || 0;
   let pts = 0;
 
+  // Huella del archivo: OpenSubtitles confirmó que este subtítulo se subió para
+  // la copia EXACTA que se está reproduciendo. Es la única señal que garantiza
+  // sincronía; todo lo demás (nombre del release, grupo, fps) son indicios de
+  // que "se parece". Por eso pesa más que cualquier combinación de los otros.
+  if (s.attributes.moviehash_match) pts += 40;
+
   if (hints.qualHint && fn.includes(hints.qualHint)) pts += 3;
   if (hints.groupHint && fn.includes(hints.groupHint)) pts += 5;
   if (s.attributes.hd) pts += 1;

@@ -80,6 +80,8 @@ export interface UseSubtitlesReturn {
     episode?: number;
     streamFilename: string | null;
     infoHash: string | null;
+    /** Enlace directo del archivo, para buscar por huella (ver `pedirHuella`). */
+    streamUrl?: string | null;
   }): Promise<void>;
   /** Ajusta el offset +/- delta ms, re-renderiza y persiste (local + crowdsourcing). */
   adjustOffset(deltaMs: number): void;
@@ -220,6 +222,12 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
   const TOPE_OFFSET_MS = 60000;
   /** Espera antes de publicar el ajuste al servidor compartido (ver abajo). */
   const ESPERA_GUARDADO_MS = 1500;
+  /**
+   * Tope de espera por la huella del archivo. Son dos pedidos de 64 KB contra
+   * Real-Debrid: si en ese tiempo no volvió, el subtítulo se busca por texto y
+   * listo. Nunca se deja al espectador sin subtítulo esperando esto.
+   */
+  const ESPERA_HUELLA_MS = 7000;
   let guardadoRemotoTimer: ReturnType<typeof setTimeout> | null = null;
 
   function adjustOffset(deltaMs: number) {
@@ -258,6 +266,36 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
     }
   }
 
+  /**
+   * pedirHuella — huella OSDb del archivo en reproducción, calculada por la
+   * function `moviehash` (el enlace de Real-Debrid no manda cabeceras CORS, así
+   * que el navegador no puede leerle bytes; el servidor sí).
+   *
+   * Nunca hace fallar la búsqueda de subtítulos: si tarda, falla o no hay enlace,
+   * devuelve null y se sigue con la búsqueda por texto de siempre.
+   */
+  async function pedirHuella(streamUrl: string | null | undefined, signal: AbortSignal): Promise<string | null> {
+    if (!streamUrl) return null;
+    const corte = new AbortController();
+    const reloj = setTimeout(() => corte.abort(), ESPERA_HUELLA_MS);
+    const cancelar = () => corte.abort();
+    signal.addEventListener('abort', cancelar);
+    try {
+      const r = await fetchImpl('/.netlify/functions/moviehash', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: streamUrl }),
+        signal: corte.signal,
+      }).then((x) => x.json());
+      return typeof r?.hash === 'string' && r.hash.length === 16 ? r.hash : null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(reloj);
+      signal.removeEventListener('abort', cancelar);
+    }
+  }
+
   // ── Búsqueda + scoring + descarga — reemplaza `fetchAndInjectSubtitle`
   // (líneas ~5226-5359). Cascada EXACTA preservada: query por release →
   // fallback por IMDB ID → scoring → crowdsourcing offset → descarga con
@@ -269,9 +307,10 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
     episode?: number;
     streamFilename: string | null;
     infoHash: string | null;
+    streamUrl?: string | null;
   }) {
     status.value = '🔍 Buscando subtítulos ES...';
-    const { imdbId, type, season, episode, streamFilename, infoHash } = params;
+    const { imdbId, type, season, episode, streamFilename, infoHash, streamUrl } = params;
 
     activeAbort?.abort(); // cancelar una búsqueda anterior en vuelo (cambio de peli)
     const ac = new AbortController();
@@ -297,13 +336,78 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
       const releaseName = buildReleaseName(streamFilename);
       let data: { data: OpenSubtitle[] } = { data: [] };
 
+      /** Suma candidatos nuevos sin repetir archivos ya listados. */
+      const fundir = (nuevos: OpenSubtitle[]) => {
+        const idDeArchivo = (x: OpenSubtitle) => x.attributes?.files?.[0]?.file_id;
+        const yaEstan = new Set((data.data ?? []).map(idDeArchivo).filter((v) => v != null));
+        data = { data: [...(data.data ?? []), ...nuevos.filter((x) => !yaEstan.has(idDeArchivo(x)))] };
+      };
+
+      // ── Búsqueda POR ARCHIVO ───────────────────────────────────────────────
+      // Primero se pregunta por la huella de la copia que se está reproduciendo.
+      // Un resultado con `moviehash_match` fue subido para ESE archivo, así que
+      // viene sincronizado; buscar por nombre del release, en cambio, trae lo que
+      // "se parece" y cae seguido en otra edición con el intro de distinta
+      // duración. Si la huella no sale (el enlace no responde, el archivo es
+      // chico, la function falla), no pasa nada: sigue la búsqueda de siempre.
+      const huella = await pedirHuella(streamUrl, signal);
+      /**
+       * Nombre del release al que pertenece de verdad el archivo, según quien
+       * reconoció su huella. Vale aunque el subtítulo que la reconoce esté en
+       * otro idioma: el nombre del torrent suele estar renombrado a mano (el de
+       * esta copia decía "Incident In A Ghostland - Horror 2018 Eng Rus Subs
+       * 720p" cuando el release real era "Ghostland.2018.720p.BluRay.x264-YTS"),
+       * y buscar por el nombre equivocado es lo que traía subtítulos de otra
+       * edición.
+       */
+      let releaseExacto: string | null = null;
+      if (huella) {
+        try {
+          // Sin filtro de idioma a propósito: aunque no haya un subtítulo en
+          // español para este archivo, el que exista en cualquier idioma nos dice
+          // de qué release se trata.
+          const qh = `${OS_BASE}?moviehash=${encodeURIComponent(huella)}`;
+          const rh = await fetchImpl(qh, { headers, signal }).then((r) => r.json());
+          const todos = (rh.data ?? []) as OpenSubtitle[];
+          const exactos = todos.filter((x) => x.attributes?.moviehash_match);
+          const enEspanol = exactos.filter((x) => /^es/i.test(x.attributes?.language || ''));
+          releaseExacto = exactos[0]?.attributes?.release || null;
+          console.warn(
+            '[SUB] Huella del archivo:',
+            huella,
+            '|',
+            exactos.length,
+            'subtítulos para esta copia exacta,',
+            enEspanol.length,
+            'en español | release real:',
+            releaseExacto || 'desconocido'
+          );
+          if (enEspanol.length) fundir(enEspanol);
+        } catch (e) {
+          console.warn('[SUB] Búsqueda por huella falló:', (e as Error)?.message);
+        }
+      }
+
+      // Con el nombre real del release en mano, se busca por ÉSE antes que por el
+      // nombre del archivo, que puede venir renombrado.
+      if (releaseExacto) {
+        try {
+          const qr = `${OS_BASE}?languages=es&query=${encodeURIComponent(releaseExacto)}&imdb_id=${numId}`;
+          const rr = await fetchImpl(qr, { headers, signal }).then((r) => r.json());
+          console.warn('[SUB] Búsqueda por el release real:', rr.total_count ?? 0, 'resultados');
+          if (rr.data?.length) fundir(rr.data as OpenSubtitle[]);
+        } catch (e) {
+          console.warn('[SUB] Búsqueda por el release real falló:', (e as Error)?.message);
+        }
+      }
+
       if (releaseName) {
         try {
           const q1 = `${OS_BASE}?languages=es&query=${encodeURIComponent(releaseName)}&imdb_id=${numId}`;
           const r1 = await fetchImpl(q1, { headers, signal }).then((r) => r.json());
           // Log de diagnóstico — preserva índex.html línea 5247 (1:1).
           console.warn('[SUB] Búsqueda por release:', r1.total_count, 'resultados');
-          if (r1.data?.length) data = r1;
+          if (r1.data?.length) fundir(r1.data as OpenSubtitle[]);
         } catch (e) {
           // Log de diagnóstico — preserva índex.html línea 5249 (1:1).
           console.warn('[SUB] Búsqueda por release falló:', (e as Error)?.message, '— usando IMDB fallback');
@@ -325,11 +429,7 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
           const r2 = await fetchImpl(q2, { headers, signal }).then((r) => r.json());
           // Log de diagnóstico — preserva índex.html línea 5258 (1:1).
           console.warn('[SUB] Búsqueda por IMDB ID:', r2.total_count, 'resultados');
-          const previos = data.data ?? [];
-          const idDeArchivo = (s: OpenSubtitle) => s.attributes?.files?.[0]?.file_id;
-          const yaEstan = new Set(previos.map(idDeArchivo).filter((v) => v != null));
-          const sumados = ((r2.data ?? []) as OpenSubtitle[]).filter((s) => !yaEstan.has(idDeArchivo(s)));
-          data = { data: [...previos, ...sumados] };
+          fundir((r2.data ?? []) as OpenSubtitle[]);
         } catch (e) {
           // Log de diagnóstico — preserva índex.html línea 5260 (1:1).
           console.warn('[SUB] Búsqueda por IMDB ID falló:', (e as Error)?.message);
@@ -340,7 +440,10 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
         return;
       }
 
-      const hints = deriveVideoHints(streamFilename);
+      // Las pistas (calidad, grupo, origen, corte) salen del nombre REAL del
+      // release cuando la huella lo reveló; el nombre del archivo queda de
+      // respaldo, porque puede venir renombrado a mano.
+      const hints = deriveVideoHints(releaseExacto || streamFilename);
       const vidDuration = opts.videoRef.value?.duration || 0;
       // ADR-009 fix 2: descartar subs de OTRA película (imdb mismatch) y subs no
       // verificables con score bajo, ANTES de elegir. La misma lista filtrada

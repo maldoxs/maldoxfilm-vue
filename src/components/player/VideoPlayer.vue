@@ -109,7 +109,7 @@ const fullscreen = useFullscreen({
 // reactivos en `usePlayer` — solo viajan una vez por stream vía callback, igual
 // que `_hasNativeSpanish`/`_hasSpaDirect` globales del original).
 const hasNativeSpanish = ref(false);
-const lastSelectedStream = ref<{ imdbId: string | null; streamFilename: string | null; infoHash: string | null } | null>(null);
+const lastSelectedStream = ref<{ imdbId: string | null; streamFilename: string | null; infoHash: string | null; streamUrl: string | null } | null>(null);
 // `_spShowForRD(true)` — los botones CC/Velocidad solo aparecen una vez el
 // stream está listo (igual que el original, que los muestra dentro de `_spInit`,
 // llamado tras resolver el stream — líneas ~7901/8012/4270).
@@ -158,7 +158,7 @@ const player: UsePlayerReturn = usePlayer({
   },
   onStreamReady: ({ selected, hasNativeSpanish: nativeEs, spanishTrack: detectedTrack }) => {
     hasNativeSpanish.value = nativeEs;
-    lastSelectedStream.value = { imdbId: selected.imdbId, streamFilename: selected.streamFilename, infoHash: selected.infoHash ?? null };
+    lastSelectedStream.value = { imdbId: selected.imdbId, streamFilename: selected.streamFilename, infoHash: selected.infoHash ?? null, streamUrl: selected.url ?? null };
     audioPanelReady.value = true;
     // `_subsEnabled = !hasSpanish` — preserva el estado inicial de `_spInit` (línea ~4265):
     // arranca ON salvo que el audio nativo ya sea español.
@@ -172,6 +172,7 @@ const player: UsePlayerReturn = usePlayer({
         episode: playerStore.current.episode,
         streamFilename: selected.streamFilename,
         infoHash: selected.infoHash ?? null,
+        streamUrl: selected.url ?? null,
       });
     }
     void detectedTrack; // las filas de audio leen `player.spanishTrack` directamente (reactivo)
@@ -196,6 +197,7 @@ const player: UsePlayerReturn = usePlayer({
           episode: playerStore.current.episode,
           streamFilename: s.streamFilename,
           infoHash: s.infoHash,
+          streamUrl: s.streamUrl,
         });
       }
     } else {
@@ -404,6 +406,7 @@ function onToggleSubs() {
         episode: playerStore.current.episode,
         streamFilename: s.streamFilename,
         infoHash: s.infoHash,
+        streamUrl: s.streamUrl,
       });
     }
   }

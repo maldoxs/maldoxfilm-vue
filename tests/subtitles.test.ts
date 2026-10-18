@@ -179,6 +179,23 @@ describe('scoreSubtitle / pickBestSubtitle — selección del mejor subtítulo',
     expect(scoreSubtitle(goodMatch, hints)).toBeGreaterThan(scoreSubtitle(poorMatch, hints));
   });
 
+  test('el subtítulo que calza con la huella del archivo le gana a cualquier otro', () => {
+    // La huella significa que ese subtítulo se subió para ESTA copia exacta, o
+    // sea que está sincronizado. El resto de las señales (nombre del release,
+    // grupo, fps, descargas) solo dicen que "se parece", y juntas no deben poder
+    // superarlo: esa fue la causa de los subtítulos corridos.
+    const porHuella = sub({ release: 'otro.rip.cualquiera.480p', download_count: 3 });
+    porHuella.attributes.moviehash_match = true;
+    const elMejorPorTexto = sub({
+      release: 'The.Movie.2020.1080p.BluRay.x264-RARBG',
+      hd: true,
+      from_trusted: true,
+      fps: 23.976,
+      download_count: 90000,
+    });
+    expect(scoreSubtitle(porHuella, hints)).toBeGreaterThan(scoreSubtitle(elMejorPorTexto, hints));
+  });
+
   test('penaliza traducciones IA y FPS de 25 (probable PAL, video es 23.976)', () => {
     const ai25 = sub({ release: 'x', ai_translated: true, fps: 25 });
     const human24 = sub({ release: 'x', ai_translated: false, fps: 23.976 });
