@@ -275,7 +275,14 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
    * devuelve null y se sigue con la búsqueda por texto de siempre.
    */
   async function pedirHuella(streamUrl: string | null | undefined, signal: AbortSignal): Promise<string | null> {
-    if (!streamUrl) return null;
+    // Cada salida escribe su propia línea. La primera versión solo registraba el
+    // caso bueno, así que cuando la huella no salía no quedaba ni rastro y no se
+    // podía saber si el problema era el enlace, la function o el tiempo.
+    if (!streamUrl) {
+      console.warn('[SUB] Huella: no hay enlace directo del archivo (no es reproducción directa)');
+      return null;
+    }
+    const arranque = Date.now();
     const corte = new AbortController();
     const reloj = setTimeout(() => corte.abort(), ESPERA_HUELLA_MS);
     const cancelar = () => corte.abort();
@@ -287,8 +294,16 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
         body: JSON.stringify({ url: streamUrl }),
         signal: corte.signal,
       }).then((x) => x.json());
-      return typeof r?.hash === 'string' && r.hash.length === 16 ? r.hash : null;
-    } catch {
+      const tardanza = ((Date.now() - arranque) / 1000).toFixed(1);
+      if (typeof r?.hash === 'string' && r.hash.length === 16) {
+        console.warn(`[SUB] Huella calculada en ${tardanza}s:`, r.hash);
+        return r.hash;
+      }
+      console.warn(`[SUB] Huella no disponible tras ${tardanza}s | motivo:`, r?.motivo ?? r?.error ?? '?');
+      return null;
+    } catch (e) {
+      const tardanza = ((Date.now() - arranque) / 1000).toFixed(1);
+      console.warn(`[SUB] Huella falló tras ${tardanza}s:`, (e as Error)?.name, (e as Error)?.message);
       return null;
     } finally {
       clearTimeout(reloj);
