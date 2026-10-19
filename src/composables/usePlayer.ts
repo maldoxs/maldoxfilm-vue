@@ -582,6 +582,57 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     sessionTorrentIds.clear();
   }
 
+  // ── Recuperación del enlace cortado ─────────────────────────────────────────
+  // Los enlaces de Real-Debrid no duran para siempre: con la película en pausa un
+  // rato largo, el servidor corta la conexión y el `<video>` emite `error`. Cuando
+  // eso pasa, el navegador deja el reproductor en negro y el tiempo en 00:00
+  // (medido en la TV el 18-10-2026: pausa de veinte minutos, `error` a los 5422 s
+  // de reproducción). Antes de esto, el manejador de `error` solo servía para el
+  // intento INICIAL —descartaba la reproducción directa y vaciaba el `<video>`—,
+  // así que una caída a mitad de película dejaba la pantalla negra y la única
+  // salida era salir del reproductor y volver a entrar.
+  type ParametrosCargaRd = {
+    id: string | number;
+    type: 'movie' | 'tv';
+    season?: number;
+    episode?: number;
+    startPositionSec?: number;
+  };
+  let ultimaCargaRd: ParametrosCargaRd | null = null;
+  /** Última posición conocida: al fallar, el `<video>` ya reporta 0. */
+  let ultimaPosicionSeg = 0;
+  let escuchaPosicionPuesta = false;
+  let recuperacionesEnlace = 0;
+  /** Dos intentos: si el enlace nuevo también se corta, el problema es otro. */
+  const MAX_RECUPERACIONES_ENLACE = 2;
+
+  function registrarPosicion(video: HTMLVideoElement) {
+    if (escuchaPosicionPuesta) return;
+    escuchaPosicionPuesta = true;
+    video.addEventListener('timeupdate', () => {
+      if (video.currentTime > 1) ultimaPosicionSeg = video.currentTime;
+    });
+  }
+
+  /** Vuelve a resolver el stream y retoma donde estaba. */
+  function recuperarEnlaceCortado(segundos: number) {
+    if (!ultimaCargaRd) return false;
+    if (recuperacionesEnlace >= MAX_RECUPERACIONES_ENLACE) {
+      console.warn('[RD] El enlace se cortó de nuevo — no se reintenta más');
+      opts.onToast('No se pudo reconectar con el servidor');
+      return false;
+    }
+    recuperacionesEnlace++;
+    // Tres segundos antes, para no retomar en mitad de una frase.
+    const desde = Math.max(0, Math.floor(segundos - 3));
+    const mm = String(Math.floor(desde / 60)).padStart(2, '0');
+    const ss = String(Math.floor(desde % 60)).padStart(2, '0');
+    console.warn(`[RD] El enlace se cortó durante la reproducción — recargando desde ${mm}:${ss}`);
+    opts.onToast('🔄 Reconectando con el servidor...');
+    void loadRdSource({ ...ultimaCargaRd, startPositionSec: desde });
+    return true;
+  }
+
   let activeMsgTimers: ReturnType<typeof setTimeout>[] = [];
   function clearMsgTimers() {
     activeMsgTimers.forEach(clearTimeout);
@@ -716,8 +767,17 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         'error',
         () => {
           limpiar();
+          const seg = ((Date.now() - desde) / 1000).toFixed(1);
+          // Si ya venía reproduciendo, esto NO es un archivo que el navegador no
+          // pueda abrir: es el enlace de Real-Debrid que se cortó. Vaciar el
+          // `<video>` acá es lo que dejaba la pantalla en negro y el tiempo en 00:00.
+          if (played) {
+            console.warn(`[RD] Direct Play: el enlace se cortó tras ${seg}s de reproducción`);
+            recuperarEnlaceCortado(ultimaPosicionSeg);
+            return;
+          }
           motivoFalloDirecto = 'este reproductor no pudo abrir el archivo';
-          console.warn(`[RD] Direct Play: error del <video> tras ${((Date.now() - desde) / 1000).toFixed(1)}s — se descarta`);
+          console.warn(`[RD] Direct Play: error del <video> tras ${seg}s — se descarta`);
           video.src = '';
           resolve();
         },
@@ -1561,6 +1621,21 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   }) {
     const video = opts.videoRef.value;
     if (!video) return;
+
+    // Si es OTRO título (o es la primera carga), el contador de recuperaciones
+    // arranca de cero: lo que falló en la película anterior no dice nada de esta.
+    const esOtroTitulo =
+      !ultimaCargaRd ||
+      ultimaCargaRd.id !== params.id ||
+      ultimaCargaRd.type !== params.type ||
+      ultimaCargaRd.season !== params.season ||
+      ultimaCargaRd.episode !== params.episode;
+    if (esOtroTitulo) {
+      recuperacionesEnlace = 0;
+      ultimaPosicionSeg = 0;
+    }
+    ultimaCargaRd = { ...params };
+    registrarPosicion(video);
 
     clearStallMonitor(); // cortar cualquier monitor DASH de una reproducción anterior
     cleanupServerTorrent(); // borrar en RD el torrent del título anterior (ADR-006)
