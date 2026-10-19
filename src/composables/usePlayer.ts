@@ -873,12 +873,29 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       /* noop */
     }
   }
+  /**
+   * memoriaUsada — cuánta memoria lleva ocupada la pestaña, si el navegador lo
+   * reporta (Chromium sí; el de la TV también).
+   *
+   * Está acá porque en la TV hubo caídas tras más de una hora de reproducción:
+   * el `<video>` murió y el navegador recargó la página solo, que es lo que hace
+   * cuando se queda sin memoria. Sin este dato no se puede distinguir eso de un
+   * problema del enlace, y la diferencia cambia por completo qué hay que arreglar.
+   */
+  function memoriaUsada(): string {
+    const m = (performance as Performance & { memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number } }).memory;
+    if (!m?.usedJSHeapSize) return '';
+    const usada = Math.round(m.usedJSHeapSize / 1048576);
+    const tope = Math.round(m.jsHeapSizeLimit / 1048576);
+    return ` | mem ${usada}/${tope}MB`;
+  }
+
   function attachDiagnostics(video: HTMLVideoElement) {
     detachDiagnostics();
     diagVideo = video;
     const log = (ev: string) =>
       console.warn(
-        `[PLAYER] ${ev} | t=${video.currentTime.toFixed(1)}s | buffer +${bufferAhead(video).toFixed(1)}s | ready=${video.readyState} net=${video.networkState}${video.seeking ? ' | seeking' : ''}`
+        `[PLAYER] ${ev} | t=${video.currentTime.toFixed(1)}s | buffer +${bufferAhead(video).toFixed(1)}s | ready=${video.readyState} net=${video.networkState}${video.seeking ? ' | seeking' : ''}${memoriaUsada()}`
       );
     const events = ['seeking', 'seeked', 'waiting', 'stalled', 'playing', 'error', 'ended'];
     diagHandlers = events.map((ev) => {

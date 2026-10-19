@@ -377,6 +377,16 @@ export const isCinemaLeakSource = (s: TorrentioStream): boolean => CINEMA_LEAK_R
  * una TV; pero cualquier cambio ahí es inerte hasta que alguien vuelva a pasar `true`.
  * No inventar comportamiento distinto por dispositivo sin revisar esa decisión primero.
  */
+/**
+ * sinClaveRd — oculta la clave de Real-Debrid de una URL de Torrentio antes de
+ * escribirla en el registro. El formato es
+ * `…/resolve/realdebrid/<CLAVE>/<infoHash>/…`, así que se reemplaza ese tramo.
+ */
+export function sinClaveRd(url: string | null | undefined): string {
+  if (!url) return String(url);
+  return url.replace(/(\/resolve\/[a-z]+\/)[^/]+/i, '$1••••••••');
+}
+
 export function scoreStream(
   s: TorrentioStream,
   isTv = false,
@@ -927,7 +937,20 @@ export function buildSelectedStream(params: {
   }
 
   // Líneas ~4915-4916 — logs de diagnóstico finales (preservados 1:1)
-  console.warn('[RD] Resultado final → url:', finalUrl, '| rdId:', active.rdId, '| isX265:', isX265(bestFinal), '| hasAAC:', streamHasAAC);
+  // La URL que arma Torrentio lleva la CLAVE de Real-Debrid en la ruta. En el
+  // registro del reproductor (que en la TV se espeja a una function para poder
+  // leerlo) no tiene nada que hacer: se reemplaza por puntos. Lo que sirve para
+  // diagnosticar es el nombre del archivo y el dominio, que quedan igual.
+  console.warn(
+    '[RD] Resultado final → url:',
+    sinClaveRd(finalUrl),
+    '| rdId:',
+    active.rdId,
+    '| isX265:',
+    isX265(bestFinal),
+    '| hasAAC:',
+    streamHasAAC
+  );
   console.warn('[RD] infoHash:', finalHash || '(no encontrado)');
 
   return {
