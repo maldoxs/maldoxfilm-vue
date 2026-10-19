@@ -505,6 +505,24 @@ function hideLoadingAndStart() {
   }
 }
 
+/**
+ * onPeliculaTerminada — al llegar al final, dejar los controles a la vista y
+ * cancelar el auto-ocultado.
+ *
+ * Sin esto la película termina, la barra ya estaba escondida por inactividad y
+ * queda una pantalla negra sin nada: la flecha de volver no se ve y parece que
+ * el reproductor se colgó. Reportado el 18-10-2026 ("quise volver al inicio y
+ * no respondió"). En series no cambia nada: el banner de "a continuación" sigue
+ * apareciendo por su cuenta antes del final.
+ */
+function onPeliculaTerminada() {
+  if (controlsHideTimeout) {
+    clearTimeout(controlsHideTimeout);
+    controlsHideTimeout = null;
+  }
+  controlsHidden.value = false;
+}
+
 /** onRdStarted — escucha `<VideoPlayer>` @started (equiv. a la rama RD de `hideLoadingAndStart`, líneas ~7853-7862). */
 function onRdStarted() {
   iframeLoading.value = false;
@@ -1465,7 +1483,7 @@ onBeforeUnmount(() => {
 
       <!-- Real-Debrid — siempre montado, mostrado vía v-show -->
       <div v-show="isRdSource" class="rd-wrap">
-        <VideoPlayer ref="videoPlayerRef" :rd-stream-resolver="rdStreamResolver" :rd-client="rdClient" :title="title" :backdrop-url="backdropUrl" :runtime-sec="(playerStore.current.runtimeMin || 0) * 60" :page-fullscreen="fullscreen.isFullscreen.value" @started="onRdStarted" @fallback-to-next-source="fallbackToFirstSource" @toggle-fullscreen="fullscreen.toggle" @native-fullscreen-exit="onNativeFullscreenExit">
+        <VideoPlayer ref="videoPlayerRef" :rd-stream-resolver="rdStreamResolver" :rd-client="rdClient" :title="title" :backdrop-url="backdropUrl" :runtime-sec="(playerStore.current.runtimeMin || 0) * 60" :page-fullscreen="fullscreen.isFullscreen.value" @started="onRdStarted" @termino="onPeliculaTerminada" @fallback-to-next-source="fallbackToFirstSource" @toggle-fullscreen="fullscreen.toggle" @native-fullscreen-exit="onNativeFullscreenExit">
           <template v-if="showEpisodeControls" #episode-triggers>
             <EpisodeTriggers
               @next-enter="onNextEnter" @next-leave="onNextLeave" @next-tap="onNextTap"

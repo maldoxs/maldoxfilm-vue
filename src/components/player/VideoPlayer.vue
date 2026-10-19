@@ -72,6 +72,12 @@ const emit = defineEmits<{
    * pantalla negra intermedia.
    */
   (e: 'native-fullscreen-exit'): void;
+  /**
+   * termino — la película llegó al final. `PlayerView` lo usa para dejar los
+   * controles a la vista: si no, la pantalla queda negra con la flecha de volver
+   * escondida y parece que el reproductor se colgó.
+   */
+  (e: 'termino'): void;
 }>();
 
 const playerStore = usePlayerStore();
@@ -740,7 +746,7 @@ onBeforeUnmount(() => {
         <span class="tpipeline-loader-text">Cargando…</span>
       </div>
 
-      <video ref="videoRef" class="video-el" playsinline @click="onVideoClick"></video>
+      <video ref="videoRef" class="video-el" playsinline @click="onVideoClick" @ended="emit('termino')"></video>
 
       <!-- Aviso "⚡ Reproducción directa": SOLO en las pelis que cumplen el formato (Direct
            Play, H264+AAC → fluido). Aparece/desaparece con la barra de controles. En /t/ y
