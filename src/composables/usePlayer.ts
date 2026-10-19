@@ -633,6 +633,51 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     return true;
   }
 
+  // ── Que el enlace no se corte durante una pausa larga ───────────────────────
+  // Real-Debrid cierra el enlace cuando nadie lo usa por un rato. Con la película
+  // en pausa veinte o treinta minutos, al volver el `<video>` ya no tiene de
+  // dónde leer y muere. Antes casi no se notaba porque la mayoría de las
+  // películas pasaban por la conversión, que renueva su manifiesto sola; desde
+  // que la TV reproduce casi todo en directo, el enlace crudo queda expuesto.
+  //
+  // La solución es la que usa cualquier reproductor: tocar el enlace cada tanto
+  // para que el servidor lo mantenga abierto. Un pedido HEAD no trae contenido,
+  // así que no gasta datos ni interfiere con la reproducción.
+  let urlDirectaActual: string | null = null;
+  let relojMantenerEnlace: ReturnType<typeof setInterval> | null = null;
+  let vigilanciaPausaPuesta = false;
+  /** Cada dos minutos: por debajo de lo que tarda Real-Debrid en cerrar. */
+  const CADA_MANTENER_MS = 120000;
+
+  function detenerMantenerEnlace() {
+    if (relojMantenerEnlace) {
+      clearInterval(relojMantenerEnlace);
+      relojMantenerEnlace = null;
+    }
+  }
+
+  function vigilarPausa(video: HTMLVideoElement, url: string) {
+    urlDirectaActual = url;
+    if (vigilanciaPausaPuesta) return;
+    vigilanciaPausaPuesta = true;
+
+    video.addEventListener('pause', () => {
+      detenerMantenerEnlace();
+      if (!urlDirectaActual || video.ended) return;
+      console.warn('[RD] En pausa: manteniendo vivo el enlace');
+      relojMantenerEnlace = setInterval(() => {
+        const u = urlDirectaActual;
+        if (!u) return;
+        // `no-cors` porque el enlace de Real-Debrid no habilita lectura desde el
+        // navegador: no se puede ver la respuesta, pero el pedido igual llega y
+        // es lo único que hace falta para que el servidor no cierre.
+        void fetch(u, { method: 'HEAD', mode: 'no-cors', cache: 'no-store' }).catch(() => {});
+      }, CADA_MANTENER_MS);
+    });
+    video.addEventListener('play', detenerMantenerEnlace);
+    video.addEventListener('ended', detenerMantenerEnlace);
+  }
+
   let activeMsgTimers: ReturnType<typeof setTimeout>[] = [];
   function clearMsgTimers() {
     activeMsgTimers.forEach(clearTimeout);
@@ -718,6 +763,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
           console.warn(`[RD] Direct Play: metadatos en ${((Date.now() - desde) / 1000).toFixed(1)}s`);
           if (video.duration && isFinite(video.duration) && video.duration > MIN_VALID_DURATION_SEC) {
             played = true;
+            vigilarPausa(video, streamUrl);
             const resumeAt =
               startPositionSec && startPositionSec > 30 && startPositionSec < video.duration
                 ? startPositionSec
@@ -1654,6 +1700,8 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     ultimaCargaRd = { ...params };
     registrarPosicion(video);
 
+    detenerMantenerEnlace();
+    urlDirectaActual = null;
     clearStallMonitor(); // cortar cualquier monitor DASH de una reproducción anterior
     cleanupServerTorrent(); // borrar en RD el torrent del título anterior (ADR-006)
     // Reset del estado /t/ AL INICIO: si la reproducción anterior usó pipeline /t/
@@ -2246,6 +2294,10 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   }
 
   function destroy() {
+    // El reloj que mantiene vivo el enlace se para acá también: si no, seguiría
+    // pidiendo cada dos minutos después de salir del reproductor.
+    detenerMantenerEnlace();
+    urlDirectaActual = null;
     // CRÍTICO: pausar y vaciar el <video>. Un <video> que quedó reproduciendo sigue
     // sonando (audio) aunque se quite del DOM hasta hacer pause() explícito → era el
     // "se escucha el sonido aunque volví al menú".
