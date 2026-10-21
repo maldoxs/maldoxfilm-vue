@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import {
   scoreStream,
+  esGrabacionDeSala,
   rankStreams,
   latinoListedFirst,
   pickOtroCandidatoAbrible,
@@ -1228,5 +1229,25 @@ describe('isOriginalLanguageCopy — excepcion para el idioma original', () => {
     expect(sinIdioma.scored.length).toBe(1); // la francesa queda fuera
     const conIdioma = rankStreams([mkvDts, copiaFrancesa], false, 'fr');
     expect(conIdioma.scored.length).toBe(2); // ahora compite
+  });
+});
+
+describe('esGrabacionDeSala — copias filmadas en el cine', () => {
+  test('reconoce las marcas clásicas y las de casas de apuestas', () => {
+    // Nombres reales medidos el 21-10-2026. El de `4rabet` viene pegado a "rip",
+    // sin separador, así que exigir límite de palabra lo dejaba pasar; y castigar
+    // solo a `1xbet` hizo que ganara el ranking la misma grabación de otra casa.
+    expect(esGrabacionDeSala('street.fighter.2026.1xbet.rip.mp4')).toBe(true);
+    expect(esGrabacionDeSala('street.fighter.2026.4rabetrip.mp4')).toBe(true);
+    expect(esGrabacionDeSala('Pelicula.2026.1080p.TELESYNC.x264-DKS.mkv')).toBe(true);
+    expect(esGrabacionDeSala('Pelicula.2026.HDCAM.x264.mp4')).toBe(true);
+    expect(esGrabacionDeSala('Street Fighter 2026.1080p.HQ Pre.Multi.AAC 2.0.x264')).toBe(true);
+  });
+
+  test('no confunde una edición de verdad con una grabación', () => {
+    expect(esGrabacionDeSala('Ghostland.2018.720p.BluRay.x264-YTS.mp4')).toBe(false);
+    expect(esGrabacionDeSala('Tenzing.2026.1080p.WEB-DL.DDP5.1.H264.mkv')).toBe(false);
+    expect(esGrabacionDeSala('The.Dark.and.the.Wicked.2020.BDRemux.1080p.mkv')).toBe(false);
+    expect(esGrabacionDeSala(null)).toBe(false);
   });
 });

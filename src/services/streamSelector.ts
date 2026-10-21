@@ -393,7 +393,17 @@ export function sinClaveRd(url: string | null | undefined): string {
  * apuestas, que son siempre de sala.
  */
 const ES_GRABACION_DE_SALA =
-  /\b(cam|camrip|hdcam|ts|hdts|telesync|telecine|tc|dvdscr|screener|1xbet|betwinner|pre.?dvd)\b/i;
+  /\b(cam|camrip|hdcam|ts|hdts|telesync|telecine|tc|dvdscr|screener|pre.?dvd|hq.?pre)\b/i;
+
+/**
+ * Casas de apuestas que ponen su marca de agua en las grabaciones de sala. Van
+ * aparte y SIN límite de palabra porque aparecen pegadas a otras:
+ * `street.fighter.2026.4rabetrip.mp4`. Castigar solo a `1xbet` no sirvió de
+ * nada: al bajarla, la siguiente del ranking era la misma grabación con la
+ * marca de otra casa (medido el 21-10-2026).
+ */
+const MARCAS_DE_APUESTAS =
+  /(1xbet|4rabet|melbet|mostbet|parimatch|linebet|betwinner|1win|pin-?up|bet365|betano|dafabet|rajabet|megapari|22bet)/i;
 
 /** Todo el texto donde puede aparecer la marca: nombre, título y archivo. */
 function textoDeStream(s: TorrentioStream): string {
@@ -405,7 +415,7 @@ function textoDeStream(s: TorrentioStream): string {
  * cine. La usa el reproductor para avisarle al espectador qué está viendo.
  */
 export function esGrabacionDeSala(texto: string | null | undefined): boolean {
-  return !!texto && ES_GRABACION_DE_SALA.test(texto);
+  return !!texto && (ES_GRABACION_DE_SALA.test(texto) || MARCAS_DE_APUESTAS.test(texto));
 }
 
 export function scoreStream(
@@ -441,7 +451,7 @@ export function scoreStream(
   // El castigo es grande pero NO descarta: en un estreno reciente puede que sea
   // lo único que exista, y es preferible verla así que no verla. Solo garantiza
   // que cualquier edición de verdad le gane.
-  if (ES_GRABACION_DE_SALA.test(textoDeStream(s))) pts -= 500;
+  if (esGrabacionDeSala(textoDeStream(s))) pts -= 500;
 
   // ── P1 — Disponibilidad RD (CRÍTICO: solo el CACHEADO [RD+] da pipeline /t/ = seek
   // fluido en TODAS las pantallas; el no-cacheado va server-side = seek LENTO). Por eso el
