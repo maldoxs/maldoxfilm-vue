@@ -24,6 +24,7 @@
 import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import SubtitleOverlay from './SubtitleOverlay.vue';
 import PlayerSettingsPanel from './PlayerSettingsPanel.vue';
+import { esGrabacionDeSala } from '../../services/streamSelector';
 import { usePlayer, type UsePlayerReturn } from '../../composables/usePlayer';
 import { useSubtitles } from '../../composables/useSubtitles';
 import { useFullscreen } from '../../composables/useFullscreen';
@@ -115,6 +116,16 @@ const fullscreen = useFullscreen({
 // reactivos en `usePlayer` — solo viajan una vez por stream vía callback, igual
 // que `_hasNativeSpanish`/`_hasSpaDirect` globales del original).
 const hasNativeSpanish = ref(false);
+/**
+ * avisoCopiaDeSala — cartel para cuando la única copia disponible es una
+ * grabación hecha en el cine (CAM/TELESYNC). No se bloquea nada: en un estreno
+ * reciente puede ser lo único que exista. Pero conviene saberlo, porque la
+ * imagen es pobre y los subtítulos de esas copias casi nunca calzan con nada
+ * (ver el castigo en `scoreStream` y el caso Street Fighter, 21-10-2026).
+ * Se cierra con la equis y no vuelve en esa reproducción.
+ */
+const avisoCopiaDeSala = ref(false);
+
 const lastSelectedStream = ref<{ imdbId: string | null; streamFilename: string | null; infoHash: string | null; streamUrl: string | null; rdId: string | null } | null>(null);
 // `_spShowForRD(true)` — los botones CC/Velocidad solo aparecen una vez el
 // stream está listo (igual que el original, que los muestra dentro de `_spInit`,
@@ -164,6 +175,7 @@ const player: UsePlayerReturn = usePlayer({
   },
   onStreamReady: ({ selected, hasNativeSpanish: nativeEs, spanishTrack: detectedTrack }) => {
     hasNativeSpanish.value = nativeEs;
+    avisoCopiaDeSala.value = esGrabacionDeSala(selected.streamFilename);
     lastSelectedStream.value = { imdbId: selected.imdbId, streamFilename: selected.streamFilename, infoHash: selected.infoHash ?? null, streamUrl: selected.url ?? null, rdId: selected.rdId ?? null };
     audioPanelReady.value = true;
     // `_subsEnabled = !hasSpanish` — preserva el estado inicial de `_spInit` (línea ~4265):
@@ -755,6 +767,15 @@ onBeforeUnmount(() => {
         ⚡ Reproducción directa
       </div>
 
+      <!-- Copia grabada en el cine: se avisa, no se bloquea. -->
+      <div v-if="avisoCopiaDeSala && !isLoading" class="aviso-sala">
+        <span>
+          Esta copia está grabada en el cine. La imagen es pobre y el subtítulo puede no calzar.
+          <button class="aviso-sala-otro" @click="emit('fallback-to-next-source')">Probar otro reproductor</button>
+        </span>
+        <button class="aviso-sala-x" aria-label="Cerrar aviso" @click="avisoCopiaDeSala = false">✕</button>
+      </div>
+
       <SubtitleOverlay :text="subtitles.activeCueText.value" :enabled="subtitles.enabled.value" />
 
       <!-- Barra de controles custom — reemplaza #nfControls (líneas ~3751-3824) -->
@@ -1029,6 +1050,53 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   transition: opacity var(--trans, 0.25s ease);
+}
+.aviso-sala {
+  position: absolute;
+  top: 54px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 41;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(90%, 640px);
+  padding: 9px 10px 9px 16px;
+  border-radius: 8px;
+  background: rgba(20, 20, 20, 0.95);
+  border: 1px solid rgba(255, 180, 60, 0.45);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+.aviso-sala-otro {
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #3d5afe;
+  font: inherit;
+  cursor: pointer;
+}
+.aviso-sala-otro:hover,
+.aviso-sala-otro:focus {
+  text-decoration: underline;
+}
+.aviso-sala-x {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.aviso-sala-x:hover,
+.aviso-sala-x:focus {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
 }
 .playback-notice.hidden {
   opacity: 0;

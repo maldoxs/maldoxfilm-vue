@@ -387,6 +387,27 @@ export function sinClaveRd(url: string | null | undefined): string {
   return url.replace(/(\/resolve\/[a-z]+\/)[^/]+/i, '$1••••••••');
 }
 
+/**
+ * Marcas de copia filmada en una sala de cine. `1xbet`/`betwinner` y similares
+ * aparecen en las grabaciones que llevan la marca de agua de esas casas de
+ * apuestas, que son siempre de sala.
+ */
+const ES_GRABACION_DE_SALA =
+  /\b(cam|camrip|hdcam|ts|hdts|telesync|telecine|tc|dvdscr|screener|1xbet|betwinner|pre.?dvd)\b/i;
+
+/** Todo el texto donde puede aparecer la marca: nombre, título y archivo. */
+function textoDeStream(s: TorrentioStream): string {
+  return `${s.name || ''} ${s.title || ''} ${s.behaviorHints?.filename || ''}`;
+}
+
+/**
+ * esGrabacionDeSala — si un nombre de archivo delata una copia filmada en el
+ * cine. La usa el reproductor para avisarle al espectador qué está viendo.
+ */
+export function esGrabacionDeSala(texto: string | null | undefined): boolean {
+  return !!texto && ES_GRABACION_DE_SALA.test(texto);
+}
+
 export function scoreStream(
   s: TorrentioStream,
   isTv = false,
@@ -407,6 +428,20 @@ export function scoreStream(
   }
 
   let pts = 0;
+
+  // ── P0 — Grabación de cine (CAM / TELESYNC / HDTS / "rip" de apuesta online) ──
+  // Una copia filmada en una sala no es una mala copia: es otra cosa. Imagen
+  // movida, sonido de ambiente, y los subtítulos que existen para ese tipo de
+  // copia son casi siempre traducidos por máquina y con tiempos que no coinciden
+  // con nada. Caso real (Street Fighter, 21-10-2026):
+  // `street.fighter.2026.1xbet.rip.mp4` ganó el ranking y su único subtítulo
+  // pedía corrimientos de -89 s en un tramo y +69 s en otro, así que ningún
+  // ajuste podía arreglarlo.
+  //
+  // El castigo es grande pero NO descarta: en un estreno reciente puede que sea
+  // lo único que exista, y es preferible verla así que no verla. Solo garantiza
+  // que cualquier edición de verdad le gane.
+  if (ES_GRABACION_DE_SALA.test(textoDeStream(s))) pts -= 500;
 
   // ── P1 — Disponibilidad RD (CRÍTICO: solo el CACHEADO [RD+] da pipeline /t/ = seek
   // fluido en TODAS las pantallas; el no-cacheado va server-side = seek LENTO). Por eso el

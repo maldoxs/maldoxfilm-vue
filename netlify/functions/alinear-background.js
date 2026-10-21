@@ -16,9 +16,6 @@ import ffmpeg from 'ffmpeg-static';
 import { enlaceDirectoDeRd } from '../lib/rd.js';
 import { medirDesfase } from '../lib/alinear.js';
 
-/** El doble de tramos para el segundo intento (ver la nota más abajo). */
-const TRAMOS_SEGUNDA_PASADA = 16;
-
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': '*',
@@ -53,25 +50,7 @@ export default async (req) => {
       return new Response('', { status: 202, headers: cors });
     }
 
-    let r = await medirDesfase({ ffmpeg, url, cues, duracionSeg: Number(duracionSeg) || 0 });
-
-    // Segunda pasada cuando la primera queda al borde. Medido con *Hope*
-    // (coreana, 20-10-2026): con ocho tramos dio -16,8 s y margen 1,245, cinco
-    // milésimas por debajo del corte, así que no aplicó nada y el usuario tuvo
-    // que ajustarla a mano. Con dieciséis tramos la misma película da -15,3 s y
-    // margen 1,30: la respuesta estaba, faltaba escuchar más. Solo se paga ese
-    // tiempo extra cuando hace falta; si la primera pasada es clara, no corre.
-    if (!r.error && !r.confiable && r.ventaja >= 1.1) {
-      await anotar({ estado: 'midiendo', pasada: 2, ventajaPrimera: Number(r.ventaja.toFixed(3)) });
-      const r2 = await medirDesfase({
-        ffmpeg,
-        url,
-        cues,
-        duracionSeg: Number(duracionSeg) || 0,
-        tramos: TRAMOS_SEGUNDA_PASADA,
-      });
-      if (!r2.error) r = r2;
-    }
+    const r = await medirDesfase({ ffmpeg, url, cues, duracionSeg: Number(duracionSeg) || 0 });
 
     if (r.error) {
       await anotar({ estado: 'error', motivo: r.error });
@@ -86,6 +65,7 @@ export default async (req) => {
         // Queda anotado el número que SÍ se midió aunque no se aplique: sin esto,
         // cuando una medición falla no hay forma de saber si estuvo cerca.
         offsetMedido: r.offsetMs,
+        difMitadesSeg: r.difMitadesSeg,
       });
       return new Response('', { status: 202, headers: cors });
     }
@@ -93,7 +73,12 @@ export default async (req) => {
     // Se guarda donde ya lo busca el reproductor al empezar cada película.
     const offsets = getStore({ name: 'subtitle-offsets', consistency: 'strong' });
     await offsets.set(clave, String(r.offsetMs));
-    await anotar({ estado: 'listo', offsetMs: r.offsetMs, ventaja: Number(r.ventaja.toFixed(3)) });
+    await anotar({
+      estado: 'listo',
+      offsetMs: r.offsetMs,
+      ventaja: Number(r.ventaja.toFixed(3)),
+      difMitadesSeg: r.difMitadesSeg,
+    });
   } catch (e) {
     await anotar({ estado: 'error', motivo: (e?.message || String(e)).slice(0, 120) });
   }

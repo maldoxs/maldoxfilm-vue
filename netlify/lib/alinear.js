@@ -27,8 +27,18 @@ import { spawn } from 'node:child_process';
 const HZ = 8000;
 const MS_POR_CUADRO = 100;
 const MUESTRAS_POR_CUADRO = (HZ * MS_POR_CUADRO) / 1000;
-/** Tramos de audio a escuchar, repartidos por la película. */
-export const TRAMOS = 8;
+/**
+ * Tramos de audio a escuchar, repartidos por la película.
+ *
+ * Dieciséis, no ocho. Con ocho, una película con poca voz da un ganador por
+ * ruido: *Street Fighter* (grabación de sala con subtítulo traducido por
+ * máquina, que no calza en ninguna parte) sacaba margen 1,39 y se aplicaba un
+ * -3 s que no servía; con dieciséis saca 1,17 y queda rechazada, que es lo
+ * correcto. Y *Hope*, que con ocho se quedaba corta (1,245) y obligaba a
+ * ajustarla a mano, con dieciséis da 1,30 y se aplica sola. Medido el
+ * 21-10-2026 sobre los cuatro archivos reales.
+ */
+export const TRAMOS = 16;
 export const SEG_POR_TRAMO = 60;
 /** Se buscan corrimientos de hasta un minuto, el mismo tope que el ajuste manual. */
 const RANGO_MS = 60000;
@@ -130,12 +140,8 @@ export function mejorCorrimiento(ventanas, cues) {
   const lejanos = puntajes.filter(([o]) => Math.abs(o - mejor) > 3000).map(([, p]) => p);
   const promedio = lejanos.reduce((a, b) => a + b, 0) / Math.max(1, lejanos.length);
   const ventaja = promedio > 0 ? mejorPts / promedio : 0;
-  return {
-    offsetMs: mejor,
-    puntaje: mejorPts,
-    ventaja,
-    confiable: ventaja >= VENTAJA_MINIMA,
-  };
+
+  return { offsetMs: mejor, puntaje: mejorPts, ventaja, confiable: ventaja >= VENTAJA_MINIMA };
 }
 
 /** Escucha la película por tramos y devuelve el corrimiento que mejor calza. */
@@ -149,5 +155,18 @@ export async function medirDesfase({ ffmpeg, url, cues, duracionSeg, tramos = TR
     if (voz.length) ventanas.push({ desdeMs: desde * 1000, voz });
   }
   if (!ventanas.length) return { error: 'sin audio' };
-  return { ...mejorCorrimiento(ventanas, cues), tramos: ventanas.length };
+  const total = mejorCorrimiento(ventanas, cues);
+  // Dato para el registro, NO para decidir: cada mitad de los tramos por su
+  // cuenta. Si las dos llegan al mismo número, la medición es sólida; si se van
+  // lejos, el subtítulo no es de esta copia. Se probó usarlo como criterio y
+  // rechazaba también mediciones buenas (`Hope` da 19 s de diferencia entre
+  // mitades y su resultado igual era el correcto), así que queda como
+  // diagnóstico.
+  const mitadA = mejorCorrimiento(ventanas.filter((_, i) => i % 2 === 0), cues);
+  const mitadB = mejorCorrimiento(ventanas.filter((_, i) => i % 2 === 1), cues);
+  return {
+    ...total,
+    tramos: ventanas.length,
+    difMitadesSeg: Number((Math.abs(mitadA.offsetMs - mitadB.offsetMs) / 1000).toFixed(1)),
+  };
 }
