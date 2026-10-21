@@ -646,7 +646,10 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
   // minuto y medio, así que acá solo se dispara y se pregunta por el resultado.
   const estadoAlineacion = ref<'nada' | 'midiendo' | 'sin_senal' | 'error'>('nada');
   let relojConsulta: ReturnType<typeof setTimeout> | null = null;
-  const ESPERA_MAXIMA_MS = 240000;
+  // Ocho minutos: una medición normal tarda poco más de un minuto, pero si la
+  // primera pasada queda al borde se hace una segunda con el doble de tramos, y
+  // en una película larga las dos juntas pasan los cinco minutos.
+  const ESPERA_MAXIMA_MS = 480000;
   const CADA_MS = 4000;
 
   function detenerConsulta() {

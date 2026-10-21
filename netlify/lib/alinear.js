@@ -139,11 +139,11 @@ export function mejorCorrimiento(ventanas, cues) {
 }
 
 /** Escucha la película por tramos y devuelve el corrimiento que mejor calza. */
-export async function medirDesfase({ ffmpeg, url, cues, duracionSeg }) {
+export async function medirDesfase({ ffmpeg, url, cues, duracionSeg, tramos = TRAMOS }) {
   const largo = duracionSeg && duracionSeg > 600 ? duracionSeg : 5400;
   const ventanas = [];
-  for (let i = 1; i <= TRAMOS; i++) {
-    const desde = Math.round((largo * i) / (TRAMOS + 1));
+  for (let i = 1; i <= tramos; i++) {
+    const desde = Math.round((largo * i) / (tramos + 1));
     const rms = await energias(ffmpeg, url, desde, SEG_POR_TRAMO);
     const voz = marcarVoz(rms);
     if (voz.length) ventanas.push({ desdeMs: desde * 1000, voz });
