@@ -214,6 +214,33 @@ export function pickSpanishAudioToken(info: MediaInfos): string | null {
   return latino ? latino.token : null;
 }
 
+/** Marcas de castellano de España, que el usuario NO quiere en ningún caso. */
+const CASTELLANO_EXPLICITO = /castellano|castilian|spain|espa[ñn]a|es-es/i;
+
+/**
+ * posicionAudioEspanol — en qué POSICIÓN viene la pista en español, contando
+ * desde cero y en el orden en que Real-Debrid lista las pistas del archivo.
+ *
+ * Existe para la reproducción directa en la TV. Ahí la pista hay que cambiarla
+ * en el navegador, y el de un televisor suele entregar la lista sin el código de
+ * idioma (o como "Track 1, Track 2"), así que no hay forma de reconocer cuál es
+ * la española mirando sus nombres. Caso real (Apocalipsis Z, 05-11-2026): el
+ * archivo trae `ita1, eng1, spa1`, el navegador mostró tres pistas sin idioma y
+ * la película sonó en italiano.
+ *
+ * Real-Debrid sí sabe el orden, así que la posición alcanza: si hay tres pistas
+ * y la tercera es la española, se activa la tercera.
+ *
+ * Devuelve -1 si no hay pista en español, o si la única es castellano de España.
+ */
+export function posicionAudioEspanol(info: MediaInfos): number {
+  const latino = info.audio.findIndex(isLatinoTrack);
+  if (latino >= 0) return latino;
+  return info.audio.findIndex(
+    (t) => isSpanishTrack(t) && !CASTELLANO_EXPLICITO.test(`${t.lang} ${t.token}`)
+  );
+}
+
 /** ¿El archivo tiene subtítulos en español embebidos? (sincronizados, del propio archivo). */
 export function pickSpanishSubToken(info: MediaInfos): string | null {
   const spa = info.subtitles.find(isSpanishTrack);

@@ -56,6 +56,7 @@ import {
   videoNeedsHevcSupport,
   videoCodecUnplayableInBrowser,
   firstAudioTrackIsSpanish,
+  posicionAudioEspanol,
 } from '../services/mediaInfos';
 import {
   resolveTpipeline,
@@ -1891,12 +1892,16 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // Formatos que el navegador no decodifica (mpeg4 de .avi, wmv, vc1...). Sin esto se
     // intentaba reproducirlos directo y la imagen salia distorsionada.
     let videoNoReproducible = false;
+    // Orden de las pistas de audio segun Real-Debrid, para el respaldo por
+    // posicion de `applyPreferredAudioTrack` (ver su nota).
+    let audioSegunRd: { posicionEspanol: number; totalPistas: number } | null = null;
     if (rdId) {
       try {
         const info = parseMediaInfos(await opts.rdClient.fetchMediaInfos(rdId));
         realAudioOk = hasNativeDecodableAudio(info, ac3Ok);
         realIsHevc = videoNeedsHevcSupport(info);
         primeraPistaEsEspanol = firstAudioTrackIsSpanish(info);
+        audioSegunRd = { posicionEspanol: posicionAudioEspanol(info), totalPistas: info.audio.length };
         videoNoReproducible = videoCodecUnplayableInBrowser(info);
         console.warn(
           `[RD] mediaInfos (códec REAL) → video: ${info.videoCodec ?? 'desconocido'} | audio: ${
@@ -2014,7 +2019,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         // no-español, con los subtitulos encendidos.
         const pistas = (video as HTMLVideoElement & { audioTracks?: AudioTrackListLike }).audioTracks;
         const sonandoEnEspanol =
-          pistas && pistas.length ? applyPreferredAudioTrack(pistas, nombreDiceLatino) : null;
+          pistas && pistas.length ? applyPreferredAudioTrack(pistas, nombreDiceLatino, audioSegunRd) : null;
         if (sonandoEnEspanol !== null) {
           console.warn(
             `[RD] Direct Play: ${pistas!.length} pistas de audio → ${
@@ -2060,7 +2065,8 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         const played2 = await tryHevcDirectPlay(video, otraCopia, params.startPositionSec);
         if (played2) {
           const pistas2 = (video as HTMLVideoElement & { audioTracks?: AudioTrackListLike }).audioTracks;
-          const enEspanol2 = pistas2 && pistas2.length ? applyPreferredAudioTrack(pistas2, nombreDiceLatino) : null;
+          const enEspanol2 =
+            pistas2 && pistas2.length ? applyPreferredAudioTrack(pistas2, nombreDiceLatino, audioSegunRd) : null;
           console.warn('[RD] ✅ La otra copia SÍ abrió — reproducción directa, sin convertir');
           opts.onStreamReady?.({
             selected,

@@ -262,3 +262,54 @@ describe('pickPreferredAudioTrack / applyPreferredAudioTrack', () => {
     expect(applyPreferredAudioTrack(undefined)).toBe(false);
   });
 });
+
+describe('applyPreferredAudioTrack — respaldo por posición (pistas sin idioma)', () => {
+  /** Tres pistas anónimas, como las entrega el navegador del televisor. */
+  const pistasAnonimas = () => {
+    const t = [
+      { id: '0', language: '', label: '', enabled: true },
+      { id: '1', language: '', label: '', enabled: false },
+      { id: '2', language: '', label: '', enabled: false },
+    ];
+    return Object.assign(t, { length: 3 }) as never;
+  };
+
+  test('activa la pista española por su posición cuando no hay nombres que mirar', () => {
+    // Caso real (Apocalipsis Z): el archivo trae ita1, eng1, spa1 y el navegador
+    // de la TV mostró tres pistas sin idioma, así que sonaba en italiano.
+    const pistas = pistasAnonimas();
+    const sonandoEnEspanol = applyPreferredAudioTrack(pistas, false, {
+      posicionEspanol: 2,
+      totalPistas: 3,
+    });
+    expect(sonandoEnEspanol).toBe(true);
+    expect(pistas[2].enabled).toBe(true);
+    expect(pistas[0].enabled).toBe(false);
+  });
+
+  test('no toca nada si la cantidad de pistas no coincide con la del archivo', () => {
+    // Si el navegador muestra otra cantidad que la que declara Real-Debrid, la
+    // posición ya no significa lo mismo: mejor dejar el audio como está.
+    const pistas = pistasAnonimas();
+    expect(applyPreferredAudioTrack(pistas, false, { posicionEspanol: 2, totalPistas: 5 })).toBe(false);
+    expect(pistas[0].enabled).toBe(true);
+  });
+
+  test('sin pista española en el archivo, no inventa ninguna', () => {
+    const pistas = pistasAnonimas();
+    expect(applyPreferredAudioTrack(pistas, false, { posicionEspanol: -1, totalPistas: 3 })).toBe(false);
+    expect(pistas[0].enabled).toBe(true);
+  });
+
+  test('cuando las pistas SÍ traen idioma, manda eso y el respaldo no se usa', () => {
+    const t = [
+      { id: '0', language: 'ita', label: 'Italiano', enabled: true },
+      { id: '1', language: 'spa', label: 'Español', enabled: false },
+      { id: '2', language: 'eng', label: 'English', enabled: false },
+    ];
+    const pistas = Object.assign(t, { length: 3 }) as never;
+    // El respaldo apunta a la posición 2 (inglés). Tiene que ganar el nombre.
+    expect(applyPreferredAudioTrack(pistas, true, { posicionEspanol: 2, totalPistas: 3 })).toBe(true);
+    expect(t[1].enabled).toBe(true);
+  });
+});

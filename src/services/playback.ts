@@ -346,7 +346,8 @@ export function pickPreferredAudioTrack(
  */
 export function applyPreferredAudioTrack(
   tracks: AudioTrackListLike | null | undefined,
-  aceptarEspanolAmbiguo = false
+  aceptarEspanolAmbiguo = false,
+  segunRd?: { posicionEspanol: number; totalPistas: number } | null
 ): boolean {
   try {
     if (!tracks || !tracks.length) return false;
@@ -358,7 +359,29 @@ export function applyPreferredAudioTrack(
       if (!tracks[i].enabled) continue;
       const texto = textoDePista(tracks[i]);
       if (CASTELLANO_RE.test(texto)) return false; // suena castellano: tratar como no-español
-      return LATINO_RE.test(texto) || SPANISH_RE.test(texto);
+      if (LATINO_RE.test(texto) || SPANISH_RE.test(texto)) return true;
+      break; // suena otra cosa: queda el respaldo por posición
+    }
+
+    // Respaldo POR POSICIÓN, solo si lo de arriba no encontró nada.
+    //
+    // El navegador de un televisor suele entregar las pistas sin su código de
+    // idioma, así que mirarles el nombre no sirve: con `ita1, eng1, spa1` mostró
+    // tres pistas anónimas y quedó sonando la italiana (Apocalipsis Z,
+    // 05-11-2026). Real-Debrid sí sabe el orden del archivo, y si la cantidad
+    // coincide, la posición identifica la pista sin ambigüedad.
+    //
+    // Se exige que coincida la cantidad: si el navegador muestra otra cantidad
+    // de pistas que las que declara Real-Debrid, la posición ya no significa lo
+    // mismo y es preferible no tocar nada.
+    if (
+      segunRd &&
+      segunRd.posicionEspanol >= 0 &&
+      segunRd.totalPistas === tracks.length &&
+      segunRd.posicionEspanol < tracks.length
+    ) {
+      for (let i = 0; i < tracks.length; i++) tracks[i].enabled = i === segunRd.posicionEspanol;
+      return !!tracks[segunRd.posicionEspanol].enabled;
     }
     return false;
   } catch {
