@@ -13,6 +13,14 @@
 export interface IframeSource {
   name: string;
   icon: string;
+  /**
+   * Fuentes que NO sirven en el navegador del televisor. No es que fallen y
+   * avisen: la página de la TV se queda congelada al cargarlas, pantalla en
+   * blanco y sin una sola línea en el registro (medido el 05-11-2026 con vidlink
+   * y vidsrc). En escritorio las dos funcionan, así que se ocultan solo en TV en
+   * vez de borrarlas.
+   */
+  soloEscritorio?: boolean;
   movie: (id: string | number) => string;
   tv: (id: string | number, season: number, episode: number) => string;
 }
@@ -44,12 +52,14 @@ export const SOURCES: IframeSource[] = [
   {
     name: 'vidlink',
     icon: '▶',
+    soloEscritorio: true,
     movie: (id) => `https://vidlink.pro/movie/${id}`,
     tv: (id, s, e) => `https://vidlink.pro/tv/${id}/${s}/${e}`,
   },
   {
     name: 'vidsrc',
     icon: '▶',
+    soloEscritorio: true,
     movie: (id) => `https://vidsrc.xyz/embed/movie?tmdb=${id}`,
     tv: (id, s, e) => `https://vidsrc.xyz/embed/tv?tmdb=${id}&season=${s}&episode=${e}`,
   },
@@ -57,6 +67,14 @@ export const SOURCES: IframeSource[] = [
 
 /** Índice "mágico" que representa la fuente Real-Debrid — preservado EXACTO de la línea ~4705. */
 export const RD_SRC_IDX = 99;
+
+/**
+ * fuenteSirveAca — si una fuente se puede ofrecer en este dispositivo. En la TV
+ * se esconden las que la cuelgan; en escritorio están todas.
+ */
+export function fuenteSirveAca(src: IframeSource, esTv: boolean): boolean {
+  return !esTv || !src.soloEscritorio;
+}
 
 /**
  * buildIframeSourceUrl — preservado EXACTO de `_buildSrcUrl` (líneas ~7757-7762):

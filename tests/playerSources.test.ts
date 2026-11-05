@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import {
   SOURCES,
+  fuenteSirveAca,
   RD_SRC_IDX,
   buildIframeSourceUrl,
   seasonOptions,
@@ -29,6 +30,19 @@ describe('SOURCES / buildIframeSourceUrl (preservados EXACTOS de líneas ~5365-5
     expect(SOURCES.length).toBe(3);
     expect(SOURCES[2].movie(550)).toBe('https://vidsrc.xyz/embed/movie?tmdb=550');
     expect(SOURCES[2].tv(1399, 2, 5)).toBe('https://vidsrc.xyz/embed/tv?tmdb=1399&season=2&episode=5');
+  });
+
+  test('en la TV se ofrecen solo las fuentes que su navegador aguanta', () => {
+    // Medido el 05-11-2026: vidlink y vidsrc dejan la pantalla en blanco en el
+    // televisor y, peor, congelan la página (deja de mandar hasta los registros).
+    // UnlimPlay sí funciona ahí. En escritorio las tres andan, así que se
+    // esconden por dispositivo en vez de borrarlas.
+    expect(SOURCES.filter((s) => fuenteSirveAca(s, true)).map((s) => s.name)).toEqual(['UnlimPlay']);
+    expect(SOURCES.filter((s) => fuenteSirveAca(s, false)).map((s) => s.name)).toEqual([
+      'UnlimPlay',
+      'vidlink',
+      'vidsrc',
+    ]);
   });
 
   test('buildIframeSourceUrl elige movie/tv según el tipo', () => {

@@ -50,6 +50,7 @@ import { TMDB_IMG_BASE } from '../services/catalog';
 import {
   SOURCES,
   RD_SRC_IDX,
+  fuenteSirveAca,
   buildIframeSourceUrl,
   seasonOptions,
   shouldPersistProgressOnClose,
@@ -199,7 +200,9 @@ function reiniciarCadenaDeFuentes() {
 /** Primera fuente de `SOURCES` que todavía no se probó para este título. */
 function primeraFuenteSinProbar(): number | null {
   for (let i = 0; i < SOURCES.length; i++) {
-    if (!fuentesYaIntentadas.has(i)) return i;
+    if (fuentesYaIntentadas.has(i)) continue;
+    if (!fuenteSirveAca(SOURCES[i], deviceStore.isTV)) continue;
+    return i;
   }
   return null;
 }
@@ -220,7 +223,12 @@ interface SourceButton {
 const sourceButtons = computed<SourceButton[]>(() => {
   const active = playerStore.sourceIndex;
   const rd: SourceButton = { idx: RD_SRC_IDX, label: 'RD', icon: '⚡', active: active === RD_SRC_IDX, isRd: true };
-  const rest = SOURCES.map((s, i) => ({ idx: i, label: s.name, icon: s.icon, active: i === active, isRd: false }));
+  // En la TV no se ofrecen las fuentes que cuelgan su navegador (ver
+  // `soloEscritorio`): un botón que deja la pantalla en blanco es peor que no
+  // tener el botón.
+  const rest = SOURCES.map((s, i) => ({ idx: i, label: s.name, icon: s.icon, active: i === active, isRd: false, src: s }))
+    .filter((b) => fuenteSirveAca(b.src, deviceStore.isTV))
+    .map(({ src: _src, ...b }) => b);
   return [rd, ...rest];
 });
 // Anime → siempre selector Anime1V (SUB/DUB/HLS). No-anime → RD/UnlimPlay/vidlink.
