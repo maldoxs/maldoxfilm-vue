@@ -355,7 +355,7 @@ export const isCinemaLeakSource = (s: TorrentioStream): boolean => CINEMA_LEAK_R
  * scoreStream — puntaje orientado a FLUIDEZ/ESTABILIDAD (que NUNCA se congele),
  * no a máxima calidad. Tiers por prioridad (rangos no solapados → respetan el orden):
  *
- *   P1 Disponibilidad RD:  [RD+] +200 · [RD download] -200   (cacheado = precondición)
+ *   P1 Disponibilidad RD:  [RD+] +400 · [RD download] -200   (cacheado = precondición)
  *   P2 Códec video:        H264 +100 · HEVC/H265 -60 (TV -150) · AV1 -80
  *   P3 Códec audio:        AAC +50 · AC3 +20 · EAC3/DDP +10 · DTS -20 · TrueHD/Atmos -30
  *   P4 Tamaño:             2-8GB +40 · <2GB +20 · 8-12GB 0 · 12-20GB -40 · >20GB -100
