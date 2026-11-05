@@ -347,7 +347,7 @@ export function pickPreferredAudioTrack(
 export function applyPreferredAudioTrack(
   tracks: AudioTrackListLike | null | undefined,
   aceptarEspanolAmbiguo = false,
-  segunRd?: { posicionEspanol: number; totalPistas: number } | null
+  segunRd?: { indice: number; esEspanol: boolean; totalPistas: number } | null
 ): boolean {
   try {
     if (!tracks || !tracks.length) return false;
@@ -376,12 +376,15 @@ export function applyPreferredAudioTrack(
     // mismo y es preferible no tocar nada.
     if (
       segunRd &&
-      segunRd.posicionEspanol >= 0 &&
+      segunRd.indice >= 0 &&
       segunRd.totalPistas === tracks.length &&
-      segunRd.posicionEspanol < tracks.length
+      segunRd.indice < tracks.length
     ) {
-      for (let i = 0; i < tracks.length; i++) tracks[i].enabled = i === segunRd.posicionEspanol;
-      return !!tracks[segunRd.posicionEspanol].enabled;
+      for (let i = 0; i < tracks.length; i++) tracks[i].enabled = i === segunRd.indice;
+      // Solo se informa "suena en español" cuando la pista elegida LO ES. Si se
+      // activó el idioma original o el inglés, la reproducción sigue tratándose
+      // como no-española y los subtítulos quedan encendidos.
+      return segunRd.esEspanol && !!tracks[segunRd.indice].enabled;
     }
     return false;
   } catch {

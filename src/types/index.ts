@@ -95,6 +95,14 @@ export interface SelectedStream {
    */
   foreignAudioLanguage?: string | null;
   /**
+   * idiomaOriginal — código ISO del idioma original de la película, según TMDB,
+   * SIEMPRE (a diferencia de `foreignAudioLanguage`, que solo se informa cuando
+   * no es inglés ni español). Lo usa la elección de pista de audio en
+   * reproducción directa: el idioma original se prefiere antes que un doblaje al
+   * inglés, para que una película francesa siga sonando en francés.
+   */
+  idiomaOriginal?: string | null;
+  /**
    * noTrustworthyCachedVersion — ninguna copia cacheada [RD+] de esta película está
    * libre de sospecha (subtítulo extranjero declarado O origen de cine — DCPRip/
    * Theater Rip/CAM). Caso real (2026-07-14): se probaron 3 copias distintas y las

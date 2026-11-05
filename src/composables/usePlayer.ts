@@ -56,7 +56,7 @@ import {
   videoNeedsHevcSupport,
   videoCodecUnplayableInBrowser,
   firstAudioTrackIsSpanish,
-  posicionAudioEspanol,
+  posicionAudioPreferida,
 } from '../services/mediaInfos';
 import {
   resolveTpipeline,
@@ -1894,14 +1894,17 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     let videoNoReproducible = false;
     // Orden de las pistas de audio segun Real-Debrid, para el respaldo por
     // posicion de `applyPreferredAudioTrack` (ver su nota).
-    let audioSegunRd: { posicionEspanol: number; totalPistas: number } | null = null;
+    let audioSegunRd: { indice: number; esEspanol: boolean; totalPistas: number } | null = null;
     if (rdId) {
       try {
         const info = parseMediaInfos(await opts.rdClient.fetchMediaInfos(rdId));
         realAudioOk = hasNativeDecodableAudio(info, ac3Ok);
         realIsHevc = videoNeedsHevcSupport(info);
         primeraPistaEsEspanol = firstAudioTrackIsSpanish(info);
-        audioSegunRd = { posicionEspanol: posicionAudioEspanol(info), totalPistas: info.audio.length };
+        audioSegunRd = {
+          ...posicionAudioPreferida(info, selected.idiomaOriginal),
+          totalPistas: info.audio.length,
+        };
         videoNoReproducible = videoCodecUnplayableInBrowser(info);
         console.warn(
           `[RD] mediaInfos (códec REAL) → video: ${info.videoCodec ?? 'desconocido'} | audio: ${

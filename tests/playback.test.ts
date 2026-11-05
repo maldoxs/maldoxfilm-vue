@@ -1,3 +1,4 @@
+import { posicionAudioPreferida } from '../src/services/mediaInfos';
 import { describe, test, expect } from 'vitest';
 import {
   detectHevcSupport,
@@ -279,7 +280,8 @@ describe('applyPreferredAudioTrack — respaldo por posición (pistas sin idioma
     // de la TV mostró tres pistas sin idioma, así que sonaba en italiano.
     const pistas = pistasAnonimas();
     const sonandoEnEspanol = applyPreferredAudioTrack(pistas, false, {
-      posicionEspanol: 2,
+      indice: 2,
+      esEspanol: true,
       totalPistas: 3,
     });
     expect(sonandoEnEspanol).toBe(true);
@@ -291,13 +293,13 @@ describe('applyPreferredAudioTrack — respaldo por posición (pistas sin idioma
     // Si el navegador muestra otra cantidad que la que declara Real-Debrid, la
     // posición ya no significa lo mismo: mejor dejar el audio como está.
     const pistas = pistasAnonimas();
-    expect(applyPreferredAudioTrack(pistas, false, { posicionEspanol: 2, totalPistas: 5 })).toBe(false);
+    expect(applyPreferredAudioTrack(pistas, false, { indice: 2, esEspanol: true, totalPistas: 5 })).toBe(false);
     expect(pistas[0].enabled).toBe(true);
   });
 
   test('sin pista española en el archivo, no inventa ninguna', () => {
     const pistas = pistasAnonimas();
-    expect(applyPreferredAudioTrack(pistas, false, { posicionEspanol: -1, totalPistas: 3 })).toBe(false);
+    expect(applyPreferredAudioTrack(pistas, false, { indice: -1, esEspanol: false, totalPistas: 3 })).toBe(false);
     expect(pistas[0].enabled).toBe(true);
   });
 
@@ -309,7 +311,43 @@ describe('applyPreferredAudioTrack — respaldo por posición (pistas sin idioma
     ];
     const pistas = Object.assign(t, { length: 3 }) as never;
     // El respaldo apunta a la posición 2 (inglés). Tiene que ganar el nombre.
-    expect(applyPreferredAudioTrack(pistas, true, { posicionEspanol: 2, totalPistas: 3 })).toBe(true);
+    expect(applyPreferredAudioTrack(pistas, true, { indice: 2, esEspanol: false, totalPistas: 3 })).toBe(true);
     expect(t[1].enabled).toBe(true);
+  });
+});
+
+describe('posicionAudioPreferida — el orden de preferencia acordado', () => {
+  const pista = (token: string, lang: string, langIso: string) => ({ token, lang, langIso, codec: 'ac3' });
+  const info = (audio: ReturnType<typeof pista>[]) => ({ durationSec: 0, videoCodec: 'h264', audio, subtitles: [] });
+
+  test('el latino gana a todo', () => {
+    const r = posicionAudioPreferida(info([pista('eng1', 'English', 'eng'), pista('lat1', 'Latino', 'lat'), pista('spa1', 'Spanish', 'spa')]), 'en');
+    expect(r).toEqual({ indice: 1, esEspanol: true });
+  });
+
+  test('sin latino, el español; caso Apocalipsis Z (ita, eng, spa)', () => {
+    const r = posicionAudioPreferida(info([pista('ita1', 'Italian', 'ita'), pista('eng1', 'English', 'eng'), pista('spa1', 'Spanish', 'spa')]), 'es');
+    expect(r).toEqual({ indice: 2, esEspanol: true });
+  });
+
+  test('sin español, el IDIOMA ORIGINAL antes que el inglés', () => {
+    // Una película francesa se mira en francés con subtítulos, no doblada.
+    const r = posicionAudioPreferida(info([pista('eng1', 'English', 'eng'), pista('fre1', 'French', 'fre')]), 'fr');
+    expect(r).toEqual({ indice: 1, esEspanol: false });
+  });
+
+  test('sin español ni original, el inglés antes que cualquier otro', () => {
+    const r = posicionAudioPreferida(info([pista('ita1', 'Italian', 'ita'), pista('rus1', 'Russian', 'rus'), pista('eng1', 'English', 'eng')]), 'ko');
+    expect(r).toEqual({ indice: 2, esEspanol: false });
+  });
+
+  test('sin nada de eso, no se toca el audio del archivo', () => {
+    const r = posicionAudioPreferida(info([pista('ita1', 'Italian', 'ita'), pista('rus1', 'Russian', 'rus')]), 'ko');
+    expect(r).toEqual({ indice: -1, esEspanol: false });
+  });
+
+  test('el castellano de España no se elige', () => {
+    const r = posicionAudioPreferida(info([pista('eng1', 'English', 'eng'), pista('spa1', 'Castellano (España)', 'spa')]), 'en');
+    expect(r).toEqual({ indice: 0, esEspanol: false });
   });
 });

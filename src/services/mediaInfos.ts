@@ -241,6 +241,52 @@ export function posicionAudioEspanol(info: MediaInfos): number {
   );
 }
 
+/** ¿La pista está en el idioma que se le pasa? (acepta código de 2 o 3 letras). */
+function pistaEnIdioma(t: RdAudioTrack, iso: string): boolean {
+  const corto = iso.slice(0, 2).toLowerCase();
+  const campos = `${t.langIso} ${t.token} ${t.lang}`.toLowerCase();
+  return new RegExp(`(^|[^a-z])${corto}[a-z]?\\d*([^a-z]|$)`).test(campos);
+}
+
+const INGLES_RE = /(^|[^a-z])(eng|en)\d*([^a-z]|$)|english|ingl[eé]s/i;
+
+/**
+ * posicionAudioPreferida — qué pista conviene activar, y si esa pista es
+ * española, según el orden de preferencia acordado:
+ *
+ *   1. latino
+ *   2. español que no sea castellano de España
+ *   3. el idioma ORIGINAL de la película
+ *   4. inglés
+ *   5. ninguna: queda la que trae el archivo
+ *
+ * El idioma original va ANTES que el inglés a propósito: una película francesa
+ * se mira en francés con subtítulos, no doblada al inglés. Y el castellano de
+ * España no se elige nunca, por preferencia del usuario.
+ *
+ * Esto decide con los datos de Real-Debrid, que son confiables, y sirve sobre
+ * todo para la TV: ahí el navegador entrega las pistas sin su código de idioma y
+ * no hay forma de reconocerlas mirando sus nombres (caso Apocalipsis Z,
+ * 05-11-2026: `ita1, eng1, spa1` y la película sonaba en italiano).
+ */
+export function posicionAudioPreferida(
+  info: MediaInfos,
+  idiomaOriginal?: string | null
+): { indice: number; esEspanol: boolean } {
+  const español = posicionAudioEspanol(info);
+  if (español >= 0) return { indice: español, esEspanol: true };
+
+  if (idiomaOriginal) {
+    const original = info.audio.findIndex((t) => pistaEnIdioma(t, idiomaOriginal));
+    if (original >= 0) return { indice: original, esEspanol: false };
+  }
+
+  const ingles = info.audio.findIndex((t) => INGLES_RE.test(`${t.langIso} ${t.token} ${t.lang}`));
+  if (ingles >= 0) return { indice: ingles, esEspanol: false };
+
+  return { indice: -1, esEspanol: false };
+}
+
 /** ¿El archivo tiene subtítulos en español embebidos? (sincronizados, del propio archivo). */
 export function pickSpanishSubToken(info: MediaInfos): string | null {
   const spa = info.subtitles.find(isSpanishTrack);

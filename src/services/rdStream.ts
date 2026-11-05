@@ -384,6 +384,7 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
       }
 
       if (foreignAudioLanguage) selected.foreignAudioLanguage = foreignAudioLanguage;
+      selected.idiomaOriginal = originalLanguage;
 
       return selected;
     } catch {
