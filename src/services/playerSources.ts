@@ -17,7 +17,23 @@ export interface IframeSource {
   tv: (id: string | number, season: number, episode: number) => string;
 }
 
-/** Orden de fallback iframe: UnlimPlay(0) → vidlink(1) — preservado EXACTO. */
+/**
+ * Orden de fallback iframe: UnlimPlay(0) → vidlink(1) → vidsrc(2).
+ *
+ * vidsrc se AGREGA al final, no reemplaza a nadie (05-11-2026). Motivo: vidlink
+ * queda en blanco en el navegador de la TV y funciona en escritorio. Se midió
+ * que vidlink devuelve la MISMA página a los dos, así que no bloquea por
+ * dispositivo: lo que falla es su página, que se arma entera con JavaScript, en
+ * un motor más viejo de lo que declara el identificador del televisor. vidsrc
+ * usa un reproductor HTML5 clásico, que es lo que mejor digiere ese navegador.
+ *
+ * Al ir último, en escritorio no cambia nada: ahí vidlink sigue respondiendo y
+ * la cadena nunca llega a vidsrc. En la TV queda como opción para elegir a mano
+ * desde los botones de arriba.
+ *
+ * `tmdb=` porque la app maneja identificadores de TMDB, que es lo que vidsrc
+ * espera en ese parámetro.
+ */
 export const SOURCES: IframeSource[] = [
   {
     name: 'UnlimPlay',
@@ -30,6 +46,12 @@ export const SOURCES: IframeSource[] = [
     icon: '▶',
     movie: (id) => `https://vidlink.pro/movie/${id}`,
     tv: (id, s, e) => `https://vidlink.pro/tv/${id}/${s}/${e}`,
+  },
+  {
+    name: 'vidsrc',
+    icon: '▶',
+    movie: (id) => `https://vidsrc.xyz/embed/movie?tmdb=${id}`,
+    tv: (id, s, e) => `https://vidsrc.xyz/embed/tv?tmdb=${id}&season=${s}&episode=${e}`,
   },
 ];
 

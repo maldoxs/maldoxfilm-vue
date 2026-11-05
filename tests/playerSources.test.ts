@@ -22,6 +22,15 @@ describe('SOURCES / buildIframeSourceUrl (preservados EXACTOS de líneas ~5365-5
     expect(SOURCES[1].tv(1399, 2, 5)).toBe('https://vidlink.pro/tv/1399/2/5');
   });
 
+  test('vidsrc va TERCERA, para no cambiar lo que ya funciona', () => {
+    // El orden importa: en escritorio vidlink responde, así que la cadena nunca
+    // llega a vidsrc y ahí no cambia nada. Se agregó porque vidlink queda en
+    // blanco en el navegador de la TV.
+    expect(SOURCES.length).toBe(3);
+    expect(SOURCES[2].movie(550)).toBe('https://vidsrc.xyz/embed/movie?tmdb=550');
+    expect(SOURCES[2].tv(1399, 2, 5)).toBe('https://vidsrc.xyz/embed/tv?tmdb=1399&season=2&episode=5');
+  });
+
   test('buildIframeSourceUrl elige movie/tv según el tipo', () => {
     expect(buildIframeSourceUrl(SOURCES, 0, 'movie', 550, 1, 1)).toBe('https://unlimplay.com/play/embed/movie/550');
     expect(buildIframeSourceUrl(SOURCES, 1, 'tv', 1399, 2, 5)).toBe('https://vidlink.pro/tv/1399/2/5');
