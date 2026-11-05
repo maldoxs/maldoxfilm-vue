@@ -346,6 +346,25 @@ describe('posicionAudioPreferida — el orden de preferencia acordado', () => {
     expect(r).toEqual({ indice: -1, esEspanol: false });
   });
 
+  test('en una película ESPAÑOLA, el castellano sí se elige: es el audio original', () => {
+    // La regla de "nunca castellano" existe para no imponer un doblaje de España
+    // sobre una película en inglés. Si la película es española, esa pista es la
+    // original y dejarla de lado sería peor. Caso Apocalipsis Z.
+    const r = posicionAudioPreferida(
+      info([pista('eng1', 'English', 'eng'), pista('spa1', 'Castellano (España)', 'spa')]),
+      'es'
+    );
+    expect(r).toEqual({ indice: 1, esEspanol: true });
+  });
+
+  test('reconoce el idioma original aunque venga con código de tres letras', () => {
+    // "de" tiene que reconocer a "ger", y "ja" a "jpn".
+    const alemana = posicionAudioPreferida(info([pista('eng1', 'English', 'eng'), pista('ger1', 'German', 'ger')]), 'de');
+    expect(alemana).toEqual({ indice: 1, esEspanol: false });
+    const japonesa = posicionAudioPreferida(info([pista('eng1', 'English', 'eng'), pista('jpn1', 'Japanese', 'jpn')]), 'ja');
+    expect(japonesa).toEqual({ indice: 1, esEspanol: false });
+  });
+
   test('el castellano de España no se elige', () => {
     const r = posicionAudioPreferida(info([pista('eng1', 'English', 'eng'), pista('spa1', 'Castellano (España)', 'spa')]), 'en');
     expect(r).toEqual({ indice: 0, esEspanol: false });

@@ -241,11 +241,37 @@ export function posicionAudioEspanol(info: MediaInfos): number {
   );
 }
 
+/**
+ * Equivalencias entre el código de dos letras que usa TMDB y los de tres que
+ * suelen traer los archivos. Sin esto, "de" no reconoce a "ger" ni "ja" a "jpn",
+ * y el idioma original de la película pasaría de largo.
+ */
+const ALIAS_IDIOMA: Record<string, string[]> = {
+  es: ['es', 'spa', 'cas', 'castellano', 'español', 'espanol', 'spanish'],
+  en: ['en', 'eng', 'english', 'ingles', 'inglés'],
+  fr: ['fr', 'fre', 'fra', 'french', 'francés', 'frances'],
+  it: ['it', 'ita', 'italian', 'italiano'],
+  de: ['de', 'ger', 'deu', 'german', 'alemán', 'aleman'],
+  pt: ['pt', 'por', 'portuguese', 'portugués', 'portugues'],
+  ru: ['ru', 'rus', 'russian', 'ruso'],
+  ja: ['ja', 'jpn', 'japanese', 'japonés', 'japones'],
+  ko: ['ko', 'kor', 'korean', 'coreano'],
+  zh: ['zh', 'chi', 'zho', 'chinese', 'chino'],
+  no: ['no', 'nor', 'norwegian', 'noruego'],
+  sv: ['sv', 'swe', 'swedish', 'sueco'],
+  da: ['da', 'dan', 'danish', 'danés', 'danes'],
+  nl: ['nl', 'dut', 'nld', 'dutch', 'holandés', 'holandes'],
+  pl: ['pl', 'pol', 'polish', 'polaco'],
+  tr: ['tr', 'tur', 'turkish', 'turco'],
+  hi: ['hi', 'hin', 'hindi'],
+};
+
 /** ¿La pista está en el idioma que se le pasa? (acepta código de 2 o 3 letras). */
 function pistaEnIdioma(t: RdAudioTrack, iso: string): boolean {
   const corto = iso.slice(0, 2).toLowerCase();
+  const nombres = ALIAS_IDIOMA[corto] ?? [corto];
   const campos = `${t.langIso} ${t.token} ${t.lang}`.toLowerCase();
-  return new RegExp(`(^|[^a-z])${corto}[a-z]?\\d*([^a-z]|$)`).test(campos);
+  return nombres.some((n) => new RegExp(`(^|[^a-z])${n}\\d*([^a-z]|$)`).test(campos));
 }
 
 const INGLES_RE = /(^|[^a-z])(eng|en)\d*([^a-z]|$)|english|ingl[eé]s/i;
@@ -275,6 +301,16 @@ export function posicionAudioPreferida(
 ): { indice: number; esEspanol: boolean } {
   const español = posicionAudioEspanol(info);
   if (español >= 0) return { indice: español, esEspanol: true };
+
+  // Si la película ES española, su pista en castellano no es un doblaje: es el
+  // audio original, y hay que preferirlo. La regla de "nunca castellano" existe
+  // para no imponer un doblaje de España sobre una película en inglés; no para
+  // dejar una película española sonando en otro idioma. Caso Apocalipsis Z
+  // (producción española), 05-11-2026.
+  if (idiomaOriginal?.slice(0, 2).toLowerCase() === 'es') {
+    const cualquierEspanol = info.audio.findIndex(isSpanishTrack);
+    if (cualquierEspanol >= 0) return { indice: cualquierEspanol, esEspanol: true };
+  }
 
   if (idiomaOriginal) {
     const original = info.audio.findIndex((t) => pistaEnIdioma(t, idiomaOriginal));
