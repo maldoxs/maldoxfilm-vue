@@ -53,6 +53,8 @@ const props = defineProps<{
   subsEnabled: boolean;
   /** Estado del ajuste automático: 'nada' | 'midiendo' | 'sin_senal' | 'error'. */
   estadoAlineacion?: string;
+  /** Código ISO del idioma ORIGINAL de la película, según TMDB (ej. 'fr'). */
+  idiomaOriginal?: string | null;
   /** Offset de sincronización de subtítulos en ms (`_subOffsetMs`) — para `#spOffsetDisplay`. */
   offsetMs: number;
   /** Velocidad de reproducción activa — uno de {@link SPEEDS} (`_playerSpeed`). */
@@ -71,6 +73,47 @@ const emit = defineEmits<{
 }>();
 
 const { show: showToast } = useToast();
+
+/**
+ * Nombre del idioma para mostrar, y si ese idioma es el ORIGINAL de la película.
+ *
+ * Antes la fila decía "Inglés [Original]" SIEMPRE, aunque la película fuera
+ * francesa o española: le mentía al espectador sobre lo que estaba escuchando.
+ * Ahora la marca de original aparece solo cuando corresponde.
+ */
+const NOMBRE_IDIOMA: Record<string, string> = {
+  en: 'Inglés',
+  es: 'Español',
+  fr: 'Francés',
+  it: 'Italiano',
+  de: 'Alemán',
+  pt: 'Portugués',
+  ru: 'Ruso',
+  ja: 'Japonés',
+  ko: 'Coreano',
+  zh: 'Chino',
+  no: 'Noruego',
+  sv: 'Sueco',
+  da: 'Danés',
+  nl: 'Neerlandés',
+  pl: 'Polaco',
+  tr: 'Turco',
+  hi: 'Hindi',
+};
+
+const isoOriginal = computed(() => (props.idiomaOriginal || '').slice(0, 2).toLowerCase());
+
+/** Agrega " [Original]" cuando ese idioma es el original de la película. */
+function conMarcaOriginal(etiqueta: string, iso: string): string {
+  return isoOriginal.value === iso ? `${etiqueta} [Original]` : etiqueta;
+}
+
+/** Cómo llamar a la pista que NO es española: su idioma real, no "inglés" por defecto. */
+const etiquetaNoEspanol = computed(() => {
+  const iso = isoOriginal.value;
+  if (iso && iso !== 'es' && NOMBRE_IDIOMA[iso]) return `${NOMBRE_IDIOMA[iso]} [Original]`;
+  return conMarcaOriginal('Inglés', 'en');
+});
 
 // "Español Latino" vs "Español" — preserva la línea ~4216-4218.
 const spaLabel = computed(() => (props.spanishTrack?.startsWith('lat') ? 'Español Latino' : 'Español'));
@@ -101,15 +144,28 @@ const audioRows = computed<AudioRow[]>(() => {
   const { hasNativeSpanish, spanishTrack, activeTrack } = props;
   if (hasNativeSpanish && spanishTrack) {
     return [
-      { key: 'spa', label: spaLabel.value, selected: activeTrack === spanishTrack, track: spanishTrack },
-      { key: 'eng', label: 'Inglés [Original]', selected: activeTrack === 'eng1', track: 'eng1' },
+      {
+        key: 'spa',
+        label: conMarcaOriginal(spaLabel.value, 'es'),
+        selected: activeTrack === spanishTrack,
+        track: spanishTrack,
+      },
+      { key: 'eng', label: etiquetaNoEspanol.value, selected: activeTrack === 'eng1', track: 'eng1' },
     ];
   }
   if (hasNativeSpanish) {
-    return [{ key: 'spa', label: spaLabel.value, selected: true, track: null }];
+    return [{ key: 'spa', label: conMarcaOriginal(spaLabel.value, 'es'), selected: true, track: null }];
   }
-  const rows: AudioRow[] = [{ key: 'eng', label: 'Inglés [Original]', selected: activeTrack === 'eng1', track: 'eng1' }];
-  if (spanishTrack) rows.push({ key: 'spa', label: spaLabel.value, selected: activeTrack === spanishTrack, track: spanishTrack });
+  const rows: AudioRow[] = [
+    { key: 'eng', label: etiquetaNoEspanol.value, selected: activeTrack === 'eng1', track: 'eng1' },
+  ];
+  if (spanishTrack)
+    rows.push({
+      key: 'spa',
+      label: conMarcaOriginal(spaLabel.value, 'es'),
+      selected: activeTrack === spanishTrack,
+      track: spanishTrack,
+    });
   return rows;
 });
 

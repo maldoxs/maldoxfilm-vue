@@ -126,6 +126,9 @@ const hasNativeSpanish = ref(false);
  */
 const avisoCopiaDeSala = ref(false);
 
+/** Idioma original de la película (TMDB), para rotular bien las filas de audio. */
+const idiomaOriginal = ref<string | null>(null);
+
 const lastSelectedStream = ref<{ imdbId: string | null; streamFilename: string | null; infoHash: string | null; streamUrl: string | null; rdId: string | null } | null>(null);
 // `_spShowForRD(true)` — los botones CC/Velocidad solo aparecen una vez el
 // stream está listo (igual que el original, que los muestra dentro de `_spInit`,
@@ -176,6 +179,7 @@ const player: UsePlayerReturn = usePlayer({
   onStreamReady: ({ selected, hasNativeSpanish: nativeEs, spanishTrack: detectedTrack }) => {
     hasNativeSpanish.value = nativeEs;
     avisoCopiaDeSala.value = esGrabacionDeSala(selected.streamFilename);
+    idiomaOriginal.value = selected.idiomaOriginal ?? null;
     lastSelectedStream.value = { imdbId: selected.imdbId, streamFilename: selected.streamFilename, infoHash: selected.infoHash ?? null, streamUrl: selected.url ?? null, rdId: selected.rdId ?? null };
     audioPanelReady.value = true;
     // `_subsEnabled = !hasSpanish` — preserva el estado inicial de `_spInit` (línea ~4265):
@@ -900,6 +904,7 @@ onBeforeUnmount(() => {
         :subs-enabled="subtitles.enabled.value"
         :offset-ms="subtitles.offsetMs.value"
         :estado-alineacion="subtitles.estadoAlineacion.value"
+        :idioma-original="idiomaOriginal"
         :speed="nfControls.speed.value"
         @switch-audio="onSwitchAudio"
         @toggle-subs="onToggleSubs"
