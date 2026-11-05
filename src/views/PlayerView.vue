@@ -963,6 +963,13 @@ function loadIframeSource(srcIdx: number, myGen: number) {
   const frame = frameRef.value;
   if (!frame) return;
 
+  // En la TV el camino del iframe era el único sin registro: cuando vidlink queda
+  // en blanco no se sabe si la página no cargó, si cargó y no muestra nada, o si
+  // se agotó la espera. Sin eso no se puede diagnosticar y solo queda adivinar.
+  const nombreFuente = SOURCES[srcIdx]?.name ?? `fuente ${srcIdx}`;
+  const desdeMs = Date.now();
+  console.warn(`[IFRAME] Cargando ${nombreFuente}`);
+
   const alCargar = () => {
     if (iframeOnloadFired) return;
     iframeOnloadFired = true;
@@ -970,6 +977,7 @@ function loadIframeSource(srcIdx: number, myGen: number) {
       clearTimeout(iframeAutoFallbackTimer);
       iframeAutoFallbackTimer = null;
     }
+    console.warn(`[IFRAME] ${nombreFuente} respondió en ${((Date.now() - desdeMs) / 1000).toFixed(1)}s`);
     setTimeout(hideLoadingAndStart, isTV ? 600 : 0);
   };
 
@@ -1004,6 +1012,9 @@ function loadIframeSource(srcIdx: number, myGen: number) {
     if (playerStore.isStale(myGen)) return;
     clearIframeMsgTimers();
     if (!iframeOnloadFired) {
+      console.warn(
+        `[IFRAME] ${nombreFuente} no respondió tras ${((Date.now() - desdeMs) / 1000).toFixed(0)}s`
+      );
       const siguiente = primeraFuenteSinProbar();
       if (siguiente != null) {
         loadIframeSource(siguiente, myGen);
