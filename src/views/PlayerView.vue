@@ -985,18 +985,16 @@ function loadIframeSource(srcIdx: number, myGen: number) {
     const f = frameRef.value;
     if (!f) return;
     f.onload = alCargar;
-    // `location.replace` sobre el `about:blank` del propio iframe (que hereda
-    // nuestro origen, así que es accesible) NO agrega entrada al historial, a
-    // diferencia de asignar `src`. Esas entradas de más son las que hacían que la
-    // X de salir pareciera pegada: el "volver" caía en una copia de la ruta del
-    // reproductor en vez de en el detalle, y había que apretar varias veces.
-    try {
-      const win = f.contentWindow;
-      if (win) win.location.replace(srcUrl);
-      else f.src = srcUrl;
-    } catch {
-      f.src = srcUrl;
-    }
+    // Asignar `src`, a secas.
+    //
+    // Se probó `contentWindow.location.replace`, que tiene la ventaja de no
+    // agregar entrada al historial. En el navegador de escritorio anda; en el de
+    // la TV la página embebida NO carga y queda la pantalla en blanco (reportado
+    // el 05-11-2026 con vidlink: en escritorio reproducía, en la TV no). La
+    // entrada de más en el historial es un precio bajo al lado de un reproductor
+    // que no muestra nada, y la salida ya navega con `replace`, que era el otro
+    // motivo del cambio.
+    f.src = srcUrl;
   }, 50);
 
   // Fuente 0 (UnlimPlay) tarda ~15s en scraping; las demás son más rápidas (línea ~8243-8245)

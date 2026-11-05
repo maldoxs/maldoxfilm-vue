@@ -411,6 +411,14 @@ function textoDeStream(s: TorrentioStream): string {
 }
 
 /**
+ * tieneUrlRota — la dirección que mandó Torrentio no identifica un archivo.
+ * Pasa cuando el torrent trae varios archivos y no supo cuál es la película.
+ */
+export function tieneUrlRota(s: { url?: string | null }): boolean {
+  return !!s.url && /\/undefined(\/|$)/.test(s.url);
+}
+
+/**
  * esGrabacionDeSala — si un nombre de archivo delata una copia filmada en el
  * cine. La usa el reproductor para avisarle al espectador qué está viendo.
  */
@@ -426,6 +434,14 @@ export function scoreStream(
 ): number {
   // ── Descartes automáticos ──
   if (isJunkStream(s)) return -10000; // sample/trailer/test → nunca
+
+  // Dirección rota de origen: Torrentio no supo qué archivo del torrent es la
+  // película y armó la URL con `undefined` donde va el número de archivo
+  // (`…/<infoHash>/null/undefined/<título>`). Esas copias vienen además con
+  // `filename: null`. Nadie puede resolver esa dirección, así que elegirla es
+  // garantizar que no se reproduzca nada. Caso real: *Kids* (1995), 21-10-2026,
+  // ganó el ranking con 485 puntos y la película no arrancó.
+  if (tieneUrlRota(s)) return -10000;
   // `ignorarIdioma` SOLO lo usa `rankStreams` cuando el filtro de idioma dejó CERO
   // candidatos (película de idioma original extranjero, sin ninguna copia doblada).
   // Ahí descartar por idioma ya no distingue nada —todas están en el mismo idioma— y

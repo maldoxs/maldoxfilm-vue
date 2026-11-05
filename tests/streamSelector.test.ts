@@ -2,6 +2,7 @@ import { describe, test, expect } from 'vitest';
 import {
   scoreStream,
   esGrabacionDeSala,
+  tieneUrlRota,
   rankStreams,
   latinoListedFirst,
   pickOtroCandidatoAbrible,
@@ -1249,5 +1250,22 @@ describe('esGrabacionDeSala — copias filmadas en el cine', () => {
     expect(esGrabacionDeSala('Tenzing.2026.1080p.WEB-DL.DDP5.1.H264.mkv')).toBe(false);
     expect(esGrabacionDeSala('The.Dark.and.the.Wicked.2020.BDRemux.1080p.mkv')).toBe(false);
     expect(esGrabacionDeSala(null)).toBe(false);
+  });
+});
+
+describe('tieneUrlRota — direcciones que no identifican un archivo', () => {
+  test('descarta la URL con `undefined` donde va el número de archivo', () => {
+    // Caso real (Kids, 1995): Torrentio no supo cuál de los archivos del torrent
+    // es la película y armó la dirección con `undefined`. Nadie puede resolverla,
+    // así que elegir esa copia garantiza que no se reproduzca nada.
+    const rota = {
+      url: 'https://torrentio.strem.fun/resolve/realdebrid/CLAVE/b0e754a0/null/undefined/Kids (1995) 720p',
+    };
+    const sana = {
+      url: 'https://torrentio.strem.fun/resolve/realdebrid/CLAVE/608eba99/null/11/Ghostland.mkv',
+    };
+    expect(tieneUrlRota(rota)).toBe(true);
+    expect(tieneUrlRota(sana)).toBe(false);
+    expect(tieneUrlRota({ url: null })).toBe(false);
   });
 });
