@@ -435,13 +435,6 @@ export function scoreStream(
   // ── Descartes automáticos ──
   if (isJunkStream(s)) return -10000; // sample/trailer/test → nunca
 
-  // Dirección rota de origen: Torrentio no supo qué archivo del torrent es la
-  // película y armó la URL con `undefined` donde va el número de archivo
-  // (`…/<infoHash>/null/undefined/<título>`). Esas copias vienen además con
-  // `filename: null`. Nadie puede resolver esa dirección, así que elegirla es
-  // garantizar que no se reproduzca nada. Caso real: *Kids* (1995), 21-10-2026,
-  // ganó el ranking con 485 puntos y la película no arrancó.
-  if (tieneUrlRota(s)) return -10000;
   // `ignorarIdioma` SOLO lo usa `rankStreams` cuando el filtro de idioma dejó CERO
   // candidatos (película de idioma original extranjero, sin ninguna copia doblada).
   // Ahí descartar por idioma ya no distingue nada —todas están en el mismo idioma— y
@@ -454,6 +447,19 @@ export function scoreStream(
   }
 
   let pts = 0;
+
+  // ── P0 bis — Dirección que no identifica el archivo ──
+  // Torrentio la arma con `undefined` donde va el número de archivo dentro del
+  // torrent (`…/<infoHash>/null/undefined/<título>`) cuando no supo cuál de
+  // todos es la película. Por esa vía no se puede resolver.
+  //
+  // Castigo, no descarte: el archivo PUEDE estar igual en la cuenta de
+  // Real-Debrid y reproducirse por su enlace directo. Caso *Kids* (1995): estaba
+  // en la cuenta y se veía en el reproductor de RD; lo que fallaba era nuestra
+  // búsqueda por nombre, arreglada en `matchInDownloads`. Así pierde contra
+  // cualquier copia con dirección sana, pero sigue siendo elegible si es lo
+  // único que hay.
+  if (tieneUrlRota(s)) pts -= 300;
 
   // ── P0 — Grabación de cine (CAM / TELESYNC / HDTS / "rip" de apuesta online) ──
   // Una copia filmada en una sala no es una mala copia: es otra cosa. Imagen
@@ -690,6 +696,16 @@ const normUrl = (u: string): string => u.toLowerCase().split('?')[0];
  *   2. URL original exacta
  *   3. filename exacto
  *   4. filename sin extensión
+ *
+ * Y una quinta, agregada el 05-11-2026: comparar por nombre NORMALIZADO, usando
+ * como respaldo el último tramo de la URL de Torrentio cuando el stream no trae
+ * `filename`.
+ *
+ * El caso que la motivó: *Kids* (1995). La copia elegida venía con
+ * `filename: null`, así que las cuatro estrategias fallaban y la película no se
+ * reproducía... estando el archivo EN LA CUENTA, con el nombre
+ * `Kids (1995) 720p H264 ITA ENG AC3 5.1 .mkv`, que es exactamente el último
+ * tramo de la URL salvo por la extensión y un espacio de más.
  */
 export function matchInDownloads(
   resolvedUrl: string,
@@ -709,7 +725,41 @@ export function matchInDownloads(
       (d) => d.filename && d.filename.toLowerCase().replace(/\.[^.]+$/, '') === fnBase
     );
   }
+  if (!m) {
+    // Último recurso: comparar nombres normalizados. El nombre sale del stream
+    // y, si no lo trae, del último tramo de la URL, que es donde Torrentio deja
+    // el título del archivo.
+    const candidato = nombreNormalizado(filename) || nombreNormalizado(ultimoTramo(originalUrl));
+    if (candidato) m = downloads.find((d) => nombreNormalizado(d.filename) === candidato);
+  }
   return m;
+}
+
+/** El último tramo de una URL, ya descifrado (`…/Kids%20(1995)%20720p` → `Kids (1995) 720p`). */
+function ultimoTramo(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const tramo = url.split('?')[0].split('/').filter(Boolean).pop() || '';
+  try {
+    return decodeURIComponent(tramo);
+  } catch {
+    return tramo;
+  }
+}
+
+/**
+ * nombreNormalizado — deja el nombre comparable: sin extensión, sin puntos ni
+ * guiones bajos, sin espacios de más y en minúsculas. Así
+ * `Kids (1995) 720p H264 ITA ENG AC3 5.1 .mkv` y
+ * `Kids (1995) 720p H264 ITA ENG AC3 5.1` son el mismo archivo.
+ */
+function nombreNormalizado(nombre: string | null | undefined): string {
+  if (!nombre) return '';
+  return nombre
+    .toLowerCase()
+    .replace(/\.(mkv|mp4|avi|mov|m4v|ts|wmv|flv)$/i, '')
+    .replace(/[._]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export interface ActiveStreamMatch {

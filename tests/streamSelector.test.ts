@@ -1269,3 +1269,26 @@ describe('tieneUrlRota — direcciones que no identifican un archivo', () => {
     expect(tieneUrlRota({ url: null })).toBe(false);
   });
 });
+
+describe('matchInDownloads — encontrar el archivo en la cuenta de RD', () => {
+  const descargas = [
+    { id: 'F7YK', filename: 'Kids (1995) 720p H264 ITA ENG AC3 5.1 .mkv', download: 'https://real-debrid.com/d/F7YK' },
+  ] as never[];
+
+  test('encuentra el archivo aunque el stream no traiga nombre', () => {
+    // Caso real (Kids, 1995): el stream venía con `filename: null` y la URL de
+    // Torrentio con `undefined` donde va el número de archivo, así que las
+    // estrategias por URL y por nombre fallaban. El archivo estaba en la cuenta
+    // y se reproducía desde la web de Real-Debrid: lo único que faltaba era
+    // compararlo con el título que la propia URL trae al final.
+    const url =
+      'https://torrentio.strem.fun/resolve/realdebrid/CLAVE/b0e754a0/null/undefined/Kids%20(1995)%20720p%20H264%20ITA%20ENG%20AC3%205.1';
+    expect(matchInDownloads(url, url, null, descargas)?.id).toBe('F7YK');
+  });
+
+  test('no inventa coincidencias con otra película', () => {
+    const url =
+      'https://torrentio.strem.fun/resolve/realdebrid/CLAVE/aaaa/null/undefined/Ghostland%202018%20720p';
+    expect(matchInDownloads(url, url, null, descargas)).toBeUndefined();
+  });
+});
