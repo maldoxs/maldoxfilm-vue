@@ -482,6 +482,17 @@ function loadRdSourceWrapped(params: Parameters<typeof player.loadRdSource>[0]) 
 }
 
 defineExpose({
+  /**
+   * mostrarControles — vuelve a mostrar la barra de reproducción y reinicia su
+   * cuenta para esconderse.
+   *
+   * La barra de abajo y la de arriba tienen temporizadores separados, y se
+   * desincronizan: con el control remoto de la TV, la actividad llega a la
+   * página (barra de arriba) pero no siempre al área del video (barra de abajo),
+   * así que quedaba el título visible y la barra de progreso escondida, sin
+   * forma evidente de recuperarla. Reportado el 06-11-2026.
+   */
+  mostrarControles: resetControlsAutoHide,
   loadRdSource: loadRdSourceWrapped,
   switchAudioTrack: player.switchAudioTrack,
   videoRef,

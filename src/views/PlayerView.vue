@@ -413,6 +413,10 @@ function armControlsHide() {
 function onPlayerActivity() {
   controlsHidden.value = false;
   armControlsHide();
+  // La barra de reproducción vive dentro de `<VideoPlayer>` y lleva su propio
+  // temporizador. Sin este aviso, mover el control remoto mostraba el título de
+  // arriba y dejaba la barra de progreso escondida.
+  videoPlayerRef.value?.mostrarControles?.();
 }
 function flashControlsOnEpChange() {
   controlsHidden.value = false;
