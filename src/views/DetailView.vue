@@ -129,6 +129,44 @@ function desplazarFila(fila: HTMLElement | null, direccion: -1 | 1) {
   fila.scrollBy({ left: direccion * Math.max(240, fila.clientWidth * 0.8), behavior: 'smooth' });
 }
 
+// ── Avance al dejar el puntero en el borde ──────────────────────────────────
+// El control remoto de los LG mueve un puntero y tiene una ruedita, pero la
+// ruedita desplaza la página de arriba abajo: una fila que se mueve de costado
+// no responde ni apuntándole ni girando la rueda. Con las flechas alcanza, pero
+// lo natural en una TV es apoyar el puntero en el borde y que la fila avance
+// sola, como hace Netflix. Eso es esto.
+//
+// No secuestra nada: solo actúa mientras el puntero está apoyado en el 12% de
+// cada extremo, y se detiene al sacarlo.
+const ZONA_BORDE = 0.12;
+const PASO_PX = 9; // por cuadro, ~8 segundos para recorrer una pantalla
+let relojBorde: ReturnType<typeof setInterval> | null = null;
+
+function detenerAvanceBorde() {
+  if (relojBorde) {
+    clearInterval(relojBorde);
+    relojBorde = null;
+  }
+}
+
+function avanzarSiEstaEnElBorde(evento: MouseEvent, fila: HTMLElement | null) {
+  if (!fila) return;
+  const caja = (evento.currentTarget as HTMLElement).getBoundingClientRect();
+  const relativo = (evento.clientX - caja.left) / Math.max(1, caja.width);
+  const direccion = relativo < ZONA_BORDE ? -1 : relativo > 1 - ZONA_BORDE ? 1 : 0;
+  detenerAvanceBorde();
+  if (!direccion) return;
+  relojBorde = setInterval(() => {
+    const tope = fila.scrollWidth - fila.clientWidth;
+    const siguiente = fila.scrollLeft + direccion * PASO_PX;
+    fila.scrollLeft = Math.max(0, Math.min(tope, siguiente));
+    // Llegó al final: no tiene sentido seguir gastando cuadros.
+    if (fila.scrollLeft === 0 || fila.scrollLeft >= tope) detenerAvanceBorde();
+  }, 16);
+}
+
+onBeforeUnmount(detenerAvanceBorde);
+
 let detailGeneration = 0;
 let seasonGeneration = 0;
 
@@ -432,12 +470,17 @@ onBeforeUnmount(() => {
           <div class="dp-overview">{{ overview }}</div>
           <div class="dp-actions">
             <button class="dp-play-btn" @click="playMain">{{ playLabel }}</button>
+            <!-- "Volver" va SEGUNDO, siempre en el mismo lugar.
+                 Antes iba al final, y como "Ver desde el inicio" solo aparece en
+                 las películas con progreso guardado, al aparecer corría a los
+                 demás: el botón saltaba de sitio según la película y había que
+                 buscarlo con el control remoto cada vez. -->
+            <button class="dp-sec-btn" @click="goBack">← Volver</button>
             <!-- "Ver desde el inicio" — solo tiene sentido si hay "Continuar viendo" guardado
                  (si no, `playMain` YA arranca del minuto 0). Navega con ?start=1, que PlayerView
                  usa para ignorar la posición guardada en ESA carga (sin borrar el progreso). -->
             <button v-if="prog" class="dp-sec-btn" @click="playFromStart">↺ Ver desde el inicio</button>
             <button class="dp-sec-btn" :class="{ added: inList }" @click="toggleList">{{ listBtnLabel }}</button>
-            <button class="dp-sec-btn" @click="goBack">← Volver</button>
           </div>
         </template>
       </div>
@@ -455,7 +498,11 @@ onBeforeUnmount(() => {
       <!-- Reparto -->
       <div v-if="cast.length" class="dp-section dp-section--cast">
         <div class="dp-sec-hd">Reparto</div>
-        <div class="dp-fila-wrap">
+        <div
+          class="dp-fila-wrap"
+          @mousemove="avanzarSiEstaEnElBorde($event, filaRepartoRef)"
+          @mouseleave="detenerAvanceBorde"
+        >
           <button class="dp-fila-flecha prev" :class="{ fija: deviceStore.isTV }" aria-label="Anterior" @click="desplazarFila(filaRepartoRef, -1)">‹</button>
           <div ref="filaRepartoRef" class="dp-cast-row">
             <div v-for="member in cast" :key="member.id" class="dp-cast-item">
@@ -534,7 +581,11 @@ onBeforeUnmount(() => {
       <!-- Recomendaciones -->
       <div v-if="recommendations.length" class="dp-section">
         <div class="dp-sec-hd">También te puede gustar</div>
-        <div class="dp-fila-wrap">
+        <div
+          class="dp-fila-wrap"
+          @mousemove="avanzarSiEstaEnElBorde($event, filaRecomendacionesRef)"
+          @mouseleave="detenerAvanceBorde"
+        >
           <button class="dp-fila-flecha prev" :class="{ fija: deviceStore.isTV }" aria-label="Anterior" @click="desplazarFila(filaRecomendacionesRef, -1)">‹</button>
           <div ref="filaRecomendacionesRef" class="dp-rec-row">
             <div v-for="r in recommendations" :key="r.id" class="dp-rec-card" @click="openRecommendation(r)">
