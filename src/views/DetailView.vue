@@ -115,6 +115,20 @@ const trailerKey = ref<string | null>(null);
 // usado en `useTmdbList`/`SearchView`: si el usuario navega a otro detalle
 // (p.ej. desde "También te puede gustar") antes de que termine un fetch
 // anterior, la respuesta obsoleta se descarta.
+// ── Flechas de las filas horizontales (reparto y recomendaciones) ────────────
+// Esas filas se desplazan con la barra del navegador, que está oculta por
+// diseño. En escritorio se puede arrastrar o usar la rueda; en la TV no hay
+// forma: la fila queda cortada y no avanza (reportado el 06-11-2026). Las
+// flechas son las mismas que ya tienen los carruseles del catálogo.
+const filaRepartoRef = ref<HTMLElement | null>(null);
+const filaRecomendacionesRef = ref<HTMLElement | null>(null);
+
+function desplazarFila(fila: HTMLElement | null, direccion: -1 | 1) {
+  if (!fila) return;
+  // Casi un ancho de pantalla por toque, como los carruseles del catálogo.
+  fila.scrollBy({ left: direccion * Math.max(240, fila.clientWidth * 0.8), behavior: 'smooth' });
+}
+
 let detailGeneration = 0;
 let seasonGeneration = 0;
 
@@ -441,12 +455,16 @@ onBeforeUnmount(() => {
       <!-- Reparto -->
       <div v-if="cast.length" class="dp-section dp-section--cast">
         <div class="dp-sec-hd">Reparto</div>
-        <div class="dp-cast-row">
-          <div v-for="member in cast" :key="member.id" class="dp-cast-item">
-            <img class="dp-cast-avatar" :src="castAvatarUrl(member)" :alt="member.name" loading="lazy" />
-            <div class="dp-cast-name">{{ member.name }}</div>
-            <div class="dp-cast-char">{{ member.character || '' }}</div>
+        <div class="dp-fila-wrap">
+          <button class="dp-fila-flecha prev" :class="{ fija: deviceStore.isTV }" aria-label="Anterior" @click="desplazarFila(filaRepartoRef, -1)">‹</button>
+          <div ref="filaRepartoRef" class="dp-cast-row">
+            <div v-for="member in cast" :key="member.id" class="dp-cast-item">
+              <img class="dp-cast-avatar" :src="castAvatarUrl(member)" :alt="member.name" loading="lazy" />
+              <div class="dp-cast-name">{{ member.name }}</div>
+              <div class="dp-cast-char">{{ member.character || '' }}</div>
+            </div>
           </div>
+          <button class="dp-fila-flecha next" :class="{ fija: deviceStore.isTV }" aria-label="Siguiente" @click="desplazarFila(filaRepartoRef, 1)">›</button>
         </div>
       </div>
 
@@ -516,15 +534,19 @@ onBeforeUnmount(() => {
       <!-- Recomendaciones -->
       <div v-if="recommendations.length" class="dp-section">
         <div class="dp-sec-hd">También te puede gustar</div>
-        <div class="dp-rec-row">
-          <div v-for="r in recommendations" :key="r.id" class="dp-rec-card" @click="openRecommendation(r)">
-            <img v-if="recPosterUrl(r)" :src="recPosterUrl(r)" :alt="recTitle(r)" loading="lazy" />
-            <div v-else class="dp-rec-fallback">{{ recTitle(r) }}</div>
-            <div class="dp-rec-ov">
-              <div class="dp-rec-title">{{ recTitle(r) }}</div>
-              <div v-if="recRating(r)" class="dp-rec-rating">★ {{ recRating(r) }}</div>
+        <div class="dp-fila-wrap">
+          <button class="dp-fila-flecha prev" :class="{ fija: deviceStore.isTV }" aria-label="Anterior" @click="desplazarFila(filaRecomendacionesRef, -1)">‹</button>
+          <div ref="filaRecomendacionesRef" class="dp-rec-row">
+            <div v-for="r in recommendations" :key="r.id" class="dp-rec-card" @click="openRecommendation(r)">
+              <img v-if="recPosterUrl(r)" :src="recPosterUrl(r)" :alt="recTitle(r)" loading="lazy" />
+              <div v-else class="dp-rec-fallback">{{ recTitle(r) }}</div>
+              <div class="dp-rec-ov">
+                <div class="dp-rec-title">{{ recTitle(r) }}</div>
+                <div v-if="recRating(r)" class="dp-rec-rating">★ {{ recRating(r) }}</div>
+              </div>
             </div>
           </div>
+          <button class="dp-fila-flecha next" :class="{ fija: deviceStore.isTV }" aria-label="Siguiente" @click="desplazarFila(filaRecomendacionesRef, 1)">›</button>
         </div>
       </div>
     </div>
@@ -1058,6 +1080,49 @@ onBeforeUnmount(() => {
   font-size: 0.61rem;
   color: var(--text-muted, #9a9a9a);
   margin-top: 2px;
+}
+
+/* Flechas de las filas horizontales. En la TV se ven siempre, porque no hay
+   forma de arrastrar la fila; en escritorio aparecen al pasar por encima, igual
+   que en los carruseles del catálogo. */
+.dp-fila-wrap {
+  position: relative;
+}
+.dp-fila-flecha {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  bottom: 0;
+  width: 48px;
+  border: none;
+  color: #fff;
+  font-size: 2.4rem;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--trans, 0.25s ease);
+}
+.dp-fila-flecha.prev {
+  left: 0;
+  background: linear-gradient(to right, rgba(14, 14, 14, 0.92), rgba(14, 14, 14, 0.1));
+}
+.dp-fila-flecha.next {
+  right: 0;
+  background: linear-gradient(to left, rgba(14, 14, 14, 0.92), rgba(14, 14, 14, 0.1));
+}
+.dp-fila-wrap:hover .dp-fila-flecha,
+.dp-fila-flecha:focus {
+  opacity: 1;
+}
+/* En TV las flechas van siempre visibles: no hay "pasar por encima" confiable
+   con el control remoto, y sin ellas la fila no se puede mover. La clase la
+   decide el componente; con un selector global no aplicaba. */
+.dp-fila-flecha.fija {
+  opacity: 1;
 }
 
 .dp-rec-row {
