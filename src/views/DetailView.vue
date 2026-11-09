@@ -470,17 +470,12 @@ onBeforeUnmount(() => {
           <div class="dp-overview">{{ overview }}</div>
           <div class="dp-actions">
             <button class="dp-play-btn" @click="playMain">{{ playLabel }}</button>
-            <!-- "Volver" va SEGUNDO, siempre en el mismo lugar.
-                 Antes iba al final, y como "Ver desde el inicio" solo aparece en
-                 las películas con progreso guardado, al aparecer corría a los
-                 demás: el botón saltaba de sitio según la película y había que
-                 buscarlo con el control remoto cada vez. -->
-            <button class="dp-sec-btn" @click="goBack">← Volver</button>
             <!-- "Ver desde el inicio" — solo tiene sentido si hay "Continuar viendo" guardado
                  (si no, `playMain` YA arranca del minuto 0). Navega con ?start=1, que PlayerView
                  usa para ignorar la posición guardada en ESA carga (sin borrar el progreso). -->
             <button v-if="prog" class="dp-sec-btn" @click="playFromStart">↺ Ver desde el inicio</button>
             <button class="dp-sec-btn" :class="{ added: inList }" @click="toggleList">{{ listBtnLabel }}</button>
+            <button class="dp-sec-btn" @click="goBack">← Volver</button>
           </div>
         </template>
       </div>
@@ -754,8 +749,17 @@ onBeforeUnmount(() => {
 .dp-actions {
   display: flex;
   gap: 10px;
-  flex-wrap: wrap;
+  /* Una sola línea, siempre.
+     Con "Ver desde el inicio" (que solo aparece en las películas con progreso
+     guardado) son cuatro botones, y al no entrar se partía: "Volver" caía solo
+     a la línea de abajo en unas películas sí y en otras no. Ahora los botones se
+     achican un poco antes que partirse, y el texto de cada uno no se corta. */
+  flex-wrap: nowrap;
   align-items: center;
+}
+.dp-actions button {
+  white-space: nowrap;
+  min-width: 0;
 }
 .dp-play-btn {
   display: flex;
@@ -782,6 +786,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 7px;
+  flex-shrink: 1;
   background: rgba(255, 255, 255, 0.1);
   color: var(--text, #f0f0f0);
   border: 1px solid rgba(255, 255, 255, 0.2);
