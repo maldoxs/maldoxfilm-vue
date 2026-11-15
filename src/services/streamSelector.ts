@@ -44,6 +44,26 @@ export const isX265 = (s: TorrentioStream): boolean =>
 export const isMp4 = (s: TorrentioStream): boolean => /\.mp4\b|\bmp4\b/i.test(streamInfo(s));
 export const isMkv = (s: TorrentioStream): boolean => /\.mkv\b|\bmkv\b|\bmatroska\b/i.test(streamInfo(s));
 
+// ── Contenedores que el navegador NO abre nunca (2026-11-15) ─────────────────
+// Caso real "Cat's Eye" (1985), leído en el log de la TV: de 30 copias se eligió
+// `Cats Eye.avi` (700 MB, dentro de un pack de 43 películas de Stephen King) con 430
+// puntos y CLASE A. Al leer el códec real resultó `video: mpeg4 | audio: mp3`, que no
+// se puede mostrar, y la película terminaba en el cartel "Película no encontrada"
+// teniendo en la MISMA lista una `REMASTERED 1080p BluRay HEVC x265` cacheada.
+//
+// El defecto no era el puntaje: era que el nombre de un `.avi` de los 2000 no declara
+// códec, y nuestro criterio de clase A decide POR DESCARTE ("si nada dice que necesita
+// conversión, se asume que no la necesita"). Esa regla es correcta para los nombres
+// modernos que no etiquetan nada, pero con estos contenedores se da vuelta: la ausencia
+// de etiqueta no es señal de que esté bien, es lo normal del formato.
+//
+// Ninguno de estos contenedores lo abre un navegador, con el códec que traigan. Se pide
+// la extensión con punto a propósito (no la palabra sola): `\bts\b` chocaría con el tag
+// TELESYNC y `\brm\b` con cualquier release que lleve esas letras.
+const CONTENEDOR_NO_WEB_RE =
+  /\.(?:avi|divx|wmv|asf|flv|f4v|rm|rmvb|mpg|mpeg|mpe|m1v|m2v|vob|m2ts|mts|ogm|3gp|3g2)\b/i;
+export const esContenedorNoWeb = (s: TorrentioStream): boolean => CONTENEDOR_NO_WEB_RE.test(streamInfo(s));
+
 // ── Disponibilidad en RD ─────────────────────────────────────────────────────
 // [RD+] = cacheado (stream inmediato). [RD download] = NO cacheado (RD lo bajaría).
 export const isCachedStream = (s: TorrentioStream): boolean => /\[rd\+\]/i.test(s.name || '');
@@ -362,6 +382,7 @@ export const isCinemaLeakSource = (s: TorrentioStream): boolean => CINEMA_LEAK_R
  *   P5 Resolución:         1080p +20 · 720p +10 · 4K -40 (TV -100)   (4K pesa, no ayuda)
  *   P6 Idioma:             SPA/Latino +25 · ENG +10   (desempate, NO sobre compat)
  *   P7 Contenedor:         MP4 +8 · MKV -5   (BONUS MENOR — un MP4 puede traer H265)
+ *                          .avi/.wmv/.flv/.mpg… -400 (el navegador no los abre nunca)
  *   Descarte (-10000):     basura (sample/test) · idioma incompatible (ITA/KOR sin ENG/SPA)
  *
  * Diseño basado en evidencia real: lo pesado (4K/HEVC/DTS/+20GB) CRASHEA al seek/pause;
@@ -529,7 +550,11 @@ export function scoreStream(
   } else pts += directPlay ? 10 : 5;
 
   // ── P7 — Contenedor (BONUS MENOR; jamás criterio principal) ──
-  if (isMp4(s)) pts += 8;
+  // La excepción es el contenedor que el navegador no abre nunca: ahí el castigo SÍ es
+  // grande (-400), porque no es una preferencia de calidad sino una copia que no se va a
+  // poder ver. No es descarte duro: si es la única del catálogo tiene que seguir elegible.
+  if (esContenedorNoWeb(s)) pts -= 400;
+  else if (isMp4(s)) pts += 8;
   else if (isMkv(s)) pts -= 5;
 
   // ── P8 — Subtítulos QUEMADOS en la imagen (ver `hasHardcodedSubs`) ──
@@ -566,9 +591,14 @@ export const declaresLowRes = (s: TorrentioStream): boolean => LOW_RES_RE.test(s
  * habría cedido su lugar a una copia en coreano. Acá se decide por DESCARTE: si nada en
  * el nombre dice que necesita conversión, se asume que no la necesita. La verificación
  * definitiva la hace el reproductor con `mediaInfos` antes de comprometerse (ADR-010).
+ *
+ * Excepción al "decidir por descarte" (2026-11-15, caso "Cat's Eye"): un contenedor que
+ * el navegador no abre nunca queda FUERA de la clase A aunque su nombre no declare nada
+ * (ver `esContenedorNoWeb`). No es descarte: sigue disponible en clase B, porque si es la
+ * única copia del catálogo igual hay que intentar algo con ella.
  */
 export const playsWithoutConversion = (s: TorrentioStream): boolean =>
-  !isX265(s) && !isAV1(s) && !hasBadAudio(s);
+  !isX265(s) && !isAV1(s) && !hasBadAudio(s) && !esContenedorNoWeb(s);
 
 /**
  * playbackClass — clase de reproducción. Se ordena PRIMERO por esto y recién después por

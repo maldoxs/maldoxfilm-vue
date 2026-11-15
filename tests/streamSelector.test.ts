@@ -1292,3 +1292,54 @@ describe('matchInDownloads — encontrar el archivo en la cuenta de RD', () => {
     expect(matchInDownloads(url, url, null, descargas)).toBeUndefined();
   });
 });
+
+// ── Contenedores que el navegador no abre nunca (2026-11-15) ────────────────────
+// Caso real "Cat's Eye" (1985), leido en el log de la TV: de 30 copias se eligio
+// `Cats Eye.avi` (700 MB, dentro de un pack de 43 peliculas de Stephen King) con 430
+// puntos y CLASE A, porque su nombre no declara codec y la clase A se decide por
+// descarte. El codec real resulto `mpeg4 / mp3`, que no se puede mostrar, y la pelicula
+// terminaba en el cartel "Pelicula no encontrada" teniendo en la MISMA lista una
+// `REMASTERED 1080p BluRay HEVC x265` cacheada que la TV decodifica directo.
+describe('"Cat\'s Eye" — un .avi no puede ganarle a una copia reproducible', () => {
+  const avi = stream({
+    name: 'Torrentio\n[RD+]',
+    title: '43 Stephen King Movies Collection\nCats Eye.avi 💾 700 MB',
+    behaviorHints: { filename: 'Cats Eye.avi' },
+  });
+  const hevc = stream({
+    name: 'Torrentio\n[RD+]',
+    title: 'Cats Eye 1985 REMASTERED 1080p BluRay HEVC x265 5.1 BONE 💾 1.61 GB',
+    behaviorHints: { filename: 'Cats Eye 1985 REMASTERED 1080p BluRay HEVC x265 5.1 BONE.mkv' },
+  });
+
+  test('el .avi NO entra a la clase A, aunque su nombre no declare nada', () => {
+    expect(playsWithoutConversion(avi)).toBe(false);
+    expect(playbackClass(avi)).toBe(1);
+  });
+
+  test('el .avi puntua por debajo de la copia HEVC', () => {
+    expect(scoreStream(avi)).toBeLessThan(scoreStream(hevc));
+  });
+
+  test('rankStreams pone primera la copia HEVC y no el .avi', () => {
+    expect(rankStreams([avi, hevc]).pool[0].s).toBe(hevc);
+  });
+
+  test('sigue siendo elegible si es la UNICA copia (castigo, no descarte)', () => {
+    expect(selectBestStream([avi]).best).toBe(avi);
+  });
+
+  test('pickOtroCandidatoAbrible ofrece el MKV cuando el .avi no se pudo mostrar', () => {
+    expect(pickOtroCandidatoAbrible(avi, [{ s: avi, pts: 30 }, { s: hevc, pts: 385 }])).toBe(hevc);
+  });
+
+  test('un MP4 o MKV normal no queda castigado por este cambio', () => {
+    const mp4 = stream({
+      name: 'Torrentio\n[RD+]',
+      title: 'Cats.Eye.1985.1080p.BluRay.H264.AAC 💾 2.5 GB',
+      behaviorHints: { filename: 'Cats.Eye.1985.1080p.BluRay.H264.AAC.mp4' },
+    });
+    expect(playbackClass(mp4)).toBe(2);
+    expect(scoreStream(mp4)).toBeGreaterThan(scoreStream(avi));
+  });
+});
