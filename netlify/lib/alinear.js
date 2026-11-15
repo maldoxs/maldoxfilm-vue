@@ -52,6 +52,18 @@ const PASO_MS = 100;
  */
 const VENTAJA_MINIMA = 1.25;
 
+/**
+ * MAX_DIF_INICIO_FIN_SEG — cuánto pueden diferir el principio y el final de la
+ * película antes de dar la medición por no concluyente.
+ *
+ * 30 s está elegido para separar los casos reales medidos, no al azar: las
+ * mediciones correctas que hay registradas dan diferencias de 0 · 0,1 · 20,1 s,
+ * y "Cat's Eye" (1985), la que salió mal, da 60. El margen queda del lado de no
+ * rechazar: 30 s de desacuerdo ya es tanto que ningún número único sirve para
+ * las dos mitades.
+ */
+const MAX_DIF_INICIO_FIN_SEG = 30;
+
 /** Energía (RMS) de cada 100 ms de un tramo, ya filtrado a la banda de la voz. */
 function energias(ffmpeg, url, desdeSeg, durSeg) {
   return new Promise((resolve, reject) => {
@@ -144,6 +156,22 @@ export function mejorCorrimiento(ventanas, cues) {
   return { offsetMs: mejor, puntaje: mejorPts, ventaja, confiable: ventaja >= VENTAJA_MINIMA };
 }
 
+/**
+ * desacuerdoInicioFinSeg — cuántos segundos difiere el corrimiento que pide la
+ * primera mitad de la película del que pide la segunda.
+ *
+ * Los tramos llegan en orden de tiempo, así que alcanza con partir la lista al
+ * medio. Con menos de cuatro tramos no hay dos mitades con sustento y devuelve
+ * 0, que es el valor que no rechaza nada: ante la falta de datos se deja pasar.
+ */
+export function desacuerdoInicioFinSeg(ventanas, cues) {
+  if (!ventanas || ventanas.length < 4) return 0;
+  const corte = Math.ceil(ventanas.length / 2);
+  const inicio = mejorCorrimiento(ventanas.slice(0, corte), cues);
+  const fin = mejorCorrimiento(ventanas.slice(corte), cues);
+  return Number((Math.abs(inicio.offsetMs - fin.offsetMs) / 1000).toFixed(1));
+}
+
 /** Escucha la película por tramos y devuelve el corrimiento que mejor calza. */
 export async function medirDesfase({ ffmpeg, url, cues, duracionSeg, tramos = TRAMOS }) {
   const largo = duracionSeg && duracionSeg > 600 ? duracionSeg : 5400;
@@ -156,17 +184,38 @@ export async function medirDesfase({ ffmpeg, url, cues, duracionSeg, tramos = TR
   }
   if (!ventanas.length) return { error: 'sin audio' };
   const total = mejorCorrimiento(ventanas, cues);
-  // Dato para el registro, NO para decidir: cada mitad de los tramos por su
-  // cuenta. Si las dos llegan al mismo número, la medición es sólida; si se van
-  // lejos, el subtítulo no es de esta copia. Se probó usarlo como criterio y
-  // rechazaba también mediciones buenas (`Hope` da 19 s de diferencia entre
-  // mitades y su resultado igual era el correcto), así que queda como
-  // diagnóstico.
+  // Dato para el registro, NO para decidir: tramos ALTERNADOS, uno sí y uno no.
+  // Se probó usarlo como criterio y rechazaba mediciones buenas (`Hope` da 19 s
+  // de diferencia y su resultado era el correcto), así que quedó como
+  // diagnóstico. Y hay que saber lo que NO dice (2026-11-15): como los dos
+  // conjuntos están repartidos por TODA la película, no puede detectar que el
+  // principio y el final pidan corrimientos distintos. En "Cat's Eye" dio 1,4 s
+  // mientras la medición estaba equivocada por un minuto.
   const mitadA = mejorCorrimiento(ventanas.filter((_, i) => i % 2 === 0), cues);
   const mitadB = mejorCorrimiento(ventanas.filter((_, i) => i % 2 === 1), cues);
+  // Principio contra final (2026-11-15). ESTE sí decide. Los tramos vienen en
+  // orden de tiempo, así que la primera mitad de la lista es la primera mitad de
+  // la película.
+  //
+  // Caso real "Cat's Eye" (1985): la película entera medía +45,1 s y la primera
+  // mitad sola, -15,1 s. Un minuto de diferencia. El subtítulo entraba corrido y
+  // el usuario lo vio antes que nosotros; la ventaja (1,356) no servía para
+  // detectarlo, porque mediciones CORRECTAS dieron 1,295 · 1,35 · 1,39 — subir
+  // ese umbral habría roto las que funcionan.
+  //
+  // Por qué este número sí puede decidir, y el de tramos alternados no: si el
+  // principio y el final de la película piden corrimientos que difieren en más
+  // de medio minuto, entonces NO existe un número único que sirva para las dos
+  // partes. Da igual cuál de los dos sea el correcto: aplicar uno solo deja la
+  // otra mitad mal. Antes que aplicar un número dudoso, se dice que no se pudo.
+  const difInicioFinSeg = desacuerdoInicioFinSeg(ventanas, cues);
   return {
     ...total,
+    // Con menos de 4 tramos no hay dos mitades que comparar: se deja pasar como
+    // antes en vez de rechazar por falta de datos.
+    confiable: total.confiable && difInicioFinSeg < MAX_DIF_INICIO_FIN_SEG,
     tramos: ventanas.length,
     difMitadesSeg: Number((Math.abs(mitadA.offsetMs - mitadB.offsetMs) / 1000).toFixed(1)),
+    difInicioFinSeg,
   };
 }

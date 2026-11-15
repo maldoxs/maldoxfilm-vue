@@ -66,6 +66,15 @@ export default async (req) => {
         // cuando una medición falla no hay forma de saber si estuvo cerca.
         offsetMedido: r.offsetMs,
         difMitadesSeg: r.difMitadesSeg,
+        difInicioFinSeg: r.difInicioFinSeg,
+        // Cuál de los dos controles lo frenó. Sin esto, un rechazo por desacuerdo
+        // entre principio y final se leía igual que uno por falta de señal, que
+        // son problemas distintos: uno es un subtítulo de otra edición, el otro
+        // una película demasiado ruidosa.
+        motivo:
+          r.difInicioFinSeg >= 30
+            ? `el principio y el final piden corrimientos distintos (${r.difInicioFinSeg}s)`
+            : 'sin señal clara',
       });
       return new Response('', { status: 202, headers: cors });
     }
@@ -78,6 +87,7 @@ export default async (req) => {
       offsetMs: r.offsetMs,
       ventaja: Number(r.ventaja.toFixed(3)),
       difMitadesSeg: r.difMitadesSeg,
+      difInicioFinSeg: r.difInicioFinSeg,
     });
   } catch (e) {
     await anotar({ estado: 'error', motivo: (e?.message || String(e)).slice(0, 120) });
