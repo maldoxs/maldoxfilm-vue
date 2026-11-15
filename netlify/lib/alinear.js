@@ -77,19 +77,19 @@ const VENTAJA_MINIMA = 1.25;
 const MAX_DIF_INICIO_FIN_SEG = 30;
 
 /**
- * MAX_DIF_MUESTRAS_SEG — cuánto pueden diferir dos muestras INDEPENDIENTES del
- * mismo archivo antes de dar la medición por no reproducible.
+ * Las dos mitades alternadas se siguen midiendo, pero SOLO para el registro.
  *
- * Es el control que faltaba. Los tramos se parten en dos mitades alternadas,
- * cada una cubre toda la película y cada una mide por su cuenta: si las dos
- * llegan al mismo número, el resultado no depende de dónde se escuchó. Con 32
- * tramos, "Cat's Eye" da 1,1 s de diferencia entre las dos muestras.
+ * Se probó usarlas como control de reproducibilidad y hubo que sacarlo el mismo
+ * día: cada mitad tiene 16 tramos, que es justo el tamaño de muestra que se
+ * acababa de demostrar insuficiente, así que el control le exigía fiabilidad a
+ * dos muestras que no la tienen y rechazaba mediciones CORRECTAS. En "Cat's Eye"
+ * tiró un +13,0 que era el número bueno, con 47 s de desacuerdo entre mitades.
  *
- * No confundir con `MAX_DIF_INICIO_FIN_SEG`, que compara el PRINCIPIO contra el
- * FINAL y detecta otra cosa: que el subtítulo sea de otra edición. Ese avisa;
- * este rechaza, porque un número que no se puede repetir no es una medición.
+ * Lo que sí es reproducible es el total con 32 tramos: dos corridas distintas,
+ * con los tramos cayendo en lugares distintos, dieron +13,3 y +13,0, y el
+ * usuario había encontrado +12 a mano. Ahí está la estabilidad, y se consiguió
+ * escuchando más película, no agregando controles.
  */
-const MAX_DIF_MUESTRAS_SEG = 3;
 
 /** Energía (RMS) de cada 100 ms de un tramo, ya filtrado a la banda de la voz. */
 export function energias(ffmpeg, url, desdeSeg, durSeg) {
@@ -318,11 +318,8 @@ export async function medirDesfase({ ffmpeg, url, cues, duracionSeg, tramos = TR
   const muestraB = medidor(ventanas.filter((_, i) => i % 2 === 1), cues);
   const difMuestrasSeg =
     muestraA && muestraB ? Number((Math.abs(muestraA.offsetMs - muestraB.offsetMs) / 1000).toFixed(1)) : 0;
-  const reproducible = difMuestrasSeg <= MAX_DIF_MUESTRAS_SEG;
   return {
     ...total,
-    confiable: total.confiable && reproducible,
-    reproducible,
     difMuestrasSeg,
     tramos: ventanas.length,
     metodo: usaArranques ? 'arranques' : 'area',

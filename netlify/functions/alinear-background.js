@@ -68,9 +68,7 @@ export default async (req) => {
         difInicioFinSeg: r.difInicioFinSeg,
         metodo: r.metodo,
         difMuestrasSeg: r.difMuestrasSeg,
-        // Dos rechazos distintos, y el usuario necesita saber cuál: una película
-        // ruidosa puede volver a intentarse, un número que no se repite no.
-        motivo: r.reproducible === false ? 'no_reproducible' : 'sin señal clara',
+        motivo: 'sin señal clara',
       });
       return new Response('', { status: 202, headers: cors });
     }
