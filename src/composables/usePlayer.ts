@@ -1605,7 +1605,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
 
     if (playerStore.isStale(myGen)) return true; // stale = no seguir (handled)
 
-    const audio = pickBestAudio(resolved.audioTracks);
+    const audio = pickBestAudio(resolved.audioTracks, selected.idiomaOriginal);
     const isSpanish = /lat|spa|es/i.test(audio);
 
     tpipelineState = { resolved, audio, myGen };

@@ -143,7 +143,10 @@ export async function waitForSegmentAt(
  * pickBestAudio — elige la pista de audio del pipeline /t/.
  * Preferencia: latino > español > inglés > primera disponible.
  */
-export function pickBestAudio(tracks: TpipelineAudioTrack[]): string {
+export function pickBestAudio(
+  tracks: TpipelineAudioTrack[],
+  idiomaOriginal?: string | null
+): string {
   const latino = tracks.find(
     (t) => /lat/i.test(t.id) || /latino|latin/i.test(t.lang)
   );
@@ -153,6 +156,20 @@ export function pickBestAudio(tracks: TpipelineAudioTrack[]): string {
     (t) => /^(spa|es)/i.test(t.iso) || /spanish|español/i.test(t.lang)
   );
   if (spanish) return spanish.id;
+
+  // 3. El idioma ORIGINAL de la película, ANTES que el inglés: una película
+  // francesa se mira en francés con subtítulos, no doblada. Faltaba acá
+  // (2026-11-15, caso "Frontier(s)"): la copia traía `rus1` y `fre1`, no había
+  // español ni inglés, y se caía al último paso —la primera pista— así que
+  // sonaba en ruso. La misma cascada ya estaba completa en `mediaInfos.ts` para
+  // reproducción directa; este camino se había quedado atrás.
+  const iso2 = (idiomaOriginal || '').slice(0, 2).toLowerCase();
+  if (iso2) {
+    const original = tracks.find(
+      (t) => t.iso?.slice(0, 2).toLowerCase() === iso2 || t.id?.slice(0, 2).toLowerCase() === iso2
+    );
+    if (original) return original.id;
+  }
 
   const english = tracks.find(
     (t) => /^eng/i.test(t.iso) || /english/i.test(t.lang)

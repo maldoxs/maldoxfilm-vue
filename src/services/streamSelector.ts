@@ -219,6 +219,46 @@ export function isOriginalLanguageCopy(s: TorrentioStream, originalIso: string |
   return re ? re.test(streamInfo(s)) || re.test(s.title || '') : false;
 }
 
+/**
+ * dobladoAIdiomaAjeno — la copia declara audio en un idioma que NO es español, ni
+ * inglés, ni el ORIGINAL de la película. O sea: un doblaje que no le sirve a nadie acá.
+ *
+ * No es para descartarla —puede traer también el original adentro, y de hecho suele
+ * traerlo— sino para que pierda contra una copia limpia.
+ *
+ * Caso real "Frontier(s)" (2026-11-15, log de la TV). Película francesa. Se eligió:
+ *
+ *   Граница / Frontière(s) [2007 BDRip 720p] Dub + Original Fra   🇷🇺 / 🇫🇷
+ *   granica720p.mkv · audio: rus1=ac3, fre1=dts
+ *
+ * La copia NO estaba mal elegida según las reglas de entonces: trae el francés
+ * original, así que no se descartaba, y con razón. El problema es el ORDEN — el
+ * doblaje ruso va primero — y que en reproducción directa suena la primera pista. El
+ * televisor además expone una sola pista, así que la cascada de audio (latino →
+ * español → original → inglés) se queda sin nada que elegir y suena ruso.
+ *
+ * En la misma lista había `Frontiers.2007.FRENCH.UNCUT.1080p.BluRay.H264.AAC-VXT`,
+ * francesa, H264+AAC, que se reproduce directa y suena en el idioma que corresponde.
+ *
+ * Es el castigo simétrico del bonus que ya existía para el español listado primero
+ * (`latinoListedFirst`): si premiamos que el idioma bueno vaya adelante, tenemos que
+ * penalizar que vaya adelante un doblaje ajeno.
+ */
+export function dobladoAIdiomaAjeno(
+  s: TorrentioStream,
+  idiomaOriginal: string | null | undefined
+): boolean {
+  // El español manda: si la copia lo trae, no se castiga por nada más.
+  if (hasLatino(s) || hasSpa(s)) return false;
+  const iso = (idiomaOriginal || '').toLowerCase();
+  const texto = `${streamInfo(s)} ${s.title || ''}`;
+  for (const [codigo, marca] of Object.entries(ORIGINAL_LANG_MARKS)) {
+    if (codigo === iso) continue; // el idioma original nunca es "ajeno"
+    if (marca.test(texto)) return true;
+  }
+  return false;
+}
+
 export const hasBadLang = (s: TorrentioStream): boolean => {
   const t = streamInfo(s);
   const bad =
@@ -361,6 +401,7 @@ export const isCinemaLeakSource = (s: TorrentioStream): boolean => CINEMA_LEAK_R
  *   P4 Tamaño:             2-8GB +40 · <2GB +20 · 8-12GB 0 · 12-20GB -40 · >20GB -100
  *   P5 Resolución:         1080p +20 · 720p +10 · 4K -40 (TV -100)   (4K pesa, no ayuda)
  *   P6 Idioma:             SPA/Latino +25 · ENG +10   (desempate, NO sobre compat)
+ *                          doblada a idioma ajeno (ni ES, ni EN, ni original) -120
  *   P7 Contenedor:         MP4 +8 · MKV -5   (BONUS MENOR — un MP4 puede traer H265)
  *   Descarte (-10000):     basura (sample/test) · idioma incompatible (ITA/KOR sin ENG/SPA)
  *
@@ -526,7 +567,14 @@ export function scoreStream(
     // lo tenga como primera pista, y en reproduccion directa (TV) suena esa. Bonus
     // chico a proposito: no debe pasar por encima de cacheado, tamaño ni codec.
     if (latinoListedFirst(s)) pts += 60;
-  } else pts += directPlay ? 10 : 5;
+  } else {
+    pts += directPlay ? 10 : 5;
+    // Doblada a un idioma que no es español, ni inglés, ni el original: pierde
+    // contra una copia limpia. Ver `dobladoAIdiomaAjeno` (caso "Frontier(s)").
+    // -120 alcanza para que no le gane a una copia sana y es chico al lado del
+    // +400 de cacheada, así que no da vuelta la prioridad de reproducción.
+    if (dobladoAIdiomaAjeno(s, idiomaOriginal)) pts -= 120;
+  }
 
   // ── P7 — Contenedor (BONUS MENOR; jamás criterio principal) ──
   if (isMp4(s)) pts += 8;

@@ -31,6 +31,7 @@ import {
   getGb,
   playsWithoutConversion,
   declaresLowRes,
+  dobladoAIdiomaAjeno,
 } from '../src/services/streamSelector';
 import type { TorrentioStream, RDDownload } from '../src/types';
 
@@ -1290,5 +1291,53 @@ describe('matchInDownloads — encontrar el archivo en la cuenta de RD', () => {
     const url =
       'https://torrentio.strem.fun/resolve/realdebrid/CLAVE/aaaa/null/undefined/Ghostland%202018%20720p';
     expect(matchInDownloads(url, url, null, descargas)).toBeUndefined();
+  });
+});
+
+// ── "Frontier(s)" (2007): doblaje ruso primero, francés segundo ─────────────────
+// Leído del log de la TV el 2026-11-15. Película francesa (TMDB: `fr`). Se eligió una
+// copia rusa que SÍ trae el francés original adentro —por eso no se descartaba, y con
+// razón— pero con el doblaje ruso como PRIMERA pista. En reproducción directa suena la
+// primera, y el televisor expone una sola, así que la cascada de audio no tenía nada
+// que elegir: sonaba en ruso.
+describe('"Frontier(s)" — una copia doblada no le gana a una limpia', () => {
+  const rusa = stream({
+    name: 'Torrentio\n720p',
+    title: 'Граница / Frontière(s) / Frontier(s) [2007 BDRip 720p] Dub + Original Fra\n👤 3 💾 4.65 GB ⚙️ Rutracker\n🇷🇺 / 🇫🇷',
+    behaviorHints: { filename: 'granica720p.mkv' },
+  });
+  const francesa = stream({
+    name: 'Torrentio\n1080p',
+    title: 'Frontiers.2007.FRENCH.UNCUT.1080p.BluRay.H264.AAC-VXT\n👤 0 💾 2.06 GB ⚙️ RARBG | 🇫🇷',
+    behaviorHints: { filename: 'Frontiers.2007.FRENCH.UNCUT.1080p.BluRay.H264.AAC-VXT.mkv' },
+  });
+
+  test('la rusa queda marcada como doblada a idioma ajeno', () => {
+    expect(dobladoAIdiomaAjeno(rusa, 'fr')).toBe(true);
+  });
+
+  test('la francesa NO: el idioma original nunca es ajeno', () => {
+    expect(dobladoAIdiomaAjeno(francesa, 'fr')).toBe(false);
+  });
+
+  test('la francesa le gana a la rusa en puntaje', () => {
+    expect(scoreStream(francesa, false, false, 'fr')).toBeGreaterThan(scoreStream(rusa, false, false, 'fr'));
+  });
+
+  test('sin el idioma original las dos quedan descartadas, como ya era', () => {
+    // Regla anterior, intacta: una copia en francés sin inglés ni español se
+    // descarta salvo que sepamos que el francés ES el idioma original. El castigo
+    // nuevo no cambia nada de esto.
+    expect(scoreStream(francesa, false, false, null)).toBe(-10000);
+    expect(scoreStream(rusa, false, false, null)).toBe(-10000);
+  });
+
+  test('una copia con español NO se castiga aunque traiga otros idiomas', () => {
+    const latina = stream({
+      name: 'Torrentio\n1080p',
+      title: 'Frontiers 2007 1080p Dual-Lat RUS ENG 💾 3 GB',
+      behaviorHints: { filename: 'Frontiers.2007.1080p.Dual-Lat.mkv' },
+    });
+    expect(dobladoAIdiomaAjeno(latina, 'fr')).toBe(false);
   });
 });
