@@ -1,7 +1,7 @@
 /**
  * alinear-mapa — DIAGNÓSTICO. Devuelve el mapa de voz de la película, crudo.
  *
- * No decide nada ni guarda nada: escucha los tramos y entrega, por cada uno,
+ * No decide nada: escucha los tramos y deja guardado, por cada uno,
  * desde qué milisegundo arranca y qué cuadros de 100 ms tienen voz. Con eso se
  * puede probar cómo se comporta el cálculo del corrimiento sin volver a bajar
  * audio ni tocar lo que está en producción.
@@ -11,6 +11,7 @@
  * una corrección: cada intento costaba un despliegue y dos minutos de espera.
  */
 
+import { getStore } from '@netlify/blobs';
 import ffmpeg from 'ffmpeg-static';
 import { enlaceDirectoDeRd } from '../lib/rd.js';
 import { energias, marcarVoz, SEG_POR_TRAMO } from '../lib/alinear.js';
@@ -33,8 +34,12 @@ export default async (req) => {
   const { rdId, duracionSeg, tramos = 16 } = datos || {};
   if (!rdId) return new Response('{"error":"falta rdId"}', { status: 400, headers: cors });
 
+  const mapas = getStore({ name: 'mapas-voz', consistency: 'strong' });
   const url = await enlaceDirectoDeRd(rdId);
-  if (!url) return new Response('{"error":"no se pudo resolver"}', { status: 404, headers: cors });
+  if (!url) {
+    await mapas.setJSON(rdId, { error: 'no se pudo resolver' });
+    return new Response('', { status: 202, headers: cors });
+  }
 
   const largo = duracionSeg && duracionSeg > 600 ? duracionSeg : 5400;
   const ventanas = [];
@@ -45,5 +50,6 @@ export default async (req) => {
       ventanas.push({ desdeMs: desde * 1000, voz: Buffer.from(voz).toString('base64') });
     }
   }
-  return new Response(JSON.stringify({ tramos: ventanas.length, ventanas }), { status: 200, headers: cors });
+  await mapas.setJSON(rdId, { tramos: ventanas.length, ventanas });
+  return new Response('', { status: 202, headers: cors });
 };
