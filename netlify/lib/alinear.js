@@ -65,7 +65,7 @@ const VENTAJA_MINIMA = 1.25;
 const MAX_DIF_INICIO_FIN_SEG = 30;
 
 /** Energía (RMS) de cada 100 ms de un tramo, ya filtrado a la banda de la voz. */
-function energias(ffmpeg, url, desdeSeg, durSeg) {
+export function energias(ffmpeg, url, desdeSeg, durSeg) {
   return new Promise((resolve, reject) => {
     const p = spawn(ffmpeg, [
       '-hide_banner', '-loglevel', 'error', '-nostdin',
