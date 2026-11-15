@@ -67,7 +67,10 @@ export default async (req) => {
         offsetMedido: r.offsetMs,
         difInicioFinSeg: r.difInicioFinSeg,
         metodo: r.metodo,
-        motivo: 'sin señal clara',
+        difMuestrasSeg: r.difMuestrasSeg,
+        // Dos rechazos distintos, y el usuario necesita saber cuál: una película
+        // ruidosa puede volver a intentarse, un número que no se repite no.
+        motivo: r.reproducible === false ? 'no_reproducible' : 'sin señal clara',
       });
       return new Response('', { status: 202, headers: cors });
     }
@@ -80,6 +83,7 @@ export default async (req) => {
       offsetMs: r.offsetMs,
       ventaja: Number(r.ventaja.toFixed(3)),
       difInicioFinSeg: r.difInicioFinSeg,
+      difMuestrasSeg: r.difMuestrasSeg,
       metodo: r.metodo,
       // El subtítulo es de otra edición: el número sirve para la parte medida,
       // pero más adelante puede correrse. Se aplica igual y se avisa.

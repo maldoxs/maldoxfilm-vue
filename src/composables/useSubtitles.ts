@@ -95,7 +95,7 @@ export interface UseSubtitlesReturn {
    * puede reintentar) y un subtítulo de OTRA EDICIÓN de la película, donde no
    * existe ningún ajuste que sirva y reintentar no cambia nada.
    */
-  motivoAlineacion: Ref<'' | 'otra_edicion' | 'sin_senal' | 'parcial'>;
+  motivoAlineacion: Ref<'' | 'no_reproducible' | 'sin_senal' | 'parcial'>;
   /** Dispara la medición contra el audio y aplica el resultado cuando llega. */
   alinearAlAudio(): Promise<void>;
   /**
@@ -652,7 +652,7 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
   // habla y calcula cuánto hay que correr el subtítulo. Tarda alrededor de
   // minuto y medio, así que acá solo se dispara y se pregunta por el resultado.
   const estadoAlineacion = ref<'nada' | 'midiendo' | 'sin_senal' | 'error'>('nada');
-  const motivoAlineacion = ref<'' | 'otra_edicion' | 'sin_senal' | 'parcial'>('');
+  const motivoAlineacion = ref<'' | 'no_reproducible' | 'sin_senal' | 'parcial'>('');
   let relojConsulta: ReturnType<typeof setTimeout> | null = null;
   // Ocho minutos: una medición normal tarda poco más de un minuto, pero si la
   // primera pasada queda al borde se hace una segunda con el doble de tramos, y
@@ -728,7 +728,7 @@ export function useSubtitles(opts: UseSubtitlesOptions): UseSubtitlesReturn {
           // saber cuál: si el principio y el final de la película piden
           // corrimientos distintos, el subtítulo es de otra edición y NO hay
           // número que sirva — insistir con el botón no va a cambiar nada.
-          motivoAlineacion.value = 'sin_senal';
+          motivoAlineacion.value = r.motivo === 'no_reproducible' ? 'no_reproducible' : 'sin_senal';
           estadoAlineacion.value = r.estado;
           return;
         }
