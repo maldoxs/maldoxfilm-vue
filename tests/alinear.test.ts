@@ -1,6 +1,14 @@
 import { describe, test, expect } from 'vitest';
 // @ts-expect-error — código de servidor en JS puro, sin tipos
-import { marcarVoz, mejorCorrimiento, desacuerdoInicioFinSeg } from '../netlify/lib/alinear.js';
+import {
+  marcarVoz,
+  mejorCorrimiento,
+  desacuerdoInicioFinSeg,
+  mejorCorrimientoPorArranques,
+  arranquesDeVoz,
+} from '../netlify/lib/alinear.js';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 /** Arma una ventana con voz en los tramos indicados (en segundos). */
 function ventana(desdeSeg: number, largoSeg: number, tramos: [number, number][]) {
@@ -107,5 +115,48 @@ describe('alinear — desacuerdo entre el principio y el final', () => {
   test('con menos de cuatro tramos no rechaza: devuelve 0 por falta de datos', () => {
     expect(desacuerdoInicioFinSeg(coherentes.slice(0, 3), cues)).toBe(0);
     expect(desacuerdoInicioFinSeg([], cues)).toBe(0);
+  });
+});
+
+// ── Datos REALES: "Cat's Eye" (1985) ────────────────────────────────────────────
+// El mapa de voz de la copia que el usuario estaba viendo, medido en producción, y
+// los tiempos del subtítulo que la app eligió. La respuesta correcta se conoce: el
+// usuario la encontró a mano ajustando de a un segundo, +12.
+//
+// Este caso es el que mostró que comparar ÁREAS no alcanza. Con los mismos datos:
+//   área      → +47,2 s (655 cuadros) · +12,1 s (653) · -14,9 s (653)   empatados
+//   arranques → un pico único entre +12,7 y +13,3 s
+describe('alinear — caso real Cat\'s Eye, con la respuesta conocida', () => {
+  const datos = JSON.parse(
+    readFileSync(resolve(__dirname, 'fixtures/catseye-voz.json'), 'utf8')
+  ) as { ventanas: { desdeMs: number; voz: string }[]; cues: [number, number][] };
+  const ventanas = datos.ventanas.map((v) => ({
+    desdeMs: v.desdeMs,
+    voz: Uint8Array.from(Buffer.from(v.voz, 'base64')),
+  }));
+
+  test('por arranques acierta: cae en el +12 que encontró el usuario', () => {
+    const r = mejorCorrimientoPorArranques(ventanas, datos.cues);
+    expect(r).not.toBeNull();
+    expect(Math.abs(r!.offsetMs - 12500)).toBeLessThanOrEqual(1500);
+    expect(r!.confiable).toBe(true);
+  });
+
+  test('por área se equivoca por 35 segundos (por eso quedó de respaldo)', () => {
+    const r = mejorCorrimiento(ventanas, datos.cues);
+    expect(Math.abs(r.offsetMs - 12500)).toBeGreaterThan(30000);
+  });
+
+  test('detecta que el subtítulo es de otra edición: principio y final no coinciden', () => {
+    const dif = desacuerdoInicioFinSeg(ventanas, datos.cues, (v, c) =>
+      mejorCorrimientoPorArranques(v, c)
+    );
+    expect(dif).toBeGreaterThanOrEqual(30);
+  });
+
+  test('los arranques de voz salen ordenados y son suficientes para medir', () => {
+    const a = arranquesDeVoz(ventanas);
+    expect(a.length).toBeGreaterThan(100);
+    expect(a).toEqual([...a].sort((x, y) => x - y));
   });
 });

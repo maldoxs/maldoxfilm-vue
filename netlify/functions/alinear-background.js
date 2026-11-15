@@ -65,16 +65,9 @@ export default async (req) => {
         // Queda anotado el número que SÍ se midió aunque no se aplique: sin esto,
         // cuando una medición falla no hay forma de saber si estuvo cerca.
         offsetMedido: r.offsetMs,
-        difMitadesSeg: r.difMitadesSeg,
         difInicioFinSeg: r.difInicioFinSeg,
-        // Cuál de los dos controles lo frenó. Sin esto, un rechazo por desacuerdo
-        // entre principio y final se leía igual que uno por falta de señal, que
-        // son problemas distintos: uno es un subtítulo de otra edición, el otro
-        // una película demasiado ruidosa.
-        motivo:
-          r.difInicioFinSeg >= 30
-            ? `el principio y el final piden corrimientos distintos (${r.difInicioFinSeg}s)`
-            : 'sin señal clara',
+        metodo: r.metodo,
+        motivo: 'sin señal clara',
       });
       return new Response('', { status: 202, headers: cors });
     }
@@ -86,8 +79,11 @@ export default async (req) => {
       estado: 'listo',
       offsetMs: r.offsetMs,
       ventaja: Number(r.ventaja.toFixed(3)),
-      difMitadesSeg: r.difMitadesSeg,
       difInicioFinSeg: r.difInicioFinSeg,
+      metodo: r.metodo,
+      // El subtítulo es de otra edición: el número sirve para la parte medida,
+      // pero más adelante puede correrse. Se aplica igual y se avisa.
+      parcial: r.parcial,
     });
   } catch (e) {
     await anotar({ estado: 'error', motivo: (e?.message || String(e)).slice(0, 120) });
