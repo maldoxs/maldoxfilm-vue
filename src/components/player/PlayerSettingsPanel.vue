@@ -53,6 +53,8 @@ const props = defineProps<{
   subsEnabled: boolean;
   /** Estado del ajuste automático: 'nada' | 'midiendo' | 'sin_senal' | 'error'. */
   estadoAlineacion?: string;
+  /** Resultado del ajuste: 'parcial' | 'sin_senal' | ''. */
+  motivoAlineacion?: string;
   /** Código ISO del idioma ORIGINAL de la película, según TMDB (ej. 'fr'). */
   idiomaOriginal?: string | null;
   /** Offset de sincronización de subtítulos en ms (`_subOffsetMs`) — para `#spOffsetDisplay`. */
@@ -279,7 +281,8 @@ function onSetSpeed(value: number) {
            apretar el "+", que lo atrasa todavía más. -->
       <div class="sp-offset-hint">
         <template v-if="estadoAlineacion === 'midiendo'">Escuchando la película, tarda alrededor de un minuto y medio. Podés seguir viendo.</template>
-        <template v-else-if="estadoAlineacion === 'sin_senal' || estadoAlineacion === 'error'">No se pudo medir en esta película. Ajustá a mano: si va atrasado, restá.</template>
+        <template v-else-if="motivoAlineacion === 'parcial'">Ajustado para esta parte de la película. Ojo: el subtítulo es de otra edición, con material de más o de menos, así que más adelante puede volver a correrse.</template>
+        <template v-else-if="estadoAlineacion === 'sin_senal' || estadoAlineacion === 'error'">No se pudo sincronizar: no se escuchó con claridad en esta película. Ajustá a mano: si va atrasado, restá.</template>
         <template v-else>Si el subtítulo va atrasado, restá. Si se adelanta a las voces, sumá.</template>
       </div>
     </div>
