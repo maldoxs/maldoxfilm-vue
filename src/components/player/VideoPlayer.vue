@@ -915,7 +915,6 @@ onBeforeUnmount(() => {
         :subs-enabled="subtitles.enabled.value"
         :offset-ms="subtitles.offsetMs.value"
         :estado-alineacion="subtitles.estadoAlineacion.value"
-        :motivo-alineacion="subtitles.motivoAlineacion.value"
         :idioma-original="idiomaOriginal"
         :speed="nfControls.speed.value"
         @switch-audio="onSwitchAudio"
