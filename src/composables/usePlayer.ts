@@ -1934,42 +1934,6 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // mpeg2, theora, realvideo, flash). El usuario siempre puede volver a RD con el
     // boton de la barra superior.
     if (videoNoReproducible) {
-      // ── Antes de abandonar RD: probar la OTRA copia cacheada (2026-11-15) ──────────
-      // Caso real "Cat's Eye" (1985), log de la TV: de 30 copias se eligió `Cats Eye.avi`
-      // (mpeg4/mp3), se descubrió acá que no se puede mostrar y se salía a UnlimPlay
-      // dejando las otras 29 SIN PROBAR, entre ellas una `REMASTERED 1080p BluRay HEVC`
-      // cacheada que la TV decodifica directo. La película terminaba en el cartel
-      // "Película no encontrada" estando disponible.
-      //
-      // Es el MISMO reintento que ya existía para cuando el `<video>` tira error (caso
-      // "Frontier(s)", más abajo): una sola vez, con una copia de otro contenedor, ANTES
-      // de reproducir nada. Si la alternativa tampoco abre, sigue al camino de siempre,
-      // así que el peor resultado posible es el comportamiento anterior.
-      const otraPorCodec = selected.altOpenableUrl;
-      if (otraPorCodec) {
-        console.warn(
-          '[RD] Códec de video que el navegador no muestra → probando otra copia cacheada antes de cambiar de reproductor'
-        );
-        opts.onToast('⚠️ Copia en formato antiguo — probando otra copia...');
-        await _shakaDetachAndWait();
-        if (playerStore.isStale(myGen)) return;
-        motivoFalloDirecto = '';
-        const abrio = await tryHevcDirectPlay(video, otraPorCodec, params.startPositionSec);
-        if (playerStore.isStale(myGen)) return;
-        if (abrio) {
-          const pistas = (video as HTMLVideoElement & { audioTracks?: AudioTrackListLike }).audioTracks;
-          const diceLatino =
-            /\blatino\b|\blat\b|dual.?lat|cinecalidad/i.test(streamFn || '') && !/castellano/i.test(streamFn || '');
-          // `audioSegunRd` NO se pasa: ese orden de pistas se midió sobre el archivo que
-          // se acaba de rechazar, y aplicarlo a otra copia activaría la pista equivocada.
-          const enEspanol = pistas && pistas.length ? applyPreferredAudioTrack(pistas, diceLatino, null) : null;
-          console.warn('[RD] ✅ La otra copia SÍ abrió — reproducción directa, sin cambiar de reproductor');
-          opts.onStreamReady?.({ selected, hasNativeSpanish: enEspanol ?? false, spanishTrack: null });
-          startStallMonitor(video, myGen, recoverReloadSrc(otraPorCodec));
-          isLoadingRd.value = false;
-          return;
-        }
-      }
       console.warn('[RD] Códec de video que el navegador no muestra → cambiando de reproductor');
       opts.onToast('⚠️ Copia en formato antiguo — cambiando de reproductor');
       opts.onFallbackToNextSource();
