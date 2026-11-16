@@ -32,7 +32,7 @@ export default async (req) => {
   } catch {
     return new Response('{"error":"body"}', { status: 400, headers: cors });
   }
-  const { rdId, infoHash, fileId, cues, duracionSeg } = datos || {};
+  const { rdId, infoHash, fileId, cues, duracionSeg, tramos } = datos || {};
   if (!rdId || !infoHash || !fileId || !Array.isArray(cues) || cues.length < 20) {
     return new Response('{"error":"faltan datos"}', { status: 400, headers: cors });
   }
@@ -50,7 +50,16 @@ export default async (req) => {
       return new Response('', { status: 202, headers: cors });
     }
 
-    const r = await medirDesfase({ ffmpeg, url, cues, duracionSeg: Number(duracionSeg) || 0 });
+    // `tramos` lo manda el botón "buscar más a fondo": el doble de película
+    // escuchada, y por eso el doble de espera. Solo lo pide el usuario cuando la
+    // primera pasada no concluyó, así que nadie espera de más sin quererlo.
+    const r = await medirDesfase({
+      ffmpeg,
+      url,
+      cues,
+      duracionSeg: Number(duracionSeg) || 0,
+      ...(Number(tramos) > 0 ? { tramos: Math.min(Number(tramos), 40) } : {}),
+    });
 
     if (r.error) {
       await anotar({ estado: 'error', motivo: r.error });
@@ -65,7 +74,14 @@ export default async (req) => {
         // Queda anotado el número que SÍ se midió aunque no se aplique: sin esto,
         // cuando una medición falla no hay forma de saber si estuvo cerca.
         offsetMedido: r.offsetMs,
-        difMitadesSeg: r.difMitadesSeg,
+        difInicioFinSeg: r.difInicioFinSeg,
+        // Los dos números que se midieron, para poder revisar el caso después.
+        offsetPorAreas: r.offsetPorAreas,
+        offsetPorArranques: r.offsetPorArranques,
+        difMetodosSeg: r.difMetodosSeg,
+        tramos: r.tramos,
+        // Dos rechazos distintos: uno se puede intentar más a fondo, el otro no.
+        motivo: r.coinciden === false ? 'no_coinciden' : 'sin señal clara',
       });
       return new Response('', { status: 202, headers: cors });
     }
@@ -77,7 +93,13 @@ export default async (req) => {
       estado: 'listo',
       offsetMs: r.offsetMs,
       ventaja: Number(r.ventaja.toFixed(3)),
-      difMitadesSeg: r.difMitadesSeg,
+      difInicioFinSeg: r.difInicioFinSeg,
+      difMetodosSeg: r.difMetodosSeg,
+      metodo: r.metodo,
+      tramos: r.tramos,
+      // El subtítulo es de otra edición: el número sirve para la parte medida,
+      // pero más adelante puede correrse. Se aplica igual y se avisa.
+      parcial: r.parcial,
     });
   } catch (e) {
     await anotar({ estado: 'error', motivo: (e?.message || String(e)).slice(0, 120) });
