@@ -32,6 +32,7 @@ import {
   playsWithoutConversion,
   declaresLowRes,
   dobladoAIdiomaAjeno,
+  candidatosRespaldo,
 } from '../src/services/streamSelector';
 import type { TorrentioStream, RDDownload } from '../src/types';
 
@@ -1495,5 +1496,49 @@ describe('"Dreamcatcher" — el checo cuenta como doblaje y el respaldo no puede
   test('una pelicula checa en checo no se castiga: es el idioma original', () => {
     expect(dobladoAIdiomaAjeno(checa, 'cs')).toBe(false);
     expect(isOriginalLanguageCopy(checa, 'cs')).toBe(true);
+  });
+});
+
+// Caso real "Dreamcatcher" (2026-11-16), segunda vuelta: la MP4 elegida no abre en la TV
+// y el unico respaldo posible era un MKV elegido por el nombre (`xxxpav69`, que por dentro
+// es solo DTS). La copia que servia, `x265-RARBG` (hevc + eng aac, 2 GB), nunca se probo:
+// era MP4 como la que fallo. Ahora hay una lista; el reproductor verifica cada una con RD.
+describe('candidatosRespaldo — varias copias en orden, no una sola', () => {
+  const rd = (titulo: string, archivo: string | null) =>
+    stream({
+      name: '[RD+] Torrentio\n1080p',
+      title: titulo,
+      url: `https://torrentio.strem.fun/resolve/realdebrid/x/${encodeURIComponent(titulo)}/null/0/${encodeURIComponent(archivo || 'null')}`,
+      behaviorHints: archivo ? { filename: archivo } : undefined,
+    });
+  const elegida = rd(
+    'Dreamcatcher - Horror 2003 Eng Rus Ukr Multi Subs 1080p [H264-mp4]\n👤 1 💾 11.2 GB',
+    'Dreamcatcher - Horror 2003 Eng Rus Ukr Multi Subs 1080p [H264-mp4].mp4'
+  );
+  const checa = rd('Dreamcatcher (2003)(FHD)(x264)(1080p)(BluRay)(English-CZ) PHDTeam\n💾 2.7 GB\n🇬🇧 / 🇨🇿', 'Dreamcatcher (English-CZ) PHDTeam .mkv');
+  const dts = rd('Dreamcatcher.2003.1080p.BluRay.x265.10bit.5 1ch(xxxpav69)\n💾 5.73 GB', 'Dreamcatcher.xxxpav69.mkv');
+  const remux = rd('Dreamcatcher.2003.1080p.BluRay.Remux.DTS-HD.5.1\n💾 31.57 GB', 'Dreamcatcher.Remux.mkv');
+  const rarbg = rd('Dreamcatcher.2003.1080p.BluRay.x265-RARBG\n💾 2.08 GB', null);
+  const avi = rd('43 Stephen King Movies\nDreamcatcher.avi\n💾 699.98 MB', 'Dreamcatcher.avi');
+  const pool = [elegida, checa, dts, remux, rarbg, avi].map((s, i) => ({ s, pts: 500 - i * 10 }));
+
+  test('la copia MP4 que sirve entra a la lista aunque sea del mismo contenedor', () => {
+    expect(candidatosRespaldo(elegida, pool, 'en')).toContain(rarbg.url);
+  });
+
+  test('primero las de otro contenedor, despues las del mismo', () => {
+    expect(candidatosRespaldo(elegida, pool, 'en')).toEqual([dts.url, rarbg.url]);
+  });
+
+  test('fuera: la elegida, la doblada a otro idioma, la de mas de 20 GB y el .avi', () => {
+    const lista = candidatosRespaldo(elegida, pool, 'en');
+    expect(lista).not.toContain(elegida.url);
+    expect(lista).not.toContain(checa.url);
+    expect(lista).not.toContain(remux.url);
+    expect(lista).not.toContain(avi.url);
+  });
+
+  test('respeta el maximo', () => {
+    expect(candidatosRespaldo(elegida, pool, 'en', 1)).toEqual([dts.url]);
   });
 });

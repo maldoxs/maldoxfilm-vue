@@ -1169,6 +1169,38 @@ export function pickOtroCandidatoAbrible(
   return alternativa ? alternativa.s : null;
 }
 
+/**
+ * candidatosRespaldo — las copias cacheadas para reintentar, en orden, cuando la elegida
+ * no abre. Primero las de otro contenedor y despues las del mismo, cada grupo en el
+ * orden del pool. El reproductor verifica cada una con `mediaInfos` antes de usarla.
+ *
+ * Caso "Dreamcatcher" (2026-11-16): el unico respaldo posible era UN archivo de otro
+ * contenedor, elegido por el nombre. La copia que servia, `x265-RARBG.mp4` (hevc + eng
+ * aac), nunca se probo por ser MP4 como la que fallo.
+ */
+export function candidatosRespaldo(
+  elegido: TorrentioStream,
+  pool: ScoredStream[],
+  idiomaOriginal: string | null = null,
+  max = 6
+): string[] {
+  const elegidoEsMkv = isMkv(elegido);
+  const sirven = pool.filter(
+    (p) =>
+      p.s !== elegido &&
+      !!p.s.url &&
+      p.s.url !== elegido.url &&
+      isCachedStream(p.s) &&
+      !esContenedorNoWeb(p.s) &&
+      !dobladoAIdiomaAjeno(p.s, idiomaOriginal) &&
+      // Mismo tope que la clase A: archivos enormes no arrancan a tiempo en la TV.
+      getGb(p.s) <= 20
+  );
+  const otroContenedor = sirven.filter((p) => isMkv(p.s) !== elegidoEsMkv);
+  const mismoContenedor = sirven.filter((p) => isMkv(p.s) === elegidoEsMkv);
+  return [...otroContenedor, ...mismoContenedor].slice(0, max).map((p) => p.s.url as string);
+}
+
 export function buildSelectedStream(params: {
   best: TorrentioStream;
   withUrl: TorrentioStream[];
@@ -1245,6 +1277,7 @@ export function buildSelectedStream(params: {
     hasLatinoTag: hasLatino(bestFinal),
       /** Otra copia cacheada, en distinto contenedor, para reintentar si el archivo no abre. */
     altOpenableUrl: otroAbrible?.url || null,
+    respaldos: pool ? candidatosRespaldo(active.activeBest, pool, params.idiomaOriginal ?? null) : [],
 };
 }
 

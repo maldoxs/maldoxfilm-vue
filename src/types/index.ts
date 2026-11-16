@@ -47,6 +47,8 @@ export interface SelectedStream {
    * null cuando no hay alternativa razonable.
    */
   altOpenableUrl?: string | null;
+  /** Copias cacheadas para reintentar en orden; cada una se verifica con mediaInfos antes. */
+  respaldos?: string[];
   imdbId: string | null;
   streamFilename: string | null;
   hasAAC: boolean;

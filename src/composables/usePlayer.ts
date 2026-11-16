@@ -724,12 +724,16 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       let huboDatos = false;
       const desde = Date.now();
       let tmo: ReturnType<typeof setTimeout>;
+      // Un intento abandonado no puede reaccionar a los eventos de la copia siguiente:
+      // sus oyentes quedan puestos y se disparaban con los metadatos del respaldo.
+      let abandonado = false;
       const limpiar = () => {
         clearTimeout(tmo);
         video.removeEventListener('progress', onProgress);
       };
       const abortar = () => {
         if (played) return;
+        abandonado = true;
         limpiar();
         const seg = ((Date.now() - desde) / 1000).toFixed(1);
         // Se distinguen los dos motivos, que llevan a arreglos distintos: si NUNCA llego
@@ -760,6 +764,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       video.addEventListener(
         'loadedmetadata',
         () => {
+          if (abandonado) return;
           limpiar();
           console.warn(`[RD] Direct Play: metadatos en ${((Date.now() - desde) / 1000).toFixed(1)}s`);
           if (video.duration && isFinite(video.duration) && video.duration > MIN_VALID_DURATION_SEC) {
@@ -804,6 +809,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
             opts.onStarted();
             resolve();
           } else {
+            abandonado = true;
             video.src = '';
             resolve();
           }
@@ -813,6 +819,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       video.addEventListener(
         'error',
         () => {
+          if (abandonado) return;
           limpiar();
           const seg = ((Date.now() - desde) / 1000).toFixed(1);
           // Si ya venía reproduciendo, esto NO es un archivo que el navegador no
@@ -823,6 +830,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
             recuperarEnlaceCortado(ultimaPosicionSeg);
             return;
           }
+          abandonado = true;
           motivoFalloDirecto = 'este reproductor no pudo abrir el archivo';
           console.warn(`[RD] Direct Play: error del <video> tras ${seg}s — se descarta`);
           video.src = '';
@@ -1942,7 +1950,11 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
             info.audio.map((a) => `${a.token}=${a.codec}`).join(', ') || 'sin pistas'
           }`
         );
-        if (hasNativeDecodableAudio(info, ac3Ok) === false) return 'su audio no se puede reproducir en este equipo';
+        // Se mira la PRIMERA pista, que es la que suena en reproduccion directa: la copia
+        // DTOne de "Dreamcatcher" trae DTS primero y AAC despues, y sonaria muda.
+        const primera = info.audio.slice(0, 1);
+        if (primera.length && hasNativeDecodableAudio({ ...info, audio: primera }, ac3Ok) === false)
+          return 'su primera pista de audio no se puede reproducir en este equipo';
         if (videoCodecUnplayableInBrowser(info)) return 'su video no se puede mostrar';
         if (videoNeedsHevcSupport(info) === true && !hevcOk) return 'su video es HEVC y este equipo no lo reproduce';
         if (posicionAudioPreferida(info, selected.idiomaOriginal).indice > 0) return 'la primera pista está en otro idioma';
@@ -1950,6 +1962,43 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       } catch {
         return '';
       }
+    };
+    // Respaldos en orden; los viejos registros guardados solo traen `altOpenableUrl`.
+    const listaRespaldos: string[] = selected.respaldos?.length
+      ? selected.respaldos
+      : selected.altOpenableUrl
+        ? [selected.altOpenableUrl]
+        : [];
+    const nombreDeUrl = (url: string): string => {
+      try {
+        return decodeURIComponent(url.split('/').pop() || url);
+      } catch {
+        return url;
+      }
+    };
+    // Prueba los respaldos en orden: verifica cada uno con RD y reproduce el primero que
+    // pasa y abre. Devuelve su URL, o null si ninguno sirvio.
+    const probarRespaldos = async (): Promise<string | null> => {
+      // Las verificaciones van en paralelo: cada una tarda lo que tarda RD en responder
+      // y en serie se sumaban. Despues se prueban en el orden de la lista.
+      const rechazos = await Promise.all(listaRespaldos.map((url) => motivoRechazoRespaldo(url)));
+      if (playerStore.isStale(myGen)) return null;
+      for (let i = 0; i < listaRespaldos.length; i++) {
+        const url = listaRespaldos[i];
+        const rechazo = rechazos[i];
+        if (rechazo) {
+          console.warn(`[RD] Respaldo descartado (${rechazo}): ${nombreDeUrl(url)}`);
+          continue;
+        }
+        console.warn(`[RD] Probando respaldo: ${nombreDeUrl(url)}`);
+        await _shakaDetachAndWait();
+        if (playerStore.isStale(myGen)) return null;
+        motivoFalloDirecto = '';
+        const abrio = await tryHevcDirectPlay(video, url, params.startPositionSec);
+        if (playerStore.isStale(myGen)) return null;
+        if (abrio) return url;
+      }
+      return null;
     };
     // Formato que el navegador no puede mostrar: se cambia de reproductor, igual que
     // cuando RD no tiene la pelicula. Caso real "Scrapbook" (2026-10-17): `Scrapbook
@@ -1972,26 +2021,14 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // "Frontier(s)", más abajo): una sola vez, con una copia de otro contenedor, ANTES
       // de reproducir nada. Si la alternativa tampoco abre, sigue al camino de siempre,
       // así que el peor resultado posible es el comportamiento anterior.
-      let otraPorCodec = selected.altOpenableUrl;
-      if (otraPorCodec) {
-        const rechazo = await motivoRechazoRespaldo(otraPorCodec);
-        if (playerStore.isStale(myGen)) return;
-        if (rechazo) {
-          console.warn(`[RD] Copia de respaldo descartada: ${rechazo}`);
-          otraPorCodec = null;
-        }
-      }
-      if (otraPorCodec) {
+      if (listaRespaldos.length) {
         console.warn(
           '[RD] Códec de video que el navegador no muestra → probando otra copia cacheada antes de cambiar de reproductor'
         );
         opts.onToast('⚠️ Copia en formato antiguo — probando otra copia...');
-        await _shakaDetachAndWait();
+        const otraPorCodec = await probarRespaldos();
         if (playerStore.isStale(myGen)) return;
-        motivoFalloDirecto = '';
-        const abrio = await tryHevcDirectPlay(video, otraPorCodec, params.startPositionSec);
-        if (playerStore.isStale(myGen)) return;
-        if (abrio) {
+        if (otraPorCodec) {
           const pistas = (video as HTMLVideoElement & { audioTracks?: AudioTrackListLike }).audioTracks;
           const diceLatino =
             /\blatino\b|\blat\b|dual.?lat|cinecalidad/i.test(streamFn || '') && !/castellano/i.test(streamFn || '');
@@ -2174,35 +2211,31 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // nada, disparado por un error concreto del <video>, y se intenta UNA sola vez. Si
       // la alternativa tampoco abre, se sigue al mismo camino de siempre, asi que el peor
       // resultado posible es el comportamiento actual.
-      let otraCopia = selected.altOpenableUrl;
-      if (!played && motivoFalloDirecto && otraCopia) {
-        const rechazo = await motivoRechazoRespaldo(otraCopia);
+      const motivoDeLaElegida = motivoFalloDirecto;
+      let otraCopia: string | null = null;
+      if (!played && motivoFalloDirecto && listaRespaldos.length) {
+        console.warn('[RD] El archivo no abrió — probando otras copias cacheadas antes de convertir');
+        otraCopia = await probarRespaldos();
         if (playerStore.isStale(myGen)) return;
-        if (rechazo) {
-          console.warn(`[RD] Copia de respaldo descartada: ${rechazo} → se convierte la elegida`);
-          otraCopia = null;
-        }
+        // Si ningun respaldo sirvio, el aviso en pantalla explica por que fallo la elegida.
+        if (!otraCopia) motivoFalloDirecto = motivoDeLaElegida;
       }
-      if (!played && motivoFalloDirecto && otraCopia) {
-        console.warn('[RD] El archivo no abrió — probando otra copia cacheada antes de convertir');
-        await _shakaDetachAndWait();
-        if (playerStore.isStale(myGen)) return;
-        motivoFalloDirecto = '';
-        const played2 = await tryHevcDirectPlay(video, otraCopia, params.startPositionSec);
-        if (played2) {
-          const pistas2 = (video as HTMLVideoElement & { audioTracks?: AudioTrackListLike }).audioTracks;
-          const enEspanol2 =
-            pistas2 && pistas2.length ? applyPreferredAudioTrack(pistas2, nombreDiceLatino, audioSegunRd) : null;
-          console.warn('[RD] ✅ La otra copia SÍ abrió — reproducción directa, sin convertir');
-          opts.onStreamReady?.({
-            selected,
-            hasNativeSpanish: enEspanol2 ?? false,
-            spanishTrack: null,
-          });
-          startStallMonitor(video, myGen, recoverReloadSrc(otraCopia));
-          isLoadingRd.value = false;
-          return;
-        }
+      if (otraCopia) {
+        const pistas2 = (video as HTMLVideoElement & { audioTracks?: AudioTrackListLike }).audioTracks;
+        // Mismo criterio que el otro respaldo: el orden de pistas de RD medido sobre la
+        // elegida no vale para otro archivo. El respaldo ya se verifico con su propia
+        // primera pista en el idioma correcto.
+        const enEspanol2 =
+          pistas2 && pistas2.length ? applyPreferredAudioTrack(pistas2, nombreDiceLatino, null) : null;
+        console.warn('[RD] ✅ La otra copia SÍ abrió — reproducción directa, sin convertir');
+        opts.onStreamReady?.({
+          selected,
+          hasNativeSpanish: enEspanol2 ?? false,
+          spanishTrack: null,
+        });
+        startStallMonitor(video, myGen, recoverReloadSrc(otraCopia));
+        isLoadingRd.value = false;
+        return;
       }
 
       // Avisar POR QUE se deja la reproduccion directa. Antes pasaba en silencio a
