@@ -1,4 +1,49 @@
 /**
+ * ╔══════════════════════════════════════════════════════════════════════════╗
+ * ║  REGLA DE SELECCIÓN — la única. Leerla antes de tocar cualquier peso.    ║
+ * ╚══════════════════════════════════════════════════════════════════════════╝
+ *
+ *   0. DESCARTES        basura (sample/trailer/<50 MB) · idioma incompatible
+ *                       sin ES/EN y que NO es el original · grabación de cine
+ *
+ *   1. CLASE            manda SOBRE el puntaje (`playbackClass`)
+ *      A  cacheada en RD + no necesita conversión + no es baja resolución +
+ *         no supera 20 GB + el navegador abre ese contenedor + no está
+ *         doblada a un idioma ajeno
+ *      B  cacheada pero necesita conversión
+ *      C  no cacheada
+ *
+ *   2. PUNTAJE          solo desempata DENTRO de la misma clase (`scoreStream`)
+ *
+ *   3. IDIOMA           latino +200 (+60 si va primero) · ORIGINAL +80 ·
+ *                       inglés +10 · doblada a idioma ajeno -120 ·
+ *                       NUNCA castellano de España
+ *
+ *   4. ADR-010          el códec REAL de `mediaInfos` manda sobre el nombre
+ *
+ * ── Por qué la clase A tiene exclusiones puestas a mano ──────────────────────
+ *
+ * Clase A significa "se ve bien SIN INTERVENCIÓN". Si la intervención que haría
+ * falta es imposible, no es clase A, por bien que puntúe.
+ *
+ * Y hay una trampa que ya costó dos veces (2026-11-15): la clase se decide POR
+ * DESCARTE —"si nada en el nombre dice que necesita conversión, se asume que no
+ * la necesita"—, y eso PREMIA AL RELEASE QUE OCULTA LO QUE TRAE.
+ *
+ *   Cats Eye.avi      no declara códec → clase A · por dentro mpeg4, no se ve
+ *   granica720p.mkv   no declara códec → clase A · doblaje ruso como 1ra pista
+ *   ...FRENCH...x265  declara x265     → clase B · era la copia correcta
+ *
+ * Por eso cada vez que aparece algo que no se puede ver o no se puede oír y el
+ * nombre no lo delata, se saca de la clase A explícitamente. Si mañana aparece
+ * otro caso de esa familia, el arreglo va ahí, no en el puntaje: un castigo de
+ * puntos no mueve nada cuando la clase ya decidió.
+ *
+ * ── Antes de cambiar un peso ─────────────────────────────────────────────────
+ * Correr el selector sobre las copias REALES del log y comparar el orden antes
+ * y después. El castigo de -120 al doblaje ajeno no movió absolutamente nada
+ * hasta que además se lo sacó de la clase A, y eso solo se vio midiendo.
+ *
  * streamSelector — la cascada de selección de streams de Real-Debrid/Torrentio.
  *
  * Extraído 1:1 desde `rdGetStream()` en assets/index.html (líneas ~4707-4919).
