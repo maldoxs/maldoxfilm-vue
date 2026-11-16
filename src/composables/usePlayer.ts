@@ -1895,6 +1895,8 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // Orden de las pistas de audio segun Real-Debrid, para el respaldo por
     // posicion de `applyPreferredAudioTrack` (ver su nota).
     let audioSegunRd: { indice: number; esEspanol: boolean; totalPistas: number } | null = null;
+    // Una sola vez por carga: si la conversión tampoco da la pista, no se insiste.
+    let yaFuiAPedirLaPista = false;
     if (rdId) {
       try {
         const info = parseMediaInfos(await opts.rdClient.fetchMediaInfos(rdId));
@@ -2029,6 +2031,50 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
               sonandoEnEspanol ? 'activada la de español' : 'sin pista en español, queda el idioma original'
             }`
           );
+        }
+
+        // ── El equipo no deja elegir la pista: ir a conversion a pedirla ──────────
+        // Caso real "Frontier(s)" (2026-11-15, log de la TV). Pelicula francesa. La
+        // copia trae `rus1=ac3, fre1=dts`, o sea el doblaje ruso PRIMERO y el frances
+        // original segundo. En reproduccion directa suena la primera, y el televisor
+        // expone UNA sola pista (`Direct Play: 1 pistas de audio`), asi que
+        // `applyPreferredAudioTrack` no tiene nada que cambiar: la pelicula francesa
+        // sonaba en ruso.
+        //
+        // No se arregla eligiendo otra copia: la rusa era la unica cacheada en la
+        // cuenta, y la clase de reproduccion manda sobre el puntaje, asi que ninguna
+        // penalizacion la saca de ahi. La unica via es pedirle la pista a Real-Debrid,
+        // y eso es el pipeline /t/, que SI selecciona pista por nombre.
+        //
+        // Deliberadamente acotado, porque convertir puede cortar y hasta ahora en TV
+        // no se convertia por audio: solo cuando el archivo tiene mas de una pista,
+        // la que corresponde NO es la primera, y el navegador expone menos pistas de
+        // las que el archivo tiene (o sea, no hay forma de cambiarla). Si algo de eso
+        // no se cumple, sigue el camino de siempre.
+        const expuestas = pistas?.length ?? 0;
+        const noSePuedeElegir =
+          !!audioSegunRd &&
+          audioSegunRd.indice > 0 &&
+          audioSegunRd.totalPistas > 1 &&
+          expuestas < audioSegunRd.totalPistas &&
+          !!rdId;
+        if (noSePuedeElegir && !yaFuiAPedirLaPista) {
+          yaFuiAPedirLaPista = true;
+          console.warn(
+            `[RD] Este equipo expone ${expuestas} de ${audioSegunRd!.totalPistas} pistas y la que corresponde es la ${
+              audioSegunRd!.indice + 1
+            } → pidiendosela a RD por conversión`
+          );
+          opts.onToast('🔊 Buscando la pista de audio correcta...');
+          const desde = Math.max(video.currentTime, params.startPositionSec ?? 0);
+          const conPista = await tryTpipeline({ video, rdId, myGen, selected, streamFn, startPositionSec: desde });
+          if (conPista) {
+            isLoadingRd.value = false;
+            return;
+          }
+          // Si la conversion no sale, se vuelve al camino de siempre: antes
+          // reproduciendo en el idioma que sea que quedarse sin imagen.
+          console.warn('[RD] La conversión no salió → se sigue con la reproducción directa');
         }
 
         // Que idioma suena DE VERDAD. Manda lo que informa el propio <video>; si no
