@@ -271,6 +271,13 @@ const ORIGINAL_LANG_MARKS: Record<string, RegExp> = {
   pl: /\bpol\b|\bpolish\b|\blektor\b|\bnapisy\b|🇵🇱/i,
   tr: /\btur\b|\bturkish\b|🇹🇷/i,
   uk: /\bukr\b|\bukrainian\b/i,
+  // "Dreamcatcher" (2003): `(English-CZ) PHDTeam .mkv` traia el checo como 1ra pista y,
+  // sin esta marca, pasaba por copia limpia en ingles.
+  cs: /\bcz\b|\bcze\b|\bces\b|\bczech\b|🇨🇿/i,
+  hu: /\bhun\b|\bhungarian\b|🇭🇺/i,
+  sv: /\bswe\b|\bswedish\b|🇸🇪/i,
+  hi: /\bhin\b|\bhindi\b|🇮🇳/i,
+  ar: /\bara\b|\barabic\b/i,
 };
 
 /**
@@ -1139,14 +1146,25 @@ export function resolveActiveStream(
  * Se prefiere un CONTENEDOR distinto al que acaba de fallar: si el navegador no pudo con
  * un MKV, reintentar con otro MKV no tiene sentido. Devuelve null cuando no hay nada
  * razonable que probar, y entonces el comportamiento queda igual que antes.
+ *
+ * La alternativa tampoco puede venir doblada a un idioma ajeno: en reproduccion directa
+ * suena la primera pista y nadie la corrige. Caso "Dreamcatcher": la MP4 en ingles tardo
+ * 13 s en abrir y el respaldo fue `(English-CZ) PHDTeam .mkv`, que sono en checo. Sin
+ * alternativa limpia se va a conversion, donde la pista de audio si se elige.
  */
 export function pickOtroCandidatoAbrible(
   elegido: TorrentioStream,
-  pool: ScoredStream[]
+  pool: ScoredStream[],
+  idiomaOriginal: string | null = null
 ): TorrentioStream | null {
   const elegidoEsMkv = isMkv(elegido);
   const alternativa = pool.find(
-    (p) => p.s !== elegido && !!p.s.url && isCachedStream(p.s) && isMkv(p.s) !== elegidoEsMkv
+    (p) =>
+      p.s !== elegido &&
+      !!p.s.url &&
+      isCachedStream(p.s) &&
+      isMkv(p.s) !== elegidoEsMkv &&
+      !dobladoAIdiomaAjeno(p.s, idiomaOriginal)
   );
   return alternativa ? alternativa.s : null;
 }
@@ -1160,6 +1178,8 @@ export function buildSelectedStream(params: {
   streamFilename: string;
   infoHash: string;
   imdbId: string | null;
+  /** Idioma original segun TMDB, para que la alternativa no salga doblada a otro idioma. */
+  idiomaOriginal?: string | null;
   active: ActiveStreamMatch & {
     rdId: string | null;
     rdDownloadUrl: string | null;
@@ -1181,7 +1201,7 @@ export function buildSelectedStream(params: {
   let finalUrl: string | null = resolvedUrlFinal !== bestFinal.url ? resolvedUrlFinal : (bestFinal.url || resolvedUrl);
   const finalHash = extractInfoHash(bestFinal) || infoHash || '';
   const fallbackUrl = pickFallbackUrl(best, withUrl);
-  const otroAbrible = pool ? pickOtroCandidatoAbrible(active.activeBest, pool) : null;
+  const otroAbrible = pool ? pickOtroCandidatoAbrible(active.activeBest, pool, params.idiomaOriginal ?? null) : null;
 
   // GUARD anti-basura final: si el stream que quedó elegido es un sample/test
   // (no se encontró alternativa real), NO entregar su URL → evita que se

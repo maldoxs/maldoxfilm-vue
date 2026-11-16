@@ -1441,3 +1441,59 @@ describe('"Cat\'s Eye" — un .avi no puede ganarle a una copia reproducible', (
     expect(scoreStream(mp4)).toBeGreaterThan(scoreStream(avi));
   });
 });
+
+// Caso real "Dreamcatcher" (2003), log de la TV del 2026-11-16: el selector eligio bien la
+// MP4 en ingles, pero tardo 13 s en abrir (el limite es 10 s) y entro como respaldo
+// `(English-CZ) PHDTeam .mkv`. Segun mediaInfos de RD su 1ra pista es checo (cze1=ac3,
+// eng1=ac3), y en reproduccion directa suena la primera: la pelicula se oyo en checo.
+// El checo no estaba entre las marcas de idioma, asi que esa copia pasaba por limpia.
+describe('"Dreamcatcher" — el checo cuenta como doblaje y el respaldo no puede traerlo', () => {
+  const checa = stream({
+    name: '[RD+] Torrentio\n1080p',
+    title:
+      'Dreamcatcher (2003)(Mastered)(FHD)(x264)(1080p)(BluRay)(English-CZ) PHDTeam\n👤 4 💾 2.7 GB ⚙️ TorrentGalaxy\n🇬🇧 / 🇨🇿',
+    behaviorHints: { filename: 'Dreamcatcher (2003)(FHD)(x264)(1080p)(BluRay)(English-CZ) PHDTeam .mkv' },
+  });
+  const mp4Ingles = stream({
+    name: '[RD+] Torrentio\n1080p',
+    title:
+      'Dreamcatcher - Horror 2003 Eng Rus Ukr Multi Subs 1080p [H264-mp4]\n👤 1 💾 11.2 GB ⚙️ 1337x\nMulti Subs / 🇬🇧 / 🇷🇺 / 🇺🇦',
+    behaviorHints: { filename: 'Dreamcatcher - Horror 2003 Eng Rus Ukr Multi Subs 1080p [H264-mp4].mp4' },
+  });
+  const av1 = stream({
+    name: '[RD+] Torrentio\n1080p',
+    title: 'Dreamcatcher 2003 1080p Bluray OPUS 5 1 AV1-WhiskeyJack\n👤 1 💾 1.87 GB ⚙️ ThePirateBay',
+    behaviorHints: { filename: 'Dreamcatcher 2003 1080p Bluray OPUS 5 1 AV1-WhiskeyJack.mkv' },
+  });
+
+  test('"English-CZ" se reconoce como doblaje ajeno y sale de la clase A', () => {
+    expect(dobladoAIdiomaAjeno(checa, 'en')).toBe(true);
+    expect(playbackClass(checa, 'en')).toBe(1);
+  });
+
+  test('la MP4 en ingles queda primera', () => {
+    expect(rankStreams([checa, mp4Ingles, av1], true, 'en').pool[0].s).toBe(mp4Ingles);
+  });
+
+  test('si la MP4 no abre, el respaldo NO es la copia checa', () => {
+    const pool = [
+      { s: mp4Ingles, pts: 423 },
+      { s: checa, pts: 375 },
+      { s: av1, pts: 365 },
+    ];
+    expect(pickOtroCandidatoAbrible(mp4Ingles, pool, 'en')).toBe(av1);
+  });
+
+  test('sin respaldo limpio no se ofrece ninguno (se va a conversion)', () => {
+    const pool = [
+      { s: mp4Ingles, pts: 423 },
+      { s: checa, pts: 375 },
+    ];
+    expect(pickOtroCandidatoAbrible(mp4Ingles, pool, 'en')).toBe(null);
+  });
+
+  test('una pelicula checa en checo no se castiga: es el idioma original', () => {
+    expect(dobladoAIdiomaAjeno(checa, 'cs')).toBe(false);
+    expect(isOriginalLanguageCopy(checa, 'cs')).toBe(true);
+  });
+});

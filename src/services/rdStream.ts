@@ -245,6 +245,7 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
         streamFilename,
         infoHash,
         imdbId,
+        idiomaOriginal: originalLanguage,
         active,
       });
 
@@ -299,6 +300,7 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
                 streamFilename,
                 infoHash,
                 imdbId,
+                idiomaOriginal: originalLanguage,
                 active: active2,
               });
             }
