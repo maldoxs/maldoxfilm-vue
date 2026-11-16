@@ -35,6 +35,7 @@ import {
   detailRuntimeLabel,
   detailTypeBadge,
   buildDetailStats,
+  creditoDeEquipo,
   episodeDisplayName,
   seasonTabLabel,
   type CastMember,
@@ -85,7 +86,7 @@ interface DetailData {
   poster_path?: string | null;
   origin_country?: string[];
   genres?: { id: number; name: string }[];
-  credits?: { cast?: CastMember[] };
+  credits?: { cast?: CastMember[]; crew?: { job?: string | null; name?: string | null }[] };
   videos?: { results?: VideoResult[] };
   recommendations?: { results?: MediaItem[] };
   similar?: { results?: MediaItem[] };
@@ -200,6 +201,9 @@ const stats = computed(() =>
     numberOfSeasons: data.value?.number_of_seasons,
     numberOfEpisodes: data.value?.number_of_episodes,
     status: data.value?.status,
+    direccion: creditoDeEquipo(data.value?.credits?.crew, ['Director']),
+    // TMDB reparte la escritura en varios puestos segun el caso.
+    escritura: creditoDeEquipo(data.value?.credits?.crew, ['Writer', 'Screenplay', 'Story', 'Author']),
   })
 );
 

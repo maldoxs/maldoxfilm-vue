@@ -396,8 +396,12 @@ export function buildDetailStats(opts: {
   numberOfSeasons?: number | null;
   numberOfEpisodes?: number | null;
   status?: string | null;
+  /** Nombre(s) de dirección y escritura, ya resueltos (ver `creditoDeEquipo`). */
+  direccion?: string | null;
+  escritura?: string | null;
 }): DetailStat[] {
   const { rating, year, isTV, runtime, voteCount, numberOfSeasons, numberOfEpisodes, status } = opts;
+  const { direccion, escritura } = opts;
   const stats: DetailStat[] = [
     { l: 'Puntuación', v: rating, g: true },
     { l: 'Año', v: year || '—' },
@@ -408,7 +412,38 @@ export function buildDetailStats(opts: {
   if (isTV && numberOfSeasons) stats.push({ l: 'Temporadas', v: numberOfSeasons });
   if (isTV && numberOfEpisodes) stats.push({ l: 'Episodios', v: numberOfEpisodes });
   if (status) stats.push({ l: 'Estado', v: status });
+  // Dirección y escritura van al final para no mover de lugar nada de lo que ya
+  // estaba, y solo aparecen cuando TMDB trae el dato.
+  if (direccion) stats.push({ l: 'Dirección', v: direccion });
+  if (escritura) stats.push({ l: 'Escritura', v: escritura });
   return stats;
+}
+
+/**
+ * creditoDeEquipo — los nombres de un puesto del equipo técnico, sin repetir y
+ * como máximo dos, separados por coma.
+ *
+ * Dos porque es lo que entra sin romper la grilla: una película con cuatro
+ * guionistas desbordaba la celda. En cine es habitual que dirección y escritura
+ * sean la misma persona (Xavier Gens en *Frontera(s)*), así que se repite el
+ * nombre en las dos celdas a propósito: cada una responde su pregunta.
+ *
+ * Para series, TMDB no suele traer `crew` en el detalle, así que devuelve null y
+ * la fila simplemente no aparece.
+ */
+export function creditoDeEquipo(
+  crew: { job?: string | null; name?: string | null }[] | null | undefined,
+  puestos: string[]
+): string | null {
+  if (!Array.isArray(crew)) return null;
+  const nombres: string[] = [];
+  for (const p of crew) {
+    const job = (p?.job || '').toLowerCase();
+    if (!puestos.some((x) => x.toLowerCase() === job)) continue;
+    const nombre = (p?.name || '').trim();
+    if (nombre && !nombres.includes(nombre)) nombres.push(nombre);
+  }
+  return nombres.length ? nombres.slice(0, 2).join(', ') : null;
 }
 
 /** episodeDisplayName — preserva `ep.name||\`Episodio ${ep.episode_number}\`` (línea ~9020). */

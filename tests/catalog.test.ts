@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import {
+  creditoDeEquipo,
   posterSize,
   buildPosterUrl,
   escapeHtml,
@@ -290,5 +291,42 @@ describe('episodeDisplayName / seasonTabLabel (preservados de líneas ~9020/8985
     expect(seasonTabLabel(1, 1)).toBe('Episodios');
     expect(seasonTabLabel(1, 3)).toBe('Temp. 1');
     expect(seasonTabLabel(2, 3)).toBe('Temp. 2');
+  });
+});
+
+// ── Dirección y escritura en la ficha (2026-11-15) ─────────────────────────────
+// TMDB ya traía `credits` en la misma llamada del detalle, pero solo se usaba el
+// reparto. El equipo técnico venía en `credits.crew` sin usar.
+describe('creditoDeEquipo', () => {
+  const crew = [
+    { job: 'Director', name: 'Xavier Gens' },
+    { job: 'Writer', name: 'Xavier Gens' },
+    { job: 'Director of Photography', name: 'Laurent Barès' },
+    { job: 'Producer', name: 'Laurent Tolleron' },
+  ];
+
+  test('caso real "Frontera(s)": dirige y escribe la misma persona', () => {
+    expect(creditoDeEquipo(crew, ['Director'])).toBe('Xavier Gens');
+    expect(creditoDeEquipo(crew, ['Writer', 'Screenplay', 'Story', 'Author'])).toBe('Xavier Gens');
+  });
+
+  test('junta los puestos de escritura que TMDB reparte, sin repetir nombres', () => {
+    const varios = [
+      { job: 'Screenplay', name: 'Ana Ruiz' },
+      { job: 'Story', name: 'Ana Ruiz' },
+      { job: 'Writer', name: 'Juan Pérez' },
+    ];
+    expect(creditoDeEquipo(varios, ['Writer', 'Screenplay', 'Story'])).toBe('Ana Ruiz, Juan Pérez');
+  });
+
+  test('como mucho dos nombres: con cuatro guionistas la celda se desbordaba', () => {
+    const muchos = [1, 2, 3, 4].map((n) => ({ job: 'Writer', name: `Guionista ${n}` }));
+    expect(creditoDeEquipo(muchos, ['Writer'])).toBe('Guionista 1, Guionista 2');
+  });
+
+  test('sin equipo técnico devuelve null y la fila no se muestra', () => {
+    expect(creditoDeEquipo(undefined, ['Director'])).toBeNull();
+    expect(creditoDeEquipo([], ['Director'])).toBeNull();
+    expect(creditoDeEquipo([{ job: 'Producer', name: 'X' }], ['Director'])).toBeNull();
   });
 });
