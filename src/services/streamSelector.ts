@@ -401,6 +401,7 @@ export const isCinemaLeakSource = (s: TorrentioStream): boolean => CINEMA_LEAK_R
  *   P4 Tamaño:             2-8GB +40 · <2GB +20 · 8-12GB 0 · 12-20GB -40 · >20GB -100
  *   P5 Resolución:         1080p +20 · 720p +10 · 4K -40 (TV -100)   (4K pesa, no ayuda)
  *   P6 Idioma:             SPA/Latino +25 · ENG +10   (desempate, NO sobre compat)
+ *                          copia en el idioma ORIGINAL +80
  *                          doblada a idioma ajeno (ni ES, ni EN, ni original) -120
  *   P7 Contenedor:         MP4 +8 · MKV -5   (BONUS MENOR — un MP4 puede traer H265)
  *   Descarte (-10000):     basura (sample/test) · idioma incompatible (ITA/KOR sin ENG/SPA)
@@ -569,10 +570,20 @@ export function scoreStream(
     if (latinoListedFirst(s)) pts += 60;
   } else {
     pts += directPlay ? 10 : 5;
+    // Sin español, la copia en el IDIOMA ORIGINAL es la que corresponde: es la
+    // película como se hizo, no un doblaje. Hasta el 2026-11-15 el idioma original
+    // solo servía para NO descartarla (ver `isOriginalLanguageCopy`, 9150411), pero
+    // no sumaba nada, así que perdía por puntaje bruto contra cualquier copia que
+    // no declarara idioma.
+    //
+    // Caso real "Frontier(s)": la copia francesa MP4 cacheada —la que el 17-10 se
+    // identificó como la correcta y con la que la película andaba bien— quedaba
+    // tercera detrás de un MKV con DTS que el `<video>` ya había rechazado con error
+    // ese mismo día. +80 alcanza para dar vuelta esa diferencia (398 contra 467) y
+    // sigue siendo chico frente al +200 del latino, que manda cuando existe.
+    if (isOriginalLanguageCopy(s, idiomaOriginal)) pts += 80;
     // Doblada a un idioma que no es español, ni inglés, ni el original: pierde
     // contra una copia limpia. Ver `dobladoAIdiomaAjeno` (caso "Frontier(s)").
-    // -120 alcanza para que no le gane a una copia sana y es chico al lado del
-    // +400 de cacheada, así que no da vuelta la prioridad de reproducción.
     if (dobladoAIdiomaAjeno(s, idiomaOriginal)) pts -= 120;
   }
 
@@ -645,15 +656,27 @@ export const playsWithoutConversion = (s: TorrentioStream): boolean =>
  */
 const MAX_CLASS_A_GB = 20;
 
-export function playbackClass(s: TorrentioStream): 0 | 1 | 2 {
+export function playbackClass(s: TorrentioStream, idiomaOriginal: string | null = null): 0 | 1 | 2 {
   if (!isCachedStream(s)) return 0;
+  // Una copia doblada a un idioma ajeno NO es clase A, por bien que se reproduzca.
+  // La clase A significa "se ve bien sin intervención", y acá la intervención que
+  // haría falta —cambiar la pista de audio— es justo la que no se puede hacer: en
+  // reproducción directa suena la primera pista y el televisor expone una sola.
+  //
+  // Caso real "Frontier(s)" (2026-11-15): `granica720p.mkv`, doblaje ruso primero y
+  // francés segundo, entraba a clase A sólo porque su nombre no declara ningún códec,
+  // mientras la copia francesa, que declara honestamente x265, bajaba a clase B. El
+  // release que oculta lo que trae le ganaba al que lo declara.
+  if (dobladoAIdiomaAjeno(s, idiomaOriginal)) return 1;
   if (playsWithoutConversion(s) && !declaresLowRes(s) && getGb(s) <= MAX_CLASS_A_GB) return 2;
   return 1;
 }
 
 /** Orden vigente: primero la CLASE de reproducción, después el puntaje. */
-const porClaseYPuntaje = (a: ScoredStream, b: ScoredStream): number =>
-  playbackClass(b.s) - playbackClass(a.s) || b.pts - a.pts;
+const porClaseYPuntaje =
+  (idiomaOriginal: string | null = null) =>
+  (a: ScoredStream, b: ScoredStream): number =>
+    playbackClass(b.s, idiomaOriginal) - playbackClass(a.s, idiomaOriginal) || b.pts - a.pts;
 
 /**
  * rankStreams — ordena por CLASE de reproducción y, dentro de cada clase, por puntaje
@@ -691,14 +714,14 @@ export function rankStreams(
   const scored = withUrl
     .map((s) => ({ s, pts: scoreStream(s, isTv, false, idiomaOriginal) }))
     .filter((x) => x.pts > -5000)
-    .sort(porClaseYPuntaje);
+    .sort(porClaseYPuntaje(idiomaOriginal));
 
   if (scored.length) return { withUrl, scored, pool: scored };
 
   const sinFiltroDeIdioma = withUrl
     .map((s) => ({ s, pts: scoreStream(s, isTv, true, idiomaOriginal) }))
     .filter((x) => x.pts > -5000) // la basura (sample/trailer) sigue fuera
-    .sort(porClaseYPuntaje);
+    .sort(porClaseYPuntaje(idiomaOriginal));
   const pool = sinFiltroDeIdioma.length ? sinFiltroDeIdioma : withUrl.map((s) => ({ s, pts: 0 }));
   return { withUrl, scored, pool };
 }

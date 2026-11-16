@@ -1332,6 +1332,55 @@ describe('"Frontier(s)" — una copia doblada no le gana a una limpia', () => {
     expect(scoreStream(rusa, false, false, null)).toBe(-10000);
   });
 
+  test('la rusa deja de ser clase A: no se ve bien sin poder cambiar la pista', () => {
+    const rusaCacheada = stream({
+      name: '[RD+] Torrentio\n720p',
+      title: 'Граница / Frontière(s) / Frontier(s) [2007 BDRip 720p] Dub + Original Fra\n👤 3 💾 4.65 GB ⚙️ Rutracker\n🇷🇺 / 🇫🇷',
+      behaviorHints: { filename: 'granica720p.mkv' },
+    });
+    expect(playbackClass(rusaCacheada, 'fr')).toBe(1);
+    // Sin el dato del idioma original tampoco es clase A: ahí ni el francés se
+    // reconoce como el idioma de la película, así que cuenta como ajeno. Es
+    // coherente con la regla que ya existía: sin ese dato, una copia francesa se
+    // descarta directamente (ver `isOriginalLanguageCopy`, 9150411).
+    expect(playbackClass(rusaCacheada)).toBe(1);
+  });
+
+  test('gana la copia FRANCESA cacheada, que es la que andaba bien el 17-10', () => {
+    // Las cinco copias cacheadas reales del log del 2026-11-15.
+    const dts = stream({
+      name: '[RD+] Torrentio\n1080p',
+      title: 'Frontier(s).(2007).1080p.BrRip.x264.DTS.[TuGAZx]\n👤 3 💾 3.23 GB ⚙️ ThePirateBay',
+      behaviorHints: { filename: 'Frontier(s).(2007).1080p.BrRip.5.1.x264.DTS.[TuGAZx].mkv' },
+    });
+    const francesaMp4 = stream({
+      name: '[RD+] Torrentio\n1080p',
+      title: 'Frontiers.2007.FRENCH.UNCUT.1080p.BluRay.x265-VXT\n👤 6 💾 1.68 GB ⚙️ RARBG\n🇫🇷',
+      behaviorHints: { filename: 'Frontiers.2007.FRENCH.UNCUT.1080p.BluRay.x265-VXT.mp4' },
+    });
+    const rusaCacheada = stream({
+      name: '[RD+] Torrentio\n720p',
+      title: 'Граница / Frontière(s) / Frontier(s) [2007 BDRip 720p] Dub + Original Fra\n👤 3 💾 4.65 GB ⚙️ Rutracker\n🇷🇺 / 🇫🇷',
+      behaviorHints: { filename: 'granica720p.mkv' },
+    });
+    const elegida = rankStreams([dts, rusaCacheada, francesaMp4], false, 'fr').pool[0].s;
+    expect(elegida).toBe(francesaMp4);
+  });
+
+  test('el bono de idioma original no le gana al latino, que sigue mandando', () => {
+    const francesaOriginal = stream({
+      name: '[RD+] Torrentio\n1080p',
+      title: 'Frontiers.2007.FRENCH.1080p.BluRay.x264.AAC 💾 3 GB\n🇫🇷',
+      behaviorHints: { filename: 'Frontiers.2007.FRENCH.1080p.BluRay.x264.AAC.mp4' },
+    });
+    const latina = stream({
+      name: '[RD+] Torrentio\n1080p',
+      title: 'Frontiers 2007 1080p Dual-Lat x264 AAC 💾 3 GB',
+      behaviorHints: { filename: 'Frontiers.2007.1080p.Dual-Lat.x264.AAC.mp4' },
+    });
+    expect(scoreStream(latina, false, false, 'fr')).toBeGreaterThan(scoreStream(francesaOriginal, false, false, 'fr'));
+  });
+
   test('una copia con español NO se castiga aunque traiga otros idiomas', () => {
     const latina = stream({
       name: 'Torrentio\n1080p',
