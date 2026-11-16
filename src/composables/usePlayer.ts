@@ -1926,6 +1926,31 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     const audioSirve = realAudioOk !== null ? realAudioOk : !hasBadAudio;
     const videoSirve =
       !videoNoReproducible && (realIsHevc !== null ? !realIsHevc || hevcOk : !streamIsX265 || hevcOk);
+    // La copia de respaldo pasa por el mismo control de codec e idioma reales que la
+    // elegida. Caso "Dreamcatcher": el respaldo `x265.10bit.5,1ch(xxxpav69).mkv` no
+    // declaraba audio y por dentro era solo DTS; la TV abrio la imagen sin sonido.
+    // Devuelve el motivo del rechazo, o '' si sirve o si RD no da el dato (como antes).
+    const motivoRechazoRespaldo = async (url: string): Promise<string> => {
+      try {
+        const resuelta = await opts.rdClient.resolveProxyUrl(url);
+        const nombre = decodeURIComponent(url.split('/').pop() || '') || null;
+        const match = await opts.rdClient.findDownloadMatch(resuelta, url, nombre);
+        if (!match?.id) return '';
+        const info = parseMediaInfos(await opts.rdClient.fetchMediaInfos(match.id));
+        console.warn(
+          `[RD] Respaldo, códec REAL → video: ${info.videoCodec ?? 'desconocido'} | audio: ${
+            info.audio.map((a) => `${a.token}=${a.codec}`).join(', ') || 'sin pistas'
+          }`
+        );
+        if (hasNativeDecodableAudio(info, ac3Ok) === false) return 'su audio no se puede reproducir en este equipo';
+        if (videoCodecUnplayableInBrowser(info)) return 'su video no se puede mostrar';
+        if (videoNeedsHevcSupport(info) === true && !hevcOk) return 'su video es HEVC y este equipo no lo reproduce';
+        if (posicionAudioPreferida(info, selected.idiomaOriginal).indice > 0) return 'la primera pista está en otro idioma';
+        return '';
+      } catch {
+        return '';
+      }
+    };
     // Formato que el navegador no puede mostrar: se cambia de reproductor, igual que
     // cuando RD no tiene la pelicula. Caso real "Scrapbook" (2026-10-17): `Scrapbook
     // 2000.avi`, unica copia del catalogo, con video MPEG-4 Parte 2. Convertirlo es
@@ -1947,7 +1972,15 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // "Frontier(s)", más abajo): una sola vez, con una copia de otro contenedor, ANTES
       // de reproducir nada. Si la alternativa tampoco abre, sigue al camino de siempre,
       // así que el peor resultado posible es el comportamiento anterior.
-      const otraPorCodec = selected.altOpenableUrl;
+      let otraPorCodec = selected.altOpenableUrl;
+      if (otraPorCodec) {
+        const rechazo = await motivoRechazoRespaldo(otraPorCodec);
+        if (playerStore.isStale(myGen)) return;
+        if (rechazo) {
+          console.warn(`[RD] Copia de respaldo descartada: ${rechazo}`);
+          otraPorCodec = null;
+        }
+      }
       if (otraPorCodec) {
         console.warn(
           '[RD] Códec de video que el navegador no muestra → probando otra copia cacheada antes de cambiar de reproductor'
@@ -2141,7 +2174,15 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       // nada, disparado por un error concreto del <video>, y se intenta UNA sola vez. Si
       // la alternativa tampoco abre, se sigue al mismo camino de siempre, asi que el peor
       // resultado posible es el comportamiento actual.
-      const otraCopia = selected.altOpenableUrl;
+      let otraCopia = selected.altOpenableUrl;
+      if (!played && motivoFalloDirecto && otraCopia) {
+        const rechazo = await motivoRechazoRespaldo(otraCopia);
+        if (playerStore.isStale(myGen)) return;
+        if (rechazo) {
+          console.warn(`[RD] Copia de respaldo descartada: ${rechazo} → se convierte la elegida`);
+          otraCopia = null;
+        }
+      }
       if (!played && motivoFalloDirecto && otraCopia) {
         console.warn('[RD] El archivo no abrió — probando otra copia cacheada antes de convertir');
         await _shakaDetachAndWait();
