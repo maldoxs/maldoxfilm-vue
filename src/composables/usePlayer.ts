@@ -2000,6 +2000,27 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       }
       return null;
     };
+    // Deja corriendo un respaldo que ya abrio: pista de audio, aviso al panel y vigilancia.
+    // El orden de pistas de RD medido sobre la elegida no vale para otro archivo; el
+    // respaldo ya se verifico con su propia primera pista en el idioma correcto.
+    const arrancarRespaldo = (url: string, diceLatino: boolean) => {
+      const pistasR = (video as HTMLVideoElement & { audioTracks?: AudioTrackListLike }).audioTracks;
+      const enEspanolR = pistasR && pistasR.length ? applyPreferredAudioTrack(pistasR, diceLatino, null) : null;
+      console.warn('[RD] ✅ La otra copia SÍ abrió — reproducción directa, sin convertir');
+      opts.onStreamReady?.({ selected, hasNativeSpanish: enEspanolR ?? false, spanishTrack: null });
+      startStallMonitor(video, myGen, recoverReloadSrc(url));
+      isLoadingRd.value = false;
+    };
+    // En TV la conversion se corta. Si ninguna copia cacheada cumple la regla, se pasa al
+    // siguiente reproductor en vez de convertir (decision del usuario, 2026-11-16). En
+    // escritorio se sigue convirtiendo: es lo que da sonido a las copias con AC3.
+    const enTv = opts.isTv?.() ?? false;
+    const siguienteReproductor = (motivo: string) => {
+      console.warn(`[RD] Ninguna copia cacheada cumple (${motivo}) → siguiente reproductor, en TV no se convierte`);
+      opts.onToast('⚠️ Ninguna copia se puede ver directo — cambiando de reproductor');
+      opts.onFallbackToNextSource();
+      isLoadingRd.value = false;
+    };
     // Formato que el navegador no puede mostrar: se cambia de reproductor, igual que
     // cuando RD no tiene la pelicula. Caso real "Scrapbook" (2026-10-17): `Scrapbook
     // 2000.avi`, unica copia del catalogo, con video MPEG-4 Parte 2. Convertirlo es
@@ -2164,6 +2185,22 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
           audioSegunRd.totalPistas > 1 &&
           expuestas < audioSegunRd.totalPistas &&
           !!rdId;
+        if (noSePuedeElegir && enTv) {
+          console.warn(
+            `[RD] Este equipo expone ${expuestas} de ${audioSegunRd!.totalPistas} pistas y la que corresponde es la ${
+              audioSegunRd!.indice + 1
+            } → probando otras copias cacheadas`
+          );
+          const otraPorIdioma = listaRespaldos.length ? await probarRespaldos() : null;
+          if (playerStore.isStale(myGen)) return;
+          if (otraPorIdioma) {
+            arrancarRespaldo(otraPorIdioma, nombreDiceLatino);
+            return;
+          }
+          video.pause();
+          siguienteReproductor('la primera pista está en otro idioma y el equipo no deja cambiarla');
+          return;
+        }
         if (noSePuedeElegir && !yaFuiAPedirLaPista) {
           yaFuiAPedirLaPista = true;
           console.warn(
@@ -2221,20 +2258,11 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         if (!otraCopia) motivoFalloDirecto = motivoDeLaElegida;
       }
       if (otraCopia) {
-        const pistas2 = (video as HTMLVideoElement & { audioTracks?: AudioTrackListLike }).audioTracks;
-        // Mismo criterio que el otro respaldo: el orden de pistas de RD medido sobre la
-        // elegida no vale para otro archivo. El respaldo ya se verifico con su propia
-        // primera pista en el idioma correcto.
-        const enEspanol2 =
-          pistas2 && pistas2.length ? applyPreferredAudioTrack(pistas2, nombreDiceLatino, null) : null;
-        console.warn('[RD] ✅ La otra copia SÍ abrió — reproducción directa, sin convertir');
-        opts.onStreamReady?.({
-          selected,
-          hasNativeSpanish: enEspanol2 ?? false,
-          spanishTrack: null,
-        });
-        startStallMonitor(video, myGen, recoverReloadSrc(otraCopia));
-        isLoadingRd.value = false;
+        arrancarRespaldo(otraCopia, nombreDiceLatino);
+        return;
+      }
+      if (enTv && rdId) {
+        siguienteReproductor(motivoFalloDirecto || 'la copia elegida no abrió');
         return;
       }
 
@@ -2253,6 +2281,22 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         if (playerStore.isStale(myGen)) return;
       }
       // continúa al transcode
+    }
+
+    // La elegida no cumple de entrada (audio o video que el equipo no reproduce): en TV
+    // se prueban las otras copias verificadas y, si ninguna sirve, el siguiente reproductor.
+    if (!canTryDirect && enTv && rdId) {
+      const motivoElegida = !videoSirve ? 'su video no se reproduce en este equipo' : 'su audio no se reproduce en este equipo';
+      console.warn(`[RD] La copia elegida no cumple (${motivoElegida}) → probando otras copias cacheadas`);
+      const otra = listaRespaldos.length ? await probarRespaldos() : null;
+      if (playerStore.isStale(myGen)) return;
+      if (otra) {
+        const diceLatinoR = /\blatino\b|\blat\b|dual.?lat|cinecalidad/i.test(streamFn || '') && !/castellano/i.test(streamFn || '');
+        arrancarRespaldo(otra, diceLatinoR);
+        return;
+      }
+      siguienteReproductor(motivoElegida);
+      return;
     }
 
     // ── Pipeline /t/ — upgrade transparente (far-seek + AAC para cualquier archivo) ──
