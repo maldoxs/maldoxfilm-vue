@@ -298,3 +298,75 @@ describe('videoCodecUnplayableInBrowser', () => {
     expect(videoCodecUnplayableInBrowser(conCodec(null))).toBe(false);
   });
 });
+
+// Pistas REALES de mediaInfos de RD, leidas el 2026-11-16 ("Dreamcatcher", "Cat's Eye",
+// "Frontier(s)"). La TV LG decodifica AAC y AC3; el escritorio solo AAC.
+import { pistaQueDebeSonarSeOye, sinPistaEnIdiomaAceptable } from '../src/services/mediaInfos';
+
+const pistas = (video: string, audio: Record<string, [string, string, string]>) => ({
+  details: {
+    video: { und1: { codec: video } },
+    audio: Object.fromEntries(
+      Object.entries(audio).map(([k, [lang, iso, codec]]) => [k, { lang, lang_iso: iso, codec }])
+    ),
+  },
+});
+const dtone = parseMediaInfos(
+  pistas('h264', {
+    eng1: ['English', 'eng', 'dts'],
+    fre1: ['French', 'fre', 'aac'],
+    ger1: ['German', 'ger', 'aac'],
+    rus1: ['Russian', 'rus', 'aac'],
+  })
+);
+const xxxpav69 = parseMediaInfos(pistas('hevc', { eng1: ['English', 'eng', 'dts'] }));
+const rarbg = parseMediaInfos(pistas('hevc', { eng1: ['English', 'eng', 'aac'] }));
+const phdteam = parseMediaInfos(pistas('h264', { cze1: ['Czech', 'cze', 'ac3'], eng1: ['English', 'eng', 'ac3'] }));
+const granica = parseMediaInfos(pistas('h264', { rus1: ['Russian', 'rus', 'ac3'], fre1: ['French', 'fre', 'dts'] }));
+const vxt = parseMediaInfos(pistas('hevc', { fre1: ['French', 'fre', 'aac'] }));
+const soloRuso = parseMediaInfos(pistas('h264', { rus1: ['Russian', 'rus', 'aac'], ukr1: ['Ukrainian', 'ukr', 'aac'] }));
+const sinIdioma = parseMediaInfos(pistas('h264', { und1: ['Unknown', 'und', 'aac'] }));
+
+describe('pistaQueDebeSonarSeOye — se mira la pista que va a sonar, no "alguna"', () => {
+  test('DTOne: el ingles es DTS; que haya AAC en otros idiomas no alcanza', () => {
+    expect(pistaQueDebeSonarSeOye(dtone, 'en', true)).toBe(false);
+  });
+  test('xxxpav69: solo DTS, muda', () => {
+    expect(pistaQueDebeSonarSeOye(xxxpav69, 'en', true)).toBe(false);
+  });
+  test('RARBG: ingles AAC, suena en TV y en escritorio', () => {
+    expect(pistaQueDebeSonarSeOye(rarbg, 'en', true)).toBe(true);
+    expect(pistaQueDebeSonarSeOye(rarbg, 'en', false)).toBe(true);
+  });
+  test('PHDTeam: el ingles AC3 suena en la TV, no en escritorio', () => {
+    expect(pistaQueDebeSonarSeOye(phdteam, 'en', true)).toBe(true);
+    expect(pistaQueDebeSonarSeOye(phdteam, 'en', false)).toBe(false);
+  });
+  test('Frontier(s) rusa: el frances original es DTS, no sirve', () => {
+    expect(pistaQueDebeSonarSeOye(granica, 'fr', true)).toBe(false);
+  });
+  test('sin pistas no hay dato', () => {
+    expect(pistaQueDebeSonarSeOye(parseMediaInfos({ details: { audio: {} } }), 'en', true)).toBe(null);
+  });
+});
+
+describe('sinPistaEnIdiomaAceptable — la copia suena en otro idioma se haga lo que se haga', () => {
+  test('solo ruso y ucraniano en una pelicula en ingles', () => {
+    expect(sinPistaEnIdiomaAceptable(soloRuso, 'en')).toBe(true);
+  });
+  test('si el ruso es el idioma original, sirve', () => {
+    expect(sinPistaEnIdiomaAceptable(soloRuso, 'ru')).toBe(false);
+  });
+  test('con una pista en ingles, sirve aunque no sea la primera', () => {
+    expect(sinPistaEnIdiomaAceptable(phdteam, 'en')).toBe(false);
+  });
+  test('Frontier(s) VXT: frances original, sirve', () => {
+    expect(sinPistaEnIdiomaAceptable(vxt, 'fr')).toBe(false);
+  });
+  test('una pista sin idioma declarado no descarta', () => {
+    expect(sinPistaEnIdiomaAceptable(sinIdioma, 'en')).toBe(false);
+  });
+  test('sin idioma original de TMDB no se decide', () => {
+    expect(sinPistaEnIdiomaAceptable(soloRuso, null)).toBe(false);
+  });
+});

@@ -57,6 +57,8 @@ import {
   videoCodecUnplayableInBrowser,
   firstAudioTrackIsSpanish,
   posicionAudioPreferida,
+  pistaQueDebeSonarSeOye,
+  sinPistaEnIdiomaAceptable,
 } from '../services/mediaInfos';
 import {
   resolveTpipeline,
@@ -712,6 +714,27 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   // ── Intento de reproducción directa HEVC (líneas ~7878-7913) ────────────
   // Devuelve `true` si reprodujo de verdad (duration > 35s), `false` si falló
   // o no aplica — el llamador decide si continuar al transcode.
+  // Solo registro, no decide nada: cuando RD no informa las pistas, la unica forma de
+  // saber si una copia suena es preguntarle al navegador cuanto audio decodifico. Antes
+  // de actuar sobre esto hay que ver en el log de la TV si lo informa y si cuenta el AC3
+  // que la TV decodifica por hardware; si no lo cuenta, cortaria copias que suenan bien.
+  function medirAudioDecodificado(video: HTMLVideoElement) {
+    setTimeout(() => {
+      const v = video as HTMLVideoElement & { webkitAudioDecodedByteCount?: number; webkitVideoDecodedByteCount?: number };
+      if (typeof v.webkitAudioDecodedByteCount !== 'number') {
+        console.warn('[RD] Medición de audio: este equipo no informa cuánto audio decodificó');
+        return;
+      }
+      const audio = v.webkitAudioDecodedByteCount;
+      const imagen = v.webkitVideoDecodedByteCount ?? 0;
+      console.warn(
+        `[RD] Medición de audio a los 8s: audio ${audio} bytes, video ${imagen} bytes${
+          audio === 0 && imagen > 0 ? ' → la imagen avanza y el audio NO' : ''
+        }`
+      );
+    }, 8000);
+  }
+
   async function tryHevcDirectPlay(
     video: HTMLVideoElement,
     streamUrl: string,
@@ -1917,10 +1940,15 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     let audioSegunRd: { indice: number; esEspanol: boolean; totalPistas: number } | null = null;
     // Una sola vez por carga: si la conversión tampoco da la pista, no se insiste.
     let yaFuiAPedirLaPista = false;
+    // La copia elegida no tiene ninguna pista en un idioma que sirva (ver mediaInfos).
+    let idiomaNoSirve = false;
     if (rdId) {
       try {
         const info = parseMediaInfos(await opts.rdClient.fetchMediaInfos(rdId));
-        realAudioOk = hasNativeDecodableAudio(info, ac3Ok);
+        // Se mira la pista que va a sonar, no "alguna": DTS primero y AAC despues en
+        // otro idioma sonaba mudo aunque el archivo tuviera audio decodificable.
+        realAudioOk = pistaQueDebeSonarSeOye(info, selected.idiomaOriginal, ac3Ok);
+        idiomaNoSirve = sinPistaEnIdiomaAceptable(info, selected.idiomaOriginal);
         realIsHevc = videoNeedsHevcSupport(info);
         primeraPistaEsEspanol = firstAudioTrackIsSpanish(info);
         audioSegunRd = {
@@ -1967,6 +1995,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         const primera = info.audio.slice(0, 1);
         if (primera.length && hasNativeDecodableAudio({ ...info, audio: primera }, ac3Ok) === false)
           return 'su primera pista de audio no se puede reproducir en este equipo';
+        if (sinPistaEnIdiomaAceptable(info, selected.idiomaOriginal)) return 'ninguna pista está en un idioma que sirva';
         if (videoCodecUnplayableInBrowser(info)) return 'su video no se puede mostrar';
         if (videoNeedsHevcSupport(info) === true && !hevcOk) return 'su video es HEVC y este equipo no lo reproduce';
         if (posicionAudioPreferida(info, selected.idiomaOriginal).indice > 0) return 'la primera pista está en otro idioma';
@@ -2033,6 +2062,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       console.warn('[RD] ✅ La otra copia SÍ abrió — reproducción directa, sin convertir');
       opts.onStreamReady?.({ selected, hasNativeSpanish: enEspanolR ?? false, spanishTrack: null });
       startStallMonitor(video, myGen, recoverReloadSrc(url));
+      medirAudioDecodificado(video);
       isLoadingRd.value = false;
     };
     // En TV la conversion se corta. Si ninguna copia cacheada cumple la regla, se pasa al
@@ -2040,7 +2070,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // escritorio se sigue convirtiendo: es lo que da sonido a las copias con AC3.
     const enTv = opts.isTv?.() ?? false;
     const siguienteReproductor = (motivo: string) => {
-      console.warn(`[RD] Ninguna copia cacheada cumple (${motivo}) → siguiente reproductor, en TV no se convierte`);
+      console.warn(`[RD] Ninguna copia cacheada cumple (${motivo}) → siguiente reproductor`);
       opts.onToast('⚠️ Ninguna copia se puede ver directo — cambiando de reproductor');
       opts.onFallbackToNextSource();
       isLoadingRd.value = false;
@@ -2137,6 +2167,21 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     // que antes andaban (La Momia/Michael: su única versión cacheada es MKV). Si el directo
     // falla (p.ej. MKV no soportado), `tryHevcDirectPlay` devuelve false y cae al transcode.
     // El contenedor MP4 ya se prioriza en el SCORING (no hace falta bloquear acá).
+    // Ninguna pista de la elegida esta en latino, español, el original o ingles: va a
+    // sonar en otro idioma tanto en directo como convertida. Se prueban las otras
+    // copias y, si ninguna sirve, el siguiente reproductor, en cualquier equipo.
+    if (idiomaNoSirve) {
+      console.warn('[RD] La copia elegida no tiene ninguna pista en un idioma que sirva → probando otras copias cacheadas');
+      const otraPorIdioma = listaRespaldos.length ? await probarRespaldos() : null;
+      if (playerStore.isStale(myGen)) return;
+      if (otraPorIdioma) {
+        const diceLatinoI = /\blatino\b|\blat\b|dual.?lat|cinecalidad/i.test(streamFn || '') && !/castellano/i.test(streamFn || '');
+        arrancarRespaldo(otraPorIdioma, diceLatinoI);
+        return;
+      }
+      siguienteReproductor('ninguna copia tiene audio en un idioma que sirva');
+      return;
+    }
     const canTryDirect = videoSirve && audioSirve;
     if (canTryDirect) {
       console.warn(
@@ -2265,6 +2310,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
               : isDualLatFilename(streamFn);
         opts.onStreamReady?.({ selected, hasNativeSpanish: hasSpaDirect, spanishTrack: null });
         startStallMonitor(video, myGen, recoverReloadSrc(streamUrl));
+        medirAudioDecodificado(video);
         // Toast "Seek fluido" quitado (a pedido) — un solo mensaje "Cargando…", sin toasts.
         isLoadingRd.value = false;
         return;

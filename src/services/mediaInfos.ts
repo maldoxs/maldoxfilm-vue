@@ -323,6 +323,37 @@ export function posicionAudioPreferida(
   return { indice: -1, esEspanol: false };
 }
 
+/**
+ * pistaQueDebeSonarSeOye — ¿la pista que corresponde escuchar se puede decodificar en
+ * este equipo? Es la del idioma preferido; si ninguna lo es, la primera. Devuelve null
+ * sin pistas. Caso "Dreamcatcher" (2026-11-16): la copia DTOne trae `eng1=dts` primero
+ * y AAC en otros idiomas despues; "alguna pista se oye" era cierto y sonaba muda.
+ */
+export function pistaQueDebeSonarSeOye(
+  info: MediaInfos,
+  idiomaOriginal: string | null | undefined,
+  ac3Ok = false
+): boolean | null {
+  if (!info.audio.length) return null;
+  const { indice } = posicionAudioPreferida(info, idiomaOriginal);
+  const pista = info.audio[indice >= 0 ? indice : 0];
+  return hasNativeDecodableAudio({ ...info, audio: [pista] }, ac3Ok);
+}
+
+const IDIOMA_DESCONOCIDO_RE = /^(und|unk|unknown|mis|zxx|)$/i;
+
+/**
+ * sinPistaEnIdiomaAceptable — true cuando TODAS las pistas tienen idioma conocido y
+ * ninguna es latino, español, el idioma original o inglés: la copia suena en otro
+ * idioma se haga lo que se haga, y convertirla no lo arregla. Sin idioma original de
+ * TMDB no se decide (false), y una sola pista sin idioma declarado tampoco descarta.
+ */
+export function sinPistaEnIdiomaAceptable(info: MediaInfos, idiomaOriginal: string | null | undefined): boolean {
+  if (!idiomaOriginal || !info.audio.length) return false;
+  if (info.audio.some((t) => IDIOMA_DESCONOCIDO_RE.test((t.langIso || '').trim()))) return false;
+  return posicionAudioPreferida(info, idiomaOriginal).indice < 0;
+}
+
 /** ¿El archivo tiene subtítulos en español embebidos? (sincronizados, del propio archivo). */
 export function pickSpanishSubToken(info: MediaInfos): string | null {
   const spa = info.subtitles.find(isSpanishTrack);
