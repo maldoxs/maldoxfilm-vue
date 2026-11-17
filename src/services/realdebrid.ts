@@ -36,6 +36,12 @@ export interface RealDebridClient {
   fetchDownloads(): Promise<RDDownload[]>;
 
   /**
+   * fetchTorrents — torrents de la cuenta (`id` y `hash`). Sirve para saber cuales
+   * agrego la verificacion de copias de respaldo y borrarlos al cerrar (ADR-006).
+   */
+  fetchTorrents?(): Promise<{ id: string; hash: string }[]>;
+
+  /**
    * fetchTranscode — pide los manifiestos de transcodificación (DASH/HLS)
    * para un `rdId` ya cacheado. Preservado de las líneas ~7919-7922:
    * `GET /streaming/transcode/{rdId}`.
@@ -127,6 +133,15 @@ export function createRealDebridClient(opts: RealDebridClientOptions): RealDebri
     return Array.isArray(downloads) ? (downloads as RDDownload[]) : [];
   }
 
+  async function fetchTorrents(): Promise<{ id: string; hash: string }[]> {
+    const lista = await fetchImpl(`${base}/torrents?limit=100`, { headers }).then((r) => r.json());
+    return Array.isArray(lista)
+      ? (lista as { id?: string; hash?: string }[])
+          .filter((t) => !!t.id && !!t.hash)
+          .map((t) => ({ id: t.id as string, hash: (t.hash as string).toLowerCase() }))
+      : [];
+  }
+
   async function fetchTranscode(rdId: string): Promise<RDTranscodeResponse> {
     return fetchImpl(`${base}/streaming/transcode/${rdId}`, { headers }).then((r) => r.json());
   }
@@ -166,5 +181,5 @@ export function createRealDebridClient(opts: RealDebridClientOptions): RealDebri
     return matchInDownloads(resolvedUrl, originalUrl, filename, downloads);
   }
 
-  return { fetchDownloads, fetchTranscode, fetchMediaInfos, resolveProxyUrl, findDownloadMatch };
+  return { fetchDownloads, fetchTorrents, fetchTranscode, fetchMediaInfos, resolveProxyUrl, findDownloadMatch };
 }

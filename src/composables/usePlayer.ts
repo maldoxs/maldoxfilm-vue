@@ -143,6 +143,12 @@ const DIRECT_PLAY_MAX_WAIT_MS = 30000;
  */
 const DIRECT_PLAY_MAX_WAIT_TV_MS = 45000;
 
+/**
+ * ESPERA_COPIA_VERIFICADA_TV_MS — espera hasta el primer dato, en TV, para una copia
+ * cuyo audio y video ya confirmo Real-Debrid. Sin esa confirmacion rige la de siempre.
+ */
+const ESPERA_COPIA_VERIFICADA_TV_MS = 25000;
+
 /** Por que se abandono el ultimo intento de reproduccion directa (para avisar en pantalla). */
 let motivoFalloDirecto = '';
 
@@ -706,7 +712,13 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
   // ── Intento de reproducción directa HEVC (líneas ~7878-7913) ────────────
   // Devuelve `true` si reprodujo de verdad (duration > 35s), `false` si falló
   // o no aplica — el llamador decide si continuar al transcode.
-  async function tryHevcDirectPlay(video: HTMLVideoElement, streamUrl: string, startPositionSec?: number): Promise<boolean> {
+  async function tryHevcDirectPlay(
+    video: HTMLVideoElement,
+    streamUrl: string,
+    startPositionSec?: number,
+    /** Espera hasta el primer dato; por defecto la de siempre. */
+    esperaInicialMs: number = HEVC_DIRECT_PLAY_TIMEOUT_MS
+  ): Promise<boolean> {
     let played = false;
     await new Promise<void>((resolve) => {
       // ── PACIENCIA MIENTRAS LLEGUE DATA (2026-08-02) ──────────────────────────────
@@ -760,7 +772,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         if (restante > 0) armar(Math.min(HEVC_DIRECT_PLAY_TIMEOUT_MS, restante));
       };
       video.addEventListener('progress', onProgress);
-      armar(HEVC_DIRECT_PLAY_TIMEOUT_MS);
+      armar(Math.min(esperaInicialMs, topeDuro - Date.now()));
       video.addEventListener(
         'loadedmetadata',
         () => {
@@ -1981,7 +1993,19 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     const probarRespaldos = async (): Promise<string | null> => {
       // Las verificaciones van en paralelo: cada una tarda lo que tarda RD en responder
       // y en serie se sumaban. Despues se prueban en el orden de la lista.
+      // Pedirle una copia a Torrentio la agrega a la cuenta de RD. Las que no estaban
+      // antes de verificar se anotan para borrarlas al cerrar, como el resto (ADR-006).
+      const hashDe = (url: string) => (url.match(/\/([a-f0-9]{40})\//i)?.[1] || '').toLowerCase();
+      const hashesCandidatos = new Set(listaRespaldos.map(hashDe).filter(Boolean));
+      const yaEstaban = await (opts.rdClient.fetchTorrents?.() ?? Promise.resolve(null)).catch(() => null);
       const rechazos = await Promise.all(listaRespaldos.map((url) => motivoRechazoRespaldo(url)));
+      if (yaEstaban) {
+        const antes = new Set(yaEstaban.map((t) => t.hash));
+        const despues = await (opts.rdClient.fetchTorrents?.() ?? Promise.resolve([])).catch(() => []);
+        for (const t of despues) {
+          if (hashesCandidatos.has(t.hash) && !antes.has(t.hash)) sessionTorrentIds.add(t.id);
+        }
+      }
       if (playerStore.isStale(myGen)) return null;
       for (let i = 0; i < listaRespaldos.length; i++) {
         const url = listaRespaldos[i];
@@ -2135,7 +2159,15 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         !/castellano/i.test(streamFn || '');
 
       motivoFalloDirecto = '';
-      const played = await tryHevcDirectPlay(video, streamUrl, params.startPositionSec);
+      // Caso "Dreamcatcher" (2026-11-16): la MP4 verificada por RD no recibio ni un dato
+      // en 10 s dos veces seguidas y a la tercera abrio bien. Si RD ya confirmo audio y
+      // video, en TV se le da mas margen antes de pasar a otra copia.
+      const copiaVerificada = realAudioOk === true && realIsHevc !== null && videoSirve;
+      const esperaInicial = enTv && copiaVerificada ? ESPERA_COPIA_VERIFICADA_TV_MS : HEVC_DIRECT_PLAY_TIMEOUT_MS;
+      if (esperaInicial !== HEVC_DIRECT_PLAY_TIMEOUT_MS) {
+        console.warn(`[RD] Copia verificada por RD → espera de hasta ${esperaInicial / 1000}s para abrir`);
+      }
+      const played = await tryHevcDirectPlay(video, streamUrl, params.startPositionSec, esperaInicial);
       if (played) {
         // ── Elegir la pista de audio (2026-10-12) ───────────────────────────────
         // La reproduccion directa arranca con la PRIMERA pista del contenedor, asi que
