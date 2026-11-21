@@ -50,6 +50,12 @@ export interface TmdbClient {
    * release sin tag de idioma se asume aceptable por defecto, que es correcto ahí).
    */
   getOriginalLanguage(tmdbId: string | number, type: 'movie' | 'tv'): Promise<string | null>;
+  /**
+   * getTitulos — todos los titulos con que TMDB conoce la obra: original, el de Mexico,
+   * los alternativos y las traducciones. Sirve para descartar copias de OTRA pelicula
+   * que Torrentio mezcla en la lista. Vacio si TMDB falla.
+   */
+  getTitulos?(tmdbId: string | number, type: 'movie' | 'tv'): Promise<string[]>;
 }
 
 /**
@@ -92,5 +98,34 @@ export function createTmdbClient(opts: TmdbClientOptions): TmdbClient {
     }
   }
 
-  return { cache, get, getImdbId, getOriginalLanguage };
+  async function getTitulos(tmdbId: string | number, type: 'movie' | 'tv'): Promise<string[]> {
+    const tmdbType = type === 'tv' ? 'tv' : 'movie';
+    type Datos = {
+      title?: string;
+      name?: string;
+      original_title?: string;
+      original_name?: string;
+      alternative_titles?: { titles?: { title?: string }[]; results?: { title?: string }[] };
+      translations?: { translations?: { data?: { title?: string; name?: string } }[] };
+    };
+    try {
+      const d = await get<Datos>(
+        `/${tmdbType}/${tmdbId}?language=es-MX&append_to_response=alternative_titles,translations`
+      );
+      const alternativos = d.alternative_titles?.titles ?? d.alternative_titles?.results ?? [];
+      const todos = [
+        d.title,
+        d.name,
+        d.original_title,
+        d.original_name,
+        ...alternativos.map((t) => t.title),
+        ...(d.translations?.translations ?? []).map((t) => t.data?.title || t.data?.name),
+      ];
+      return [...new Set(todos.filter((t): t is string => !!t && !!t.trim()))];
+    } catch {
+      return [];
+    }
+  }
+
+  return { cache, get, getImdbId, getOriginalLanguage, getTitulos };
 }

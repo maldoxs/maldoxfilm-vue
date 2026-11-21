@@ -33,6 +33,7 @@ import {
   declaresLowRes,
   dobladoAIdiomaAjeno,
   candidatosRespaldo,
+  soloDeEstaPelicula,
 } from '../src/services/streamSelector';
 import type { TorrentioStream, RDDownload } from '../src/types';
 
@@ -1540,5 +1541,63 @@ describe('candidatosRespaldo — varias copias en orden, no una sola', () => {
 
   test('respeta el maximo', () => {
     expect(candidatosRespaldo(elegida, pool, 'en', 1)).toEqual([dts.url]);
+  });
+});
+
+// Caso real "Oddity" (2024), log de la TV del 2026-11-21: se reprodujo otra pelicula,
+// `Dìdi (弟弟) (2024)...dual-lat`, que Torrentio mezclo en la lista y el latino puso
+// primera. Los titulos son los que TMDB devuelve para cada obra (es-MX, original,
+// alternativos y traducciones), y los nombres de copias son reales de Torrentio.
+describe('soloDeEstaPelicula — no reproducir otra pelicula', () => {
+  const copia = (titulo: string, archivo?: string) =>
+    stream({ title: `${titulo}\n👤 1 💾 2 GB`, behaviorHints: archivo ? { filename: archivo } : undefined });
+  const titulosOddity = ['Médium', 'Oddity', 'Странность', 'Astralinis pasaulis', 'Oddity: Objetos Obscuros', 'Астрал. Медиум'];
+
+  test('Oddity: Dìdi se descarta y Médium (titulo en Mexico) se queda', () => {
+    const didi = copia('Dìdi (弟弟) (2024).1080p.dual-lat.cinecalidad.day.mp4', 'Dìdi (弟弟) (2024).1080p.dual-lat.cinecalidad.day.mp4');
+    const medium = copia('Médium.2024.1080P-Dual-Lat', 'Médium.2024.1080P-Dual-Lat.mkv');
+    const yts = copia('Oddity.2024.1080p.BluRay.x264.AAC5.1-[YTS.MX]', 'Oddity.2024.1080p.BluRay.x264.AAC5.1-[YTS.MX].mp4');
+    const pack = copia('Plexbomb.Top100.movies.of.2024.pack.1080p.x264.v01-Dust', 'Oddity.2024.1080p.BluRay.x264.AAC5.1-[YTS.MX].mp4');
+    const rusa = copia('Астрал. Медиум / Oddity [2024 BDRemux 1080p] Dub', 'Oddity.2024.REMUX.mkv');
+    const r = soloDeEstaPelicula([didi, medium, yts, pack, rusa], titulosOddity);
+    expect(r.descartadas).toEqual([didi]);
+    expect(r.quedan).toEqual([medium, yts, pack, rusa]);
+  });
+
+  test("Cat's Eye: el titulo sin palabras de 4 letras se reconoce pegado", () => {
+    const r = soloDeEstaPelicula(
+      [
+        copia('Cats Eye 1985 REMASTERED 1080p BluRay HEVC x265 5.1 BONE', 'Cats Eye 1985 REMASTERED 1080p BluRay HEVC x265 5.1 BONE.mkv'),
+        copia('[H-Enc] 2026.10 Pack (DVDRip 480p HEVC AC3)', '[261030][nur] ヒトリ妻.mkv'),
+      ],
+      ["Cat's Eye", 'El ojo del gato']
+    );
+    expect(r.quedan).toHaveLength(1);
+    expect(r.descartadas).toHaveLength(1);
+  });
+
+  test('variantes del titulo en el nombre de la copia no se descartan', () => {
+    const titulosFuga = ['Sueño de fuga', 'The Shawshank Redemption', 'Cadena perpetua'];
+    const variantes = [
+      copia('Sueños.De.Fuga.1994.1080P-Dual-Lat', 'Sueños.De.Fuga.1994.1080P-Dual-Lat.mkv'),
+      copia('43 Stephen King Movies', 'Shawshank Redemption.avi'),
+      copia('The Shawsank Redemption.Bdrip.1080p.x264.mkv'),
+      copia('Shaw Shank Redemption'),
+    ];
+    expect(soloDeEstaPelicula(variantes, titulosFuga).descartadas).toEqual([]);
+    const apocalipsis = copia('Apocalypse.z.el.principio.del.fin.2024.1080p-dual-lat-cinecalidad.rs.mp4');
+    expect(soloDeEstaPelicula([apocalipsis], ['Apocalipsis Z: el principio del fin']).descartadas).toEqual([]);
+    const frontiere = copia('Frontière~UnrateD~SweSub~maz');
+    expect(soloDeEstaPelicula([frontiere], ['La frontera del miedo', 'Frontière(s)', 'Frontier(s)']).descartadas).toEqual([]);
+  });
+
+  test('sin titulos de TMDB no se filtra nada', () => {
+    const didi = copia('Dìdi (弟弟) (2024).1080p.dual-lat.cinecalidad.day.mp4');
+    expect(soloDeEstaPelicula([didi], []).quedan).toEqual([didi]);
+  });
+
+  test('si todas son de otra pelicula, no queda ninguna', () => {
+    const didi = copia('Dìdi (弟弟) (2024).1080p.dual-lat.cinecalidad.day.mp4');
+    expect(soloDeEstaPelicula([didi], titulosOddity).quedan).toEqual([]);
   });
 });

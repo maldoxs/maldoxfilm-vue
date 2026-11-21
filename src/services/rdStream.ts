@@ -43,6 +43,7 @@ import {
   hasEng,
   hasSpa,
   hasLatino,
+  soloDeEstaPelicula,
 } from './streamSelector';
 
 /**
@@ -139,13 +140,26 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
       if (!imdbId) return emptySelectedStream();
 
       // ── 2. Streams desde Torrentio (líneas ~4718-4724) ──
-      const streamsAll: TorrentioStream[] = await torrentioClient.fetchStreams({
+      const streamsTorrentio: TorrentioStream[] = await torrentioClient.fetchStreams({
         rdToken,
         imdbId,
         type,
         season,
         episode,
       });
+      // Torrentio a veces mezcla copias de OTRA pelicula en la lista. Caso "Oddity": se
+      // reprodujo `Dìdi (弟弟) (2024)...dual-lat` porque el latino la puso primera. Solo
+      // quedan las copias que nombran la obra con alguno de sus titulos de TMDB.
+      const titulosObra =
+        type === 'movie' && tmdbClient.getTitulos ? await tmdbClient.getTitulos(tmdbId, type).catch(() => []) : [];
+      const filtroTitulo = soloDeEstaPelicula(streamsTorrentio, titulosObra);
+      if (filtroTitulo.descartadas.length) {
+        console.warn(
+          `[RD] Descartadas ${filtroTitulo.descartadas.length} copias de otra película:`,
+          filtroTitulo.descartadas.map((s) => (s.title || '').split('\n')[0])
+        );
+      }
+      const streamsAll = filtroTitulo.quedan;
       if (!streamsAll.length) {
         console.warn('[RD] Sin streams en Torrentio'); // línea ~4724
         return emptySelectedStream();
@@ -275,7 +289,10 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
             episode,
           });
           const known = new Set(streams.map((s) => s.url).filter(Boolean));
-          const nuevos = (streams2 || []).filter((s) => s.url && !known.has(s.url));
+          // Mismo filtro de titulo que la primera consulta.
+          const nuevos = soloDeEstaPelicula(streams2 || [], titulosObra).quedan.filter(
+            (s) => s.url && !known.has(s.url)
+          );
           if (nuevos.length) {
             console.warn('[RD] Pool sin versión fluida — re-fetch trajo', nuevos.length, 'streams nuevos');
             const merged = selectBestStream([...streams, ...nuevos], isTv, originalLanguage);

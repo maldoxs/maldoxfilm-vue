@@ -178,6 +178,77 @@ export function extractTitleYear(s: TorrentioStream): { title: string; year: str
 
 const SEQUEL_MARKER_RE = /\b(2|3|4|5|ii|iii|iv|v)\b/i;
 
+/** Minusculas, sin tildes, y todo lo que no sea letra o numero pasa a ser un espacio. */
+export function normalizarTitulo(texto: string): string {
+  return texto
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+const PALABRAS_VACIAS = new Set([
+  'with', 'from', 'that', 'this', 'what', 'when', 'your', 'into', 'over', 'para', 'pour',
+  'dans', 'della', 'delle', 'este', 'esta', 'como', 'sobre', 'movie', 'film', 'pelicula',
+]);
+
+/** Palabras con peso de los titulos: 4+ letras y que no sean de relleno. */
+export function palabrasDeTitulos(titulos: string[]): Set<string> {
+  const palabras = new Set<string>();
+  for (const t of titulos) {
+    for (const p of normalizarTitulo(t).split(' ')) {
+      if (p.length >= 4 && !PALABRAS_VACIAS.has(p) && !/^\d+$/.test(p)) palabras.add(p);
+    }
+  }
+  return palabras;
+}
+
+/**
+ * nombraLaPelicula — ¿el nombre de la copia (1ra linea del title de Torrentio + nombre
+ * del archivo) comparte al menos una palabra con peso con alguno de los titulos de la
+ * obra? Se exige poco a proposito: el titulo exacto descartaba copias buenas, porque
+ * los nombres traen variantes ("Sueños de fuga" contra "Sueño de fuga" de TMDB,
+ * "Apocalypse Z" contra "Apocalipsis Z", "Shawsank" mal escrito). Una palabra de 5+
+ * letras tambien vale dentro de otra ("frontier" en "frontiers").
+ */
+export function nombraLaPelicula(s: TorrentioStream, palabras: Set<string>, titulosPegados: string[] = []): boolean {
+  if (!palabras.size && !titulosPegados.length) return true;
+  const texto = normalizarTitulo(`${(s.title || '').split('\n')[0]} ${s.behaviorHints?.filename || ''}`);
+  // Titulo entero sin espacios: "Cat's Eye" no tiene ninguna palabra de 4 letras, pero
+  // "catseye" esta dentro de "cats eye 1985".
+  const pegado = texto.replace(/ /g, '');
+  if (titulosPegados.some((t) => pegado.includes(t))) return true;
+  const tokens = texto.split(' ');
+  return tokens.some(
+    (tok) => palabras.has(tok) || [...palabras].some((p) => p.length >= 5 && tok.length > p.length && tok.includes(p))
+  );
+}
+
+/** Cada titulo normalizado y sin espacios, si tiene 5+ caracteres. */
+export function titulosSinEspacios(titulos: string[]): string[] {
+  return [...new Set(titulos.map((t) => normalizarTitulo(t).replace(/ /g, '')).filter((t) => t.length >= 5))];
+}
+
+/**
+ * soloDeEstaPelicula — saca las copias que no nombran la obra con ninguno de sus
+ * titulos de TMDB. Caso "Oddity" (2024-11-21, log de la TV): Torrentio mezclo
+ * `Dìdi (弟弟) (2024).1080p.dual-lat...mp4`, otra pelicula, y el +200 del latino la puso
+ * primera. `Médium.2024...Dual-Lat` SI es Oddity (titulo en Mexico y Argentina) y se
+ * queda. Sin titulos de TMDB no se aplica. Si no queda ninguna, la lista queda vacia a
+ * proposito: mejor pasar al siguiente reproductor que mostrar otra pelicula.
+ */
+export function soloDeEstaPelicula(
+  streams: TorrentioStream[],
+  titulos: string[]
+): { quedan: TorrentioStream[]; descartadas: TorrentioStream[] } {
+  const palabras = palabrasDeTitulos(titulos);
+  const pegados = titulosSinEspacios(titulos);
+  if (!palabras.size && !pegados.length) return { quedan: streams, descartadas: [] };
+  const quedan = streams.filter((s) => nombraLaPelicula(s, palabras, pegados));
+  return { quedan, descartadas: streams.filter((s) => !quedan.includes(s)) };
+}
+
 /**
  * findCachedByTitleYear — RESCATE DE ÚLTIMO RECURSO: busca en TODOS los
  * downloads de la cuenta (no solo los candidatos de Torrentio) una entrada
