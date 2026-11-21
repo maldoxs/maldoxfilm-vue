@@ -1601,3 +1601,44 @@ describe('soloDeEstaPelicula — no reproducir otra pelicula', () => {
     expect(soloDeEstaPelicula([didi], titulosOddity).quedan).toEqual([]);
   });
 });
+
+// Caso real "1922" (2017), log de la TV del 2026-11-21: se reprodujo
+// `Dr.Mabuse.The.Gambler.1922.Part.1`, una pelicula de 1922. El titulo es un numero y
+// coincidia; lo que la distingue es el año de estreno.
+describe('soloDeEstaPelicula — año de estreno', () => {
+  const copia = (titulo: string, archivo?: string) =>
+    stream({ title: `${titulo}\n👤 1 💾 2 GB`, behaviorHints: archivo ? { filename: archivo } : undefined });
+
+  test('1922: titulo numerico exige el año 2017', () => {
+    const mabuse = copia('Dr.Mabuse.The.Gambler.1922.Part.1.720p.BRRip.x264-Classics');
+    const startrek = copia('Star Trek Complete Series', '192 - 1987-10-19 - TNG S01 E05 - Haven - BS.mkv');
+    const buena = copia('1922 (2017) 1080p H264 iTA EnG AC3 5.1');
+    const latino = copia('1922.2017.1080P-Dual-Lat.mp4', '1922.2017.1080P-Dual-Lat.mp4');
+    const r = soloDeEstaPelicula([mabuse, startrek, buena, latino], ['1922'], 2017, ['1922']);
+    expect(r.quedan).toEqual([buena, latino]);
+  });
+
+  test('un titulo alternativo numerico no obliga al año (Blade Runner tiene "2020" en TMDB)', () => {
+    const sinAnio = copia('Blade Runner [4K UHDremux 2160p][HDR10]', 'Blade Runner 4Kremux2160.www.atomohd.beer.mkv');
+    const r = soloDeEstaPelicula([sinAnio], ['Blade Runner', '2020'], 1982, ['Blade Runner']);
+    expect(r.quedan).toEqual([sinAnio]);
+  });
+
+  test('un año distinto descarta: remake y secuela', () => {
+    const remake = copia('Halloween.2007.UNRATED.720p.BluRay.DTS.x264-HDxT');
+    const original = copia('Halloween.1978.1080P-Dual-Lat', 'Halloween.1978.1080P-Dual-Lat.mkv');
+    expect(soloDeEstaPelicula([remake, original], ['Halloween'], 1978, ['Halloween']).quedan).toEqual([original]);
+  });
+
+  test('el año admite ±1 (estrenos de fin de año)', () => {
+    const c = copia('Oddity.2025.1080p.WEB');
+    expect(soloDeEstaPelicula([c], ['Oddity'], 2024, ['Oddity']).quedan).toEqual([c]);
+  });
+
+  test('titulos cortos (It, Us) se reconocen como palabra exacta', () => {
+    const it = copia('It.2017.1080p.dual-lat.cinecalidad.lol.mp4');
+    const otra = copia('Aeon Flux (2005) (1080p BluRay X265 HEVC 10bit AAC 5.1 Tigole) [QxR]', 'Locations.mkv');
+    const r = soloDeEstaPelicula([it, otra], ['It (Eso)', 'It', 'Eso'], 2017, ['It (Eso)', 'It']);
+    expect(r.quedan).toEqual([it]);
+  });
+});

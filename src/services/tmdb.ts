@@ -51,11 +51,15 @@ export interface TmdbClient {
    */
   getOriginalLanguage(tmdbId: string | number, type: 'movie' | 'tv'): Promise<string | null>;
   /**
-   * getTitulos — todos los titulos con que TMDB conoce la obra: original, el de Mexico,
-   * los alternativos y las traducciones. Sirve para descartar copias de OTRA pelicula
-   * que Torrentio mezcla en la lista. Vacio si TMDB falla.
+   * getDatosObra — titulos con que TMDB conoce la obra (original, el de Mexico,
+   * alternativos y traducciones), los principales por separado y el año de estreno.
+   * Sirve para descartar copias de OTRA pelicula que Torrentio mezcla en la lista.
+   * Vacio si TMDB falla.
    */
-  getTitulos?(tmdbId: string | number, type: 'movie' | 'tv'): Promise<string[]>;
+  getDatosObra?(
+    tmdbId: string | number,
+    type: 'movie' | 'tv'
+  ): Promise<{ titulos: string[]; principales: string[]; anio: number | null }>;
 }
 
 /**
@@ -98,13 +102,18 @@ export function createTmdbClient(opts: TmdbClientOptions): TmdbClient {
     }
   }
 
-  async function getTitulos(tmdbId: string | number, type: 'movie' | 'tv'): Promise<string[]> {
+  async function getDatosObra(
+    tmdbId: string | number,
+    type: 'movie' | 'tv'
+  ): Promise<{ titulos: string[]; principales: string[]; anio: number | null }> {
     const tmdbType = type === 'tv' ? 'tv' : 'movie';
     type Datos = {
       title?: string;
       name?: string;
       original_title?: string;
       original_name?: string;
+      release_date?: string;
+      first_air_date?: string;
       alternative_titles?: { titles?: { title?: string }[]; results?: { title?: string }[] };
       translations?: { translations?: { data?: { title?: string; name?: string } }[] };
     };
@@ -113,19 +122,20 @@ export function createTmdbClient(opts: TmdbClientOptions): TmdbClient {
         `/${tmdbType}/${tmdbId}?language=es-MX&append_to_response=alternative_titles,translations`
       );
       const alternativos = d.alternative_titles?.titles ?? d.alternative_titles?.results ?? [];
-      const todos = [
-        d.title,
-        d.name,
-        d.original_title,
-        d.original_name,
+      const limpios = (xs: (string | undefined)[]) => [...new Set(xs.filter((t): t is string => !!t && !!t.trim()))];
+      const principales = limpios([d.title, d.name, d.original_title, d.original_name]);
+      const titulos = limpios([
+        ...principales,
         ...alternativos.map((t) => t.title),
         ...(d.translations?.translations ?? []).map((t) => t.data?.title || t.data?.name),
-      ];
-      return [...new Set(todos.filter((t): t is string => !!t && !!t.trim()))];
+      ]);
+      const fecha = d.release_date || d.first_air_date || '';
+      const anio = /^\d{4}/.test(fecha) ? Number(fecha.slice(0, 4)) : null;
+      return { titulos, principales, anio };
     } catch {
-      return [];
+      return { titulos: [], principales: [], anio: null };
     }
   }
 
-  return { cache, get, getImdbId, getOriginalLanguage, getTitulos };
+  return { cache, get, getImdbId, getOriginalLanguage, getDatosObra };
 }

@@ -238,14 +238,50 @@ export function titulosSinEspacios(titulos: string[]): string[] {
  * queda. Sin titulos de TMDB no se aplica. Si no queda ninguna, la lista queda vacia a
  * proposito: mejor pasar al siguiente reproductor que mostrar otra pelicula.
  */
+const ANIO_RE = /^(19|20)\d{2}$/;
+
+/**
+ * anioCompatible — la copia no puede declarar un año que no sea el del estreno (±1).
+ * Caso "1922" (2017), log de la TV del 2026-11-21: se reprodujo
+ * `Dr.Mabuse.The.Gambler.1922.Part.1`, una pelicula de 1922; el titulo es un numero y
+ * coincidia. Cuando el titulo es un numero, el año del estreno es obligatorio, porque
+ * sin el no hay forma de distinguirla. Los numeros que son el propio titulo no cuentan
+ * como año. Sin años en el nombre (y titulo no numerico), no se decide por esto.
+ */
+export function anioCompatible(s: TorrentioStream, anio: number, titulosNumericos: Set<string>): boolean {
+  const tokens = normalizarTitulo(`${(s.title || '').split('\n')[0]} ${s.behaviorHints?.filename || ''}`).split(' ');
+  const anios = tokens.filter((t) => ANIO_RE.test(t) && !titulosNumericos.has(t)).map(Number);
+  const coincide = anios.some((a) => Math.abs(a - anio) <= 1);
+  if (titulosNumericos.size) return coincide;
+  return !anios.length || coincide;
+}
+
 export function soloDeEstaPelicula(
   streams: TorrentioStream[],
-  titulos: string[]
+  titulos: string[],
+  anioEstreno: number | null = null,
+  /** Titulo original y el de Mexico. Solo de estos se toma un titulo numerico. */
+  principales: string[] = titulos
 ): { quedan: TorrentioStream[]; descartadas: TorrentioStream[] } {
   const palabras = palabrasDeTitulos(titulos);
-  const pegados = titulosSinEspacios(titulos);
-  if (!palabras.size && !pegados.length) return { quedan: streams, descartadas: [] };
-  const quedan = streams.filter((s) => nombraLaPelicula(s, palabras, pegados));
+  const pegados = titulosSinEspacios(titulos.filter((t) => !/^\d+$/.test(normalizarTitulo(t))));
+  // Titulo principal que es solo un numero ("1922"): cuenta como palabra del titulo y
+  // obliga a que la copia traiga el año. Un alternativo numerico no: TMDB registra
+  // "2020" para Blade Runner en algun pais y descartaba copias buenas.
+  const numericos = new Set(principales.map(normalizarTitulo).filter((t) => /^\d{3,}$/.test(t)));
+  for (const n of numericos) palabras.add(n);
+  // Titulos de una sola palabra corta ("It", "Us"): sin esto ninguna copia los nombraba
+  // y se descartaban todas. Cuentan como palabra exacta; el año hace el resto.
+  for (const t of principales.map(normalizarTitulo)) {
+    if (/^\p{L}{2,3}$/u.test(t)) palabras.add(t);
+  }
+  const hayTitulo = palabras.size > 0 || pegados.length > 0;
+  if (!hayTitulo && !anioEstreno) return { quedan: streams, descartadas: [] };
+  const quedan = streams.filter(
+    (s) =>
+      (!hayTitulo || nombraLaPelicula(s, palabras, pegados)) &&
+      (!anioEstreno || anioCompatible(s, anioEstreno, numericos))
+  );
   return { quedan, descartadas: streams.filter((s) => !quedan.includes(s)) };
 }
 

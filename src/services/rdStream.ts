@@ -150,9 +150,14 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
       // Torrentio a veces mezcla copias de OTRA pelicula en la lista. Caso "Oddity": se
       // reprodujo `Dìdi (弟弟) (2024)...dual-lat` porque el latino la puso primera. Solo
       // quedan las copias que nombran la obra con alguno de sus titulos de TMDB.
-      const titulosObra =
-        type === 'movie' && tmdbClient.getTitulos ? await tmdbClient.getTitulos(tmdbId, type).catch(() => []) : [];
-      const filtroTitulo = soloDeEstaPelicula(streamsTorrentio, titulosObra);
+      const sinDatosObra = { titulos: [] as string[], principales: [] as string[], anio: null as number | null };
+      const obra =
+        type === 'movie' && tmdbClient.getDatosObra
+          ? await tmdbClient.getDatosObra(tmdbId, type).catch(() => sinDatosObra)
+          : sinDatosObra;
+      const filtrarObra = (lista: TorrentioStream[]) =>
+        soloDeEstaPelicula(lista, obra.titulos, obra.anio, obra.principales);
+      const filtroTitulo = filtrarObra(streamsTorrentio);
       if (filtroTitulo.descartadas.length) {
         console.warn(
           `[RD] Descartadas ${filtroTitulo.descartadas.length} copias de otra película:`,
@@ -290,7 +295,7 @@ export function createRdStreamResolver(opts: RdStreamResolverOptions): RdStreamR
           });
           const known = new Set(streams.map((s) => s.url).filter(Boolean));
           // Mismo filtro de titulo que la primera consulta.
-          const nuevos = soloDeEstaPelicula(streams2 || [], titulosObra).quedan.filter(
+          const nuevos = filtrarObra(streams2 || []).quedan.filter(
             (s) => s.url && !known.has(s.url)
           );
           if (nuevos.length) {
