@@ -240,3 +240,15 @@ html.tv-mode .ml-del-btn:focus-visible {
   background: rgba(220, 50, 50, 0.9);
   outline: 2px solid #f55;
 }
+
+/* iPhone y iPad agrandan la pagina al tocar un campo con letra de menos de 16 px, y la
+   pagina queda mas ancha que la pantalla aunque se cambie de vista (medido en un
+   iPhone: el buscador tenia 15,2 px). En pantallas tactiles los campos van a 16 px; en
+   el computador no cambia nada. No se bloquea el zoom: impediria agrandar con los dedos. */
+@media (hover: none) and (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
