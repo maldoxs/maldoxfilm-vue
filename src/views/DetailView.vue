@@ -589,6 +589,10 @@ onBeforeUnmount(() => {
                   <template v-else-if="ep.runtime">{{ ep.runtime }} min</template>
                 </div>
               </div>
+              <!-- En TV la barra va a lo ancho de la tarjeta, debajo del texto (a pedido). -->
+              <div v-if="barraCapitulo(ep) > 0" class="dp-ep-bar-tv">
+                <div class="dp-ep-bar-fill" :style="{ width: `${barraCapitulo(ep)}%` }"></div>
+              </div>
             </div>
           </template>
         </div>
@@ -1090,6 +1094,10 @@ onBeforeUnmount(() => {
   height: 100%;
   background: #5b7cff;
   box-shadow: 0 0 6px rgba(91, 124, 255, 0.9);
+}
+/* La barra a lo ancho de la tarjeta solo existe en TV (ver reglas de tv-mode). */
+.dp-ep-bar-tv {
+  display: none;
 }
 /* Visto: la barra llena en el mismo azul; en gris se confundia con la foto. */
 .dp-ep-bar-fill.is-visto {
