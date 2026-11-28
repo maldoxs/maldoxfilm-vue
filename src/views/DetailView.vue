@@ -1074,21 +1074,26 @@ onBeforeUnmount(() => {
   color: var(--text-dim, #6a6a6a);
   margin-top: 3px;
 }
-/* Barra de lo visto del capitulo, al pie de la miniatura. */
+/* Barra de lo visto del capitulo, al pie de la miniatura. Con 4 px y el azul de la
+   marca se perdia contra la foto: base oscura para el contraste, azul mas claro y un
+   brillo suave. */
 .dp-ep-bar {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.25);
+  height: 6px;
+  background: rgba(0, 0, 0, 0.75);
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
 }
 .dp-ep-bar-fill {
   height: 100%;
-  background: var(--accent, #3d5afe);
+  background: #5b7cff;
+  box-shadow: 0 0 6px rgba(91, 124, 255, 0.9);
 }
+/* Visto: la barra llena en el mismo azul; en gris se confundia con la foto. */
 .dp-ep-bar-fill.is-visto {
-  background: var(--text-muted, #9a9a9a);
+  background: #5b7cff;
 }
 .dp-ep-visto {
   color: var(--text-muted, #9a9a9a);
