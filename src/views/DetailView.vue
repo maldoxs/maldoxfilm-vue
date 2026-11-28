@@ -1394,9 +1394,13 @@ onBeforeUnmount(() => {
   /* La imagen pasa de overlay absoluto a un bloque con altura fija al tope */
   .dp-hero-bg {
     position: relative;
-    height: 56vw;
-    min-height: 210px;
-    background-position: center 18%;
+    /* Mas alta que la proporcion panoramica (56vw), a pedido: se veia apretada. La
+       imagen se recorta por los costados; el tope por alto evita que en telefonos
+       chicos los botones queden demasiado abajo. */
+    height: 78vw;
+    max-height: 62vh;
+    min-height: 240px;
+    background-position: center 20%;
   }
   /* Degradado solo en el borde inferior para fundir la imagen con la página */
   .dp-hero-bg::after {
