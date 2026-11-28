@@ -1631,8 +1631,11 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         if (!tpipelineState || _tReloading) return;
         const t = video.currentTime;
         if (estaDescargado(t)) return;
-        console.warn(`[/t/] Salto desde la barra nativa → t=${Math.round(tpipelineOffset.value + t)}s`);
-        void tpipelineSeekTo(tpipelineOffset.value + t);
+        const destino = Math.max(0, Math.min(Math.floor(tpipelineOffset.value + t), tpipelineDuration.value || 99999));
+        console.warn(`[/t/] Salto desde la barra nativa → t=${destino}s`);
+        // Directo a la recarga: `tpipelineSeekTo` compara contra `currentTime`, que la
+        // barra nativa ya movio al destino, y no hacia nada (log del 2026-11-28).
+        void tpipelineReloadMpd(video, destino);
       }, 700);
     };
     video.addEventListener('seeking', alSaltar);
