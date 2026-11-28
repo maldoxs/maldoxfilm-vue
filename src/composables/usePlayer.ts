@@ -1170,7 +1170,8 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         // lleva trabado SIN buffer más de SEEK_FREEZE_MS, volvemos a la última posición
         // reproducible (zona ya transcodeada). No mata el player: seguís viendo. El seek
         // lejano recién funciona cuando el pre-cacheo (#5) cambia a Direct Play.
-        if (bufferAhead(video) < 0.1) {
+        // Mientras /t/ recarga en otra posicion, el seek sin buffer es esperado: no volver.
+        if (bufferAhead(video) < 0.1 && !_tReloading) {
           if (seekStuckSince === 0) {
             seekStuckSince = Date.now();
           } else {
@@ -1603,6 +1604,45 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     }
   }
 
+  /**
+   * Salto desde la barra NATIVA en conversion (iPhone y iPad). En el iPhone el video se
+   * abre en pantalla completa nativa y su barra mueve `currentTime` directo, sin pasar por
+   * `tpipelineSeekTo`: el video quedaba esperando un tramo que RD no genero y a los 5 s
+   * se volvia atras (log del 2026-11-28, "Cat's Eye": arrastre hasta 666 s, vuelta a 131).
+   * Cuando el salto cae fuera de lo descargado, se hace el mismo salto que la barra propia.
+   */
+  let quitarSaltoNativo: (() => void) | null = null;
+  function engancharSaltoNativo(video: HTMLVideoElement) {
+    quitarSaltoNativo?.();
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+    const esIos = /iphone|ipad|ipod/i.test(ua) || (/macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+    if (!esIos) return;
+    let espera: ReturnType<typeof setTimeout> | null = null;
+    const estaDescargado = (t: number) => {
+      const b = video.buffered;
+      for (let i = 0; i < b.length; i++) if (t >= b.start(i) - 1 && t <= b.end(i) + 1) return true;
+      return false;
+    };
+    const alSaltar = () => {
+      if (!tpipelineState || _tReloading) return;
+      if (espera) clearTimeout(espera);
+      // Arrastrar la barra dispara muchos `seeking`: se espera a que se suelte.
+      espera = setTimeout(() => {
+        if (!tpipelineState || _tReloading) return;
+        const t = video.currentTime;
+        if (estaDescargado(t)) return;
+        console.warn(`[/t/] Salto desde la barra nativa → t=${Math.round(tpipelineOffset.value + t)}s`);
+        void tpipelineSeekTo(tpipelineOffset.value + t);
+      }, 700);
+    };
+    video.addEventListener('seeking', alSaltar);
+    quitarSaltoNativo = () => {
+      video.removeEventListener('seeking', alSaltar);
+      if (espera) clearTimeout(espera);
+      quitarSaltoNativo = null;
+    };
+  }
+
   async function tpipelineSeekTo(seconds: number) {
     const video = opts.videoRef.value;
     if (!video || !tpipelineState) return;
@@ -1690,6 +1730,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       if (hasNativeSpanish) opts.onNativeSpanishDetected?.();
       opts.onStreamReady?.({ selected, hasNativeSpanish, spanishTrack: isSpanish ? audio : null });
       opts.onStarted();
+      engancharSaltoNativo(video);
 
       startStallMonitor(video, myGen, async (v) => {
         if (!tpipelineState) throw new Error('sin /t/ state');
@@ -2630,6 +2671,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
     tpipelineOffset.value = 0;
     if (_tSeekTimer) { clearTimeout(_tSeekTimer); _tSeekTimer = null; }
     _tReloading = false;
+    quitarSaltoNativo?.();
     _shakaDestroy();
     const w = window as unknown as { hlsInstance?: { destroy(): void } | null };
     if (w.hlsInstance) {
