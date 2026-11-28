@@ -117,3 +117,66 @@ describe('playButtonLabel (preservado EXACTO de `progLabel`+template del botón,
     expect(playButtonLabel(prog, true)).toBe('▶ Continuar 12%');
   });
 });
+
+// Progreso por capitulo (2026-11-28): barra en la lista de capitulos y retomar cada uno en
+// su minuto. Caso real: serie "El Instituto", E1 "El chico" a los 5 min; la lista no
+// mostraba nada, y el progreso de la serie se aplicaba a cualquier capitulo que se abriera.
+import {
+  episodeKey,
+  withSavedEpisode,
+  withoutSeriesEpisodes,
+  episodeBarPct,
+  resumeSecForEpisode,
+  PCT_CAPITULO_VISTO,
+} from '../src/services/progress';
+
+describe('progreso por capitulo', () => {
+  const serie = (season: number, episode: number, positionSec: number): ProgressEntry =>
+    ({ id: 1, type: 'tv', pct: 8, positionSec, season, episode, ts: 1 }) as ProgressEntry;
+
+  test('la barra se calcula con el minuto y la duracion de TMDB', () => {
+    const e = withSavedEpisode({}, 1, 1, 1, { positionSec: 300, pct: 0 })[episodeKey(1, 1, 1)];
+    expect(episodeBarPct(e, 59)).toBe(8); // 5 de 59 min
+  });
+
+  test('sin duracion de TMDB usa el porcentaje guardado', () => {
+    const e = withSavedEpisode({}, 1, 1, 1, { positionSec: 300, pct: 42 })[episodeKey(1, 1, 1)];
+    expect(episodeBarPct(e, null)).toBe(42);
+  });
+
+  test(`desde el ${PCT_CAPITULO_VISTO}% queda visto y la barra llena`, () => {
+    const e = withSavedEpisode({}, 1, 1, 1, { positionSec: 3200, pct: 91 })[episodeKey(1, 1, 1)];
+    expect(e.visto).toBe(true);
+    expect(episodeBarPct(e, 59)).toBe(100);
+  });
+
+  test('volver a abrir un capitulo visto no lo desmarca', () => {
+    const visto = withSavedEpisode({}, 1, 1, 1, { positionSec: 3200, pct: 95 });
+    const otraVez = withSavedEpisode(visto, 1, 1, 1, { positionSec: 120, pct: 3 });
+    expect(otraVez[episodeKey(1, 1, 1)].visto).toBe(true);
+  });
+
+  test('cada capitulo retoma en su propio minuto', () => {
+    const mapa = withSavedEpisode(withSavedEpisode({}, 1, 1, 1, { positionSec: 300, pct: 8 }), 1, 1, 2, { positionSec: 1200, pct: 35 });
+    expect(resumeSecForEpisode(serie(1, 2, 1200), mapa[episodeKey(1, 1, 1)], 1, 1)).toBe(300);
+    expect(resumeSecForEpisode(serie(1, 2, 1200), mapa[episodeKey(1, 1, 2)], 1, 2)).toBe(1200);
+  });
+
+  test('un capitulo visto empieza desde cero', () => {
+    const e = withSavedEpisode({}, 1, 1, 1, { positionSec: 3300, pct: 96 })[episodeKey(1, 1, 1)];
+    expect(resumeSecForEpisode(serie(1, 1, 3300), e, 1, 1)).toBeUndefined();
+  });
+
+  test('el progreso de la serie ya no se aplica a otro capitulo', () => {
+    expect(resumeSecForEpisode(serie(1, 1, 1500), null, 1, 2)).toBeUndefined();
+  });
+
+  test('sin registro propio, se usa el de la serie si es ese mismo capitulo', () => {
+    expect(resumeSecForEpisode(serie(1, 1, 300), null, 1, 1)).toBe(300);
+  });
+
+  test('quitar la serie del historial borra sus capitulos y no los de otra', () => {
+    const mapa = withSavedEpisode(withSavedEpisode({}, 1, 1, 1, { positionSec: 300, pct: 8 }), 2, 1, 1, { positionSec: 300, pct: 8 });
+    expect(Object.keys(withoutSeriesEpisodes(mapa, 1))).toEqual([episodeKey(2, 1, 1)]);
+  });
+});

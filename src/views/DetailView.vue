@@ -41,7 +41,7 @@ import {
   type CastMember,
   type VideoResult,
 } from '../services/catalog';
-import { playButtonLabel } from '../services/progress';
+import { playButtonLabel, episodeBarPct, type EpisodeProgress } from '../services/progress';
 import { setRuntime } from '../services/runtimeCache';
 import type { MediaItem } from '../types';
 
@@ -185,6 +185,33 @@ const typeBadge = computed(() => detailTypeBadge(isTV.value));
 
 const prog = computed(() => progressStore.get(props.id, props.type));
 const inList = computed(() => myListStore.inList(props.id));
+
+/**
+ * progresoCapitulo — lo visto de un capitulo: su registro propio o, si no tiene (datos
+ * anteriores al registro por capitulo), el de la serie cuando es justo ese capitulo.
+ */
+function progresoCapitulo(episodio: number): EpisodeProgress | null {
+  const propio = progressStore.getEpisode(props.id, activeSeason.value, episodio);
+  if (propio) return propio;
+  const p = prog.value;
+  if (p && p.season === activeSeason.value && p.episode === episodio && p.positionSec && p.positionSec > 30) {
+    return { positionSec: p.positionSec, pct: p.pct, runtimeMin: p.runtimeMin, ts: p.ts };
+  }
+  return null;
+}
+
+/** Ancho de la barra del capitulo (0 sin progreso, 100 visto). */
+function barraCapitulo(ep: { episode_number: number; runtime?: number | null }): number {
+  return episodeBarPct(progresoCapitulo(ep.episode_number), ep.runtime);
+}
+
+/** Minutos que faltan del capitulo, si se puede calcular. */
+function minutosRestantes(ep: { episode_number: number; runtime?: number | null }): number | null {
+  const p = progresoCapitulo(ep.episode_number);
+  if (!p || p.visto || !ep.runtime) return null;
+  const quedan = Math.round(ep.runtime - p.positionSec / 60);
+  return quedan > 0 ? quedan : null;
+}
 
 /** playLabel — preserva `progLabel`/el texto del botón Reproducir EXACTO (línea ~8917/8930), incluido el doble ▶ cuando no hay progreso. */
 const playLabel = computed(() => playButtonLabel(prog.value, isTV.value, data.value?.runtime));
@@ -546,6 +573,9 @@ onBeforeUnmount(() => {
                 <img v-if="ep.still_path" :src="`${IMG}w300${ep.still_path}`" :alt="episodeDisplayName(ep.name, ep.episode_number)" loading="lazy" />
                 <div v-else class="dp-ep-thumb-fallback">▶</div>
                 <div class="dp-ep-ov"><div class="dp-ep-pc">▶</div></div>
+                <div v-if="barraCapitulo(ep) > 0" class="dp-ep-bar">
+                  <div class="dp-ep-bar-fill" :class="{ 'is-visto': barraCapitulo(ep) >= 100 }" :style="{ width: `${barraCapitulo(ep)}%` }"></div>
+                </div>
               </div>
               <div class="dp-ep-info">
                 <div class="dp-ep-row">
@@ -553,7 +583,11 @@ onBeforeUnmount(() => {
                   <span class="dp-ep-name">{{ episodeDisplayName(ep.name, ep.episode_number) }}</span>
                 </div>
                 <div class="dp-ep-desc">{{ ep.overview || '' }}</div>
-                <div v-if="ep.runtime" class="dp-ep-rt">{{ ep.runtime }} min</div>
+                <div v-if="ep.runtime || barraCapitulo(ep) > 0" class="dp-ep-rt">
+                  <template v-if="barraCapitulo(ep) >= 100"><span class="dp-ep-visto">Visto</span><template v-if="ep.runtime"> · {{ ep.runtime }} min</template></template>
+                  <template v-else-if="minutosRestantes(ep)">Quedan {{ minutosRestantes(ep) }} min de {{ ep.runtime }}</template>
+                  <template v-else-if="ep.runtime">{{ ep.runtime }} min</template>
+                </div>
               </div>
             </div>
           </template>
@@ -1036,6 +1070,26 @@ onBeforeUnmount(() => {
   font-size: 0.6rem;
   color: var(--text-dim, #6a6a6a);
   margin-top: 3px;
+}
+/* Barra de lo visto del capitulo, al pie de la miniatura. */
+.dp-ep-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.25);
+}
+.dp-ep-bar-fill {
+  height: 100%;
+  background: var(--accent, #3d5afe);
+}
+.dp-ep-bar-fill.is-visto {
+  background: var(--text-muted, #9a9a9a);
+}
+.dp-ep-visto {
+  color: var(--text-muted, #9a9a9a);
+  font-weight: 600;
 }
 .dp-ep-error {
   color: var(--text-muted, #9a9a9a);

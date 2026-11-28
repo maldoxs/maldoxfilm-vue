@@ -89,6 +89,111 @@ export function withoutProgress(all: ProgressMap, id: string | number, type: 'mo
   return next;
 }
 
+// ── Progreso por capitulo ─────────────────────────────────────────────────────
+// El progreso de una serie guarda un solo capitulo (el ultimo). Para mostrar cuanto se
+// vio de cada uno y retomar cada uno en su minuto, se lleva aparte un registro por
+// capitulo. El de la serie no se toca: lo siguen usando "Continuar viendo" y el boton.
+
+export const EPISODE_PROGRESS_KEY = 'sx_prog_ep_v1';
+
+/** Desde este porcentaje un capitulo cuenta como visto (los creditos no se ven). */
+export const PCT_CAPITULO_VISTO = 90;
+
+export interface EpisodeProgress {
+  positionSec: number;
+  /** Porcentaje visto, sobre la duracion real si se conocia; si no, sobre la de TMDB. */
+  pct: number;
+  runtimeMin?: number;
+  visto?: boolean;
+  ts: number;
+}
+
+export type EpisodeProgressMap = Record<string, EpisodeProgress>;
+
+export function episodeKey(id: string | number, season: number, episode: number): string {
+  return `tv:${id}:${season}:${episode}`;
+}
+
+export function loadEpisodeProgress(): EpisodeProgressMap {
+  try {
+    const parsed: unknown = JSON.parse(safeStorage.getItem(EPISODE_PROGRESS_KEY) || '{}');
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as EpisodeProgressMap;
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+export function persistEpisodeProgress(all: EpisodeProgressMap): void {
+  try {
+    safeStorage.setItem(EPISODE_PROGRESS_KEY, JSON.stringify(all));
+  } catch {
+    // Sin espacio o sin almacenamiento: el progreso por capitulo es un extra.
+  }
+}
+
+/**
+ * withSavedEpisode — nuevo mapa con el capitulo actualizado. Un capitulo ya visto sigue
+ * visto aunque se vuelva a abrir y se guarde un minuto menor: volver a ver una escena no
+ * lo desmarca. Si se ve de nuevo hasta el final, queda visto igual.
+ */
+export function withSavedEpisode(
+  all: EpisodeProgressMap,
+  id: string | number,
+  season: number,
+  episode: number,
+  data: { positionSec: number; pct: number; runtimeMin?: number; visto?: boolean }
+): EpisodeProgressMap {
+  const key = episodeKey(id, season, episode);
+  const antes = all[key];
+  const visto = !!(data.visto || data.pct >= PCT_CAPITULO_VISTO || antes?.visto);
+  return { ...all, [key]: { ...data, visto, ts: Date.now() } };
+}
+
+/** withoutSeriesEpisodes — saca todos los capitulos de una serie (al quitarla del historial). */
+export function withoutSeriesEpisodes(all: EpisodeProgressMap, id: string | number): EpisodeProgressMap {
+  const prefijo = `tv:${id}:`;
+  const claves = Object.keys(all).filter((k) => k.startsWith(prefijo));
+  if (!claves.length) return all;
+  const next = { ...all };
+  for (const k of claves) delete next[k];
+  return next;
+}
+
+/**
+ * episodeBarPct — ancho de la barra del capitulo, de 0 a 100. Visto = 100. Si se conoce
+ * la duracion del capitulo (TMDB), se calcula con el minuto guardado; si no, con el
+ * porcentaje que se guardo al verlo.
+ */
+export function episodeBarPct(entry: EpisodeProgress | null | undefined, runtimeMin?: number | null): number {
+  if (!entry) return 0;
+  if (entry.visto) return 100;
+  const min = runtimeMin || entry.runtimeMin;
+  const pct = min && min > 0 ? (entry.positionSec / (min * 60)) * 100 : entry.pct;
+  return Math.max(0, Math.min(100, Math.round(pct || 0)));
+}
+
+/**
+ * resumeSecForEpisode — desde donde retomar un capitulo. Manda su propio registro; un
+ * capitulo visto empieza desde cero. Sin registro propio (datos anteriores a este cambio)
+ * se usa el de la serie solo si es de ESE capitulo: antes se aplicaba a cualquiera.
+ */
+export function resumeSecForEpisode(
+  serie: ProgressEntry | null,
+  capitulo: EpisodeProgress | null | undefined,
+  season: number,
+  episode: number
+): number | undefined {
+  if (capitulo) {
+    if (capitulo.visto) return undefined;
+    return capitulo.positionSec > 30 ? capitulo.positionSec : undefined;
+  }
+  if (serie && serie.season === season && serie.episode === episode && serie.positionSec && serie.positionSec > 30) {
+    return serie.positionSec;
+  }
+  return undefined;
+}
+
 /**
  * playButtonLabel — el texto del botón "Reproducir"/"Continuar..." del
  * detalle. Preservado EXACTO de `progLabel`+template del botón (líneas

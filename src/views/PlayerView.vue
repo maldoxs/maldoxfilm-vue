@@ -471,6 +471,41 @@ function getRealPositionSec(): number {
   return ct;
 }
 
+/**
+ * posicionParaRetomar — minuto guardado del titulo actual, o undefined para empezar de
+ * cero. En series es el del propio capitulo: antes se tomaba el de la serie, que es el
+ * del ultimo capitulo visto, y se aplicaba a cualquier capitulo que se abriera.
+ */
+function posicionParaRetomar(id: string | number): number | undefined {
+  const cur = playerStore.current;
+  if (cur.type === 'tv') return progressStore.resumeSecForEpisode(id, cur.season, cur.episode);
+  const prog = progressStore.get(id, cur.type);
+  return prog?.positionSec && prog.positionSec > 30 ? prog.positionSec : undefined;
+}
+
+/** Duracion del capitulo en segundos: la real del archivo si se conoce, si no la de TMDB. */
+function duracionCapituloSec(): number | null {
+  const vp = videoPlayerRef.value;
+  const d = vp?.videoRef?.duration;
+  if (vp && !vp.isTpipeline && d && isFinite(d) && d > 60) return d;
+  const min = playerStore.current.runtimeMin;
+  return min > 0 ? min * 60 : null;
+}
+
+/** Guarda el progreso del capitulo actual; `visto` lo marca terminado aunque falte el final. */
+function guardarCapitulo(positionSec: number, visto = false) {
+  const cur = playerStore.current;
+  if (cur.type !== 'tv' || cur.id == null || !cur.season || !cur.episode) return;
+  const dur = duracionCapituloSec();
+  const pct = dur ? Math.min((positionSec / dur) * 100, 100) : 0;
+  progressStore.saveEpisode(cur.id, cur.season, cur.episode, {
+    positionSec: Math.floor(positionSec),
+    pct,
+    runtimeMin: cur.runtimeMin || undefined,
+    visto,
+  });
+}
+
 function startProgressTracking() {
   stopProgressTracking();
 
@@ -497,6 +532,7 @@ function startProgressTracking() {
         episode: playerStore.current.episode,
         title: playerStore.current.title,
       });
+      guardarCapitulo(positionSec);
     } else {
       progressStore.save(playerStore.current.id, 'movie', { pct, positionSec: Math.floor(positionSec), runtimeMin: rtMin, title: playerStore.current.title });
     }
@@ -556,7 +592,8 @@ function onRdStarted() {
   // Restaurar posición guardada ("Continuar viendo") — se salta si el usuario
   // eligió "Ver desde el inicio" (props.fromStart), igual que en loadActiveSource.
   if (playerStore.current.id && !props.fromStart) {
-    const prog = progressStore.get(playerStore.current.id, playerStore.current.type);
+    const retomarSec = posicionParaRetomar(playerStore.current.id);
+    const prog = retomarSec ? { positionSec: retomarSec } : null;
     if (prog?.positionSec && prog.positionSec > 30) {
       setTimeout(() => {
         const vp = videoPlayerRef.value;
@@ -747,6 +784,13 @@ function scheduleAutoNext() {
 /** goToNextEpisode — preserva líneas ~8378-8402 (avanza episodio, o salta de temporada y refresca el conteo). */
 async function goToNextEpisode() {
   cancelAutoNext();
+  // Pasar al siguiente desde el ultimo tramo cuenta como haberlo visto: el aviso de
+  // "a continuacion" aparece en los creditos, antes del final del archivo.
+  {
+    const pos = getRealPositionSec();
+    const dur = duracionCapituloSec();
+    if (pos >= 30) guardarCapitulo(pos, !!dur && pos / dur >= 0.8);
+  }
   const cur = playerStore.current;
   if (cur.episode < cur.totalEpisodes) {
     playerStore.setEpisode(cur.season, cur.episode + 1);
@@ -1082,11 +1126,7 @@ function loadActiveSource() {
       // "Ver desde el inicio" (props.fromStart, ?start=1 de DetailView): el usuario
       // eligió arrancar de cero explícitamente → se ignora la posición guardada para
       // ESTA carga (no se borra el progreso: si sigue viendo, se sobreescribe solo).
-      const savedProg = progressStore.get(currentId, playerStore.current.type);
-      const startPositionSec =
-        !props.fromStart && savedProg?.positionSec && savedProg.positionSec > 30
-          ? savedProg.positionSec
-          : undefined;
+      const startPositionSec = !props.fromStart ? posicionParaRetomar(currentId) : undefined;
       void videoPlayerRef.value?.loadRdSource({
         id: currentId,
         type: playerStore.current.type,
@@ -1188,6 +1228,9 @@ function persistProgressOnClose() {
   const positionSec = getRealPositionSec();
   const runtimeSec = (playerStore.current.runtimeMin || 22) * 60;
   const pct = runtimeSec > 0 ? Math.min((positionSec / runtimeSec) * 100, 95) : 0;
+  // El capitulo se guarda antes del filtro de la serie: un capitulo visto casi entero
+  // tiene que quedar marcado aunque la serie no guarde ese minuto.
+  if (playerStore.current.type === 'tv' && positionSec >= 30) guardarCapitulo(positionSec);
   if (!shouldPersistProgressOnClose(pct)) return;
   if (playerStore.current.type === 'tv') {
     progressStore.save(playerStore.current.id, 'tv', { pct, positionSec: Math.floor(positionSec), season: playerStore.current.season, episode: playerStore.current.episode, title: playerStore.current.title });
