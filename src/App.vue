@@ -162,7 +162,7 @@ onMounted(() => {
       <NavTV v-else :active="activeKey" @navigate="onNavigate" @open-search="onOpenSearch" @toggle-fullscreen="onToggleAppFullscreen" />
     </template>
 
-    <main class="app-main" :class="`mode-${deviceStore.mode}`">
+    <main class="app-main" :class="[`mode-${deviceStore.mode}`, { 'en-reproductor': enReproductor }]">
       <router-view />
     </main>
 
@@ -189,5 +189,13 @@ onMounted(() => {
   overflow-x: hidden; /* fallback Chromium 38 / iOS viejo (sin overflow:clip) — moderno usa clip abajo */
   overflow-x: clip;
   max-width: 100vw;
+}
+/* En el reproductor no hay barra inferior y el reproductor cubre la pantalla por su
+   cuenta (position: fixed). El alto de pantalla mas los 64 px reservados para la barra
+   dejaban la pagina de abajo mas alta que la pantalla, y en el telefono se podia
+   desplazar (medido: 1020 px de contenido en una pantalla de 956). */
+.app-main.mode-mobile.en-reproductor {
+  padding-bottom: 0;
+  min-height: 0;
 }
 </style>

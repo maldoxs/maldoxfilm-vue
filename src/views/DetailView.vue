@@ -669,15 +669,18 @@ onBeforeUnmount(() => {
   top: calc(12px + env(safe-area-inset-top, 0px));
   left: 12px;
   z-index: 5;
-  width: 42px;
-  height: 42px;
+  /* Fondo claro degradado y flecha oscura: el circulo oscuro de antes se perdia sobre
+     posters oscuros. 48 px es el tamaño minimo recomendado para tocar con el dedo. */
+  width: 48px;
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.85);
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.5);
-  color: #fff;
+  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.72) 55%, rgba(220, 220, 220, 0.55) 100%);
+  color: #111;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
   cursor: pointer;
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
