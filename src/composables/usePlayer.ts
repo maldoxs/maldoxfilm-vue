@@ -2004,12 +2004,27 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         return '';
       }
     };
+    // iPhone y iPad no abren MKV. Medido el 2026-11-28 en un iPhone: el equipo responde
+    // `canPlayType('video/x-matroska') = "no"`, la copia MKV de "Oddity" dio error a los
+    // 20,8 s y otras cuatro MKV de respaldo tampoco sirvieron; la conversion arranco recien
+    // a los ~55 s. Acotado a iOS: la TV y el computador si abren MKV (medido en la TV).
+    const uaEquipo = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+    const esIos =
+      /iphone|ipad|ipod/i.test(uaEquipo) ||
+      (/macintosh/i.test(uaEquipo) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1);
+    const iosSinMkv = esIos && (video.canPlayType?.('video/x-matroska') || '') === '';
+    const esUrlMkv = (url: string) => {
+      try {
+        return /\.mkv$/i.test(decodeURIComponent(url.split('?')[0].split('/').pop() || ''));
+      } catch {
+        return false;
+      }
+    };
+    const elegidaEsMkvSinSoporte = iosSinMkv && /\.mkv$/i.test(streamFn || '');
     // Respaldos en orden; los viejos registros guardados solo traen `altOpenableUrl`.
-    const listaRespaldos: string[] = selected.respaldos?.length
-      ? selected.respaldos
-      : selected.altOpenableUrl
-        ? [selected.altOpenableUrl]
-        : [];
+    const listaRespaldos: string[] = (
+      selected.respaldos?.length ? selected.respaldos : selected.altOpenableUrl ? [selected.altOpenableUrl] : []
+    ).filter((url) => !(iosSinMkv && esUrlMkv(url)));
     const nombreDeUrl = (url: string): string => {
       try {
         return decodeURIComponent(url.split('/').pop() || url);
@@ -2182,7 +2197,7 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
       siguienteReproductor('ninguna copia tiene audio en un idioma que sirva');
       return;
     }
-    const canTryDirect = videoSirve && audioSirve;
+    const canTryDirect = videoSirve && audioSirve && !elegidaEsMkvSinSoporte;
     if (canTryDirect) {
       console.warn(
         `[RD] Direct Play: intentando — video ${realIsHevc !== null ? 'VERIFICADO' : 'por nombre'}, audio ${
@@ -2363,8 +2378,12 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
 
     // La elegida no cumple de entrada (audio o video que el equipo no reproduce): en TV
     // se prueban las otras copias verificadas y, si ninguna sirve, el siguiente reproductor.
-    if (!canTryDirect && enTv && rdId) {
-      const motivoElegida = !videoSirve ? 'su video no se reproduce en este equipo' : 'su audio no se reproduce en este equipo';
+    if (!canTryDirect && rdId && (enTv || elegidaEsMkvSinSoporte)) {
+      const motivoElegida = elegidaEsMkvSinSoporte
+        ? 'es MKV y este equipo no abre MKV'
+        : !videoSirve
+          ? 'su video no se reproduce en este equipo'
+          : 'su audio no se reproduce en este equipo';
       console.warn(`[RD] La copia elegida no cumple (${motivoElegida}) → probando otras copias cacheadas`);
       const otra = listaRespaldos.length ? await probarRespaldos() : null;
       if (playerStore.isStale(myGen)) return;
@@ -2373,8 +2392,12 @@ export function usePlayer(opts: UsePlayerOptions): UsePlayerReturn {
         arrancarRespaldo(otra, diceLatinoR);
         return;
       }
-      siguienteReproductor(motivoElegida);
-      return;
+      if (enTv) {
+        siguienteReproductor(motivoElegida);
+        return;
+      }
+      // Fuera de la TV, sin copia que abra directo se convierte, como siempre.
+      console.warn('[RD] Ninguna copia abre directo en este equipo → conversión');
     }
 
     // ── Pipeline /t/ — upgrade transparente (far-seek + AAC para cualquier archivo) ──
