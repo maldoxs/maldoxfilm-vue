@@ -26,6 +26,46 @@ export interface DeviceStateShape {
 /** Clave de `localStorage` donde queda anotado que este equipo es un televisor. */
 const CLAVE_MODO = 'mf-modo-dispositivo';
 
+/**
+ * capacidadesDelEquipo — que dice el navegador que puede reproducir, para el log. Solo
+ * informa: no cambia ninguna decision. Se pregunta de las dos formas porque no coinciden:
+ * la TV niega el AC3 por MediaSource y lo reproduce por `<video src>`.
+ */
+function capacidadesDelEquipo(): string {
+  const v = document.createElement('video');
+  const cpt = (t: string) => {
+    try {
+      return v.canPlayType(t) || 'no';
+    } catch {
+      return 'error';
+    }
+  };
+  const w = window as unknown as {
+    MediaSource?: { isTypeSupported(t: string): boolean };
+    ManagedMediaSource?: { isTypeSupported(t: string): boolean };
+  };
+  const mse = w.MediaSource || w.ManagedMediaSource;
+  const mseHevc = (() => {
+    try {
+      return mse?.isTypeSupported('video/mp4; codecs="hvc1.1.6.L120.90"') ? 'si' : 'no';
+    } catch {
+      return 'error';
+    }
+  })();
+  return [
+    `hevc:${cpt('video/mp4; codecs="hvc1.1.6.L120.90"')}`,
+    `h264:${cpt('video/mp4; codecs="avc1.640028"')}`,
+    `ac3:${cpt('video/mp4; codecs="avc1.640028, ac-3"')}`,
+    `eac3:${cpt('video/mp4; codecs="avc1.640028, ec-3"')}`,
+    `av1:${cpt('video/mp4; codecs="av01.0.08M.08"')}`,
+    `mkv:${cpt('video/x-matroska')}`,
+    `hls:${cpt('application/vnd.apple.mpegurl')}`,
+    `MediaSource:${w.MediaSource ? 'si' : 'no'}`,
+    `ManagedMediaSource:${w.ManagedMediaSource ? 'si' : 'no'}`,
+    `hevcPorMediaSource:${mseHevc}`,
+  ].join(' ');
+}
+
 function leerModoRecordado(): 'tv' | null {
   try {
     return localStorage.getItem(CLAVE_MODO) === 'tv' ? 'tv' : null;
@@ -114,10 +154,24 @@ export const useDeviceStore = defineStore('device', {
       const pareceTv = /netcast|smarttv|smart-tv|webos|web0s|tizen|viera|bravia|lgtv/i.test(
         navigator.userAgent
       );
-      if (result.mode === 'tv' || pareceTv || leerModoRecordado() === 'tv') {
+      const esTvParaElLog = result.mode === 'tv' || pareceTv || leerModoRecordado() === 'tv';
+      // Desde el 2026-11-28 el log se envia desde todos los equipos, para medir que puede
+      // reproducir directo cada uno (iPhone, tablet, computador) en vez de suponerlo.
+      const ua = navigator.userAgent;
+      const esIpad = /ipad/i.test(ua) || (/macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+      const equipo = esTvParaElLog
+        ? 'tv'
+        : esIpad
+          ? 'ipad'
+          : /iphone|ipod/i.test(ua)
+            ? 'iphone'
+            : /android/i.test(ua)
+              ? 'android'
+              : 'pc';
+      {
         void import('../services/tvLog')
           .then((m) => {
-            m.engancharLogsDeTv();
+            m.engancharLogsDeTv(fetch, equipo);
             // Cómo llegó la página: "reload" significa que el navegador volvió a
             // cargar la app por su cuenta (en la TV pasa cuando se queda sin memoria
             // con el reproductor abierto). Eso reinicia el reproductor desde RD y es
@@ -131,9 +185,10 @@ export const useDeviceStore = defineStore('device', {
                 `pantalla:${screen.width}x${screen.height} dpr:${window.devicePixelRatio} ` +
                 `ruta:${location.pathname} ua:${navigator.userAgent}`
             );
-            if (result.mode !== 'tv') {
+            if (esTvParaElLog && result.mode !== 'tv') {
               console.warn(`[RD] ATENCION: parece un televisor pero se detecto modo "${result.mode}"`);
             }
+            console.warn(`[RD] Capacidades → ${capacidadesDelEquipo()}`);
           })
           .catch(() => {});
       }

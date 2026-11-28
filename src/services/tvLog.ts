@@ -7,7 +7,9 @@
  * respuesta en un log que nadie podia leer. Con esto las mismas lineas que se ven en la
  * consola del escritorio quedan disponibles en los logs de la function.
  *
- * Solo se activa en TV. En escritorio y movil no se engancha nada: ahi ya hay consola.
+ * Se activa en todos los equipos (TV, telefono, tablet y computador): sin log remoto no
+ * habia forma de saber que pasaba en un iPhone o una tablet. La sesion lleva el tipo de
+ * equipo en el nombre ("iphone-ab12cd") para separar cada log.
  *
  * Es best effort de punta a punta. Si la red falla, si la function no responde o si el
  * JSON sale mal, se descarta en silencio: un log no puede romper una reproduccion.
@@ -29,7 +31,7 @@ let cola: string[] = [];
 let ultima = '';
 let repetidas = 0;
 let temporizador: ReturnType<typeof setInterval> | null = null;
-const sesion = Math.random().toString(36).slice(2, 8);
+let sesion = Math.random().toString(36).slice(2, 8);
 
 function enviar(fetchImpl: typeof fetch) {
   if (!cola.length) return;
@@ -69,9 +71,10 @@ export function formatearArgumentos(args: unknown[]): string {
  * engancharLogsDeTv — empieza a espejar. Idempotente: llamarla dos veces no duplica.
  * Devuelve la funcion para desenganchar, que hoy solo usan los tests.
  */
-export function engancharLogsDeTv(fetchImpl: typeof fetch = fetch): () => void {
+export function engancharLogsDeTv(fetchImpl: typeof fetch = fetch, equipo = 'tv'): () => void {
   if (enganchado) return () => {};
   enganchado = true;
+  sesion = `${equipo.replace(/[^a-z]/gi, '').slice(0, 7) || 'eq'}-${sesion.slice(0, 4)}`;
 
   const original = console.warn.bind(console);
   console.warn = (...args: unknown[]) => {

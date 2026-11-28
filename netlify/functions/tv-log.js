@@ -33,7 +33,10 @@ export const handler = async (event) => {
     const marca = String(sesion || '?').slice(0, 12);
     for (const linea of Array.isArray(lineas) ? lineas.slice(0, 200) : []) {
       // eslint-disable-next-line no-console
-      console.log(`[TV ${marca}] ${String(linea).slice(0, 600)}`);
+      // La marca ya dice el equipo ("tv-ab12", "iphone-ab12"); las sesiones viejas sin
+      // prefijo son de la TV, que era el unico equipo que enviaba.
+      const etiqueta = marca.includes('-') ? marca : `tv-${marca}`;
+      console.log(`[TV ${etiqueta}] ${String(linea).slice(0, 600)}`);
     }
   } catch {
     /* un log mal formado no es motivo para devolver error al reproductor */
